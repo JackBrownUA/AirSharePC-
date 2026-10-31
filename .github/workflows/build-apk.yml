@@ -29,7 +29,7 @@ jobs:
             libfreetype6-dev \
             libgles2-mesa-dev \
             libunwind-dev \
-            git zip unzip
+            git zip unzip wget
       
       - name: Install Python dependencies
         run: |
@@ -42,6 +42,15 @@ jobs:
           echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > ~/.buildozer/android/platform/android-sdk/licenses/android-sdk-license
           echo "84831b9409646a918e30573bab4c9c91346d8abd" > ~/.buildozer/android/platform/android-sdk/licenses/android-sdk-preview-license
           echo "d975f751698a77b662f1254ddbeed3901e976f5a" > ~/.buildozer/android/platform/android-sdk/licenses/android-sdk-arm-dbt-license
+      
+      - name: Install Android SDK Command Line Tools
+        run: |
+          mkdir -p ~/.buildozer/android/platform/android-sdk/cmdline-tools
+          cd ~/.buildozer/android/platform/android-sdk/cmdline-tools
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q commandlinetools-linux-11076708_latest.zip
+          mv cmdline-tools latest
+          rm commandlinetools-linux-11076708_latest.zip
       
       - name: Build APK
         run: buildozer -v android debug
