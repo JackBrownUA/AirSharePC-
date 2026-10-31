@@ -13,6 +13,7 @@ from config import SERVER_PORT, STORAGE_PATH
 from utils import format_size
 from web_ui import get_css, get_star_script, get_upload_script, get_theme_script
 
+
 class _ZipStream:
     """Streams ZIP directly to socket without loading into RAM"""
     def __init__(self, wfile):
@@ -33,9 +34,11 @@ class _ZipStream:
     def flush(self):
         pass
 
+
 class ReusableThreadingServer(ThreadingHTTPServer):
     allow_reuse_address = True
     daemon_threads = True
+
 
 class AirShareHandler(SimpleHTTPRequestHandler):
     current_password = ""
@@ -81,9 +84,11 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             self.stream_folder_zip(parsed.path, params["zip"][0])
             return
 
-        if "download_selected" in params:
-            self.download_selected_files(params.get("files", []))
-            return
+        if "download_selected" in params or "files" in params:
+            selected = params.get("files", [])
+            if selected:
+                self.download_selected_files(selected)
+                return
 
         super().do_GET()
 
@@ -162,7 +167,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             pass
 
     def download_selected_files(self, files):
-        """Download selected files as ZIP"""
+        """Download selected files and folders as ZIP"""
         self.send_response(200)
         self.send_header("Content-Type", "application/zip")
         self.send_header("Content-Disposition", "attachment; filename=\"selected_files.zip\"")
@@ -171,15 +176,30 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         stream = _ZipStream(self.wfile)
         try:
             with zipfile.ZipFile(stream, mode="w", compression=zipfile.ZIP_STORED) as zf:
-                for file_path in files:
-                    full_path = os.path.realpath(os.path.join(STORAGE_PATH, urllib.parse.unquote(file_path)))
-                    if os.path.commonpath([STORAGE_PATH, full_path]) == STORAGE_PATH and os.path.isfile(full_path):
-                        zf.write(full_path, arcname=os.path.basename(full_path))
+                for item_rel_path in files:
+                    clean_rel = urllib.parse.unquote(item_rel_path).lstrip("/")
+                    full_path = os.path.realpath(os.path.join(STORAGE_PATH, clean_rel))
+                    if os.path.commonpath([STORAGE_PATH, full_path]) != STORAGE_PATH:
+                        continue
+                    if os.path.isfile(full_path):
+                        try:
+                            zf.write(full_path, arcname=os.path.basename(full_path))
+                        except OSError:
+                            continue
+                    elif os.path.isdir(full_path):
+                        parent_dir = os.path.dirname(full_path)
+                        for root, _, subfiles in os.walk(full_path):
+                            for f in subfiles:
+                                fp = os.path.join(root, f)
+                                try:
+                                    zf.write(fp, arcname=os.path.relpath(fp, parent_dir))
+                                except OSError:
+                                    continue
         except (BrokenPipeError, ConnectionResetError):
             pass
 
     def list_directory(self, path):
-        """Display file list with theme support"""
+        """Display file list with theme support and instant directory scan"""
         try:
             list_dir = os.listdir(path)
         except OSError:
@@ -188,58 +208,66 @@ class AirShareHandler(SimpleHTTPRequestHandler):
 
         list_dir.sort(key=lambda a: a.lower())
         r = []
-        displaypath = urllib.parse.unquote(urllib.parse.unquote(self.path))
-        
+
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
         theme = params.get("theme", ["dark"])[0]
+        displaypath = urllib.parse.unquote(parsed.path)
 
         r.append('<!DOCTYPE html><html><head><meta charset="utf-8">')
         r.append('<meta name="viewport" content="width=device-width, initial-scale=1.0">')
         r.append('<title>AirShare PC</title>')
         r.append(f'<style>{get_css(theme)}</style>')
         r.append('</head><body>')
-        
+
         if theme == "dark":
             r.append('<div id="starfield"></div>')
-        
-        r.append(f'<button class="theme-toggle" onclick="toggleTheme()">{"" if theme == "light" else "☀️"}</button>')
+
+        r.append(f'<button class="theme-toggle" onclick="toggleTheme()">{"🌙" if theme == "light" else "☀️"}</button>')
         r.append('<div class="container">')
         r.append(f'<div class="header"><h1>AirShare PC</h1><p>{displaypath}</p>')
-        r.append('<label class="upload-btn">Upload files to phone<input type="file" id="up" multiple style="display:none" onchange="uploadFiles(this.files)"></label>')
+        r.append('<label class="upload-btn">⬆ Upload files to phone<input type="file" id="up" multiple style="display:none" onchange="uploadFiles(this.files)"></label>')
         r.append('<p id="status" style="margin-top:10px;color:#667eea;"></p></div>')
-        r.append('<form id="fileForm"><ul class="file-list">')
+        r.append('<form id="fileForm" method="GET"><input type="hidden" name="download_selected" value="1"><ul class="file-list">')
 
         for name in list_dir:
             fullname = os.path.join(path, name)
+            rel_path = os.path.relpath(fullname, STORAGE_PATH)
+            safe_val = rel_path.replace('"', '&quot;')
+
             if os.path.isdir(fullname):
                 try:
-                    size = 0
-                    count = 0
-                    for dirpath, dirnames, filenames in os.walk(fullname):
-                        count += len(filenames)
-                        for filename in filenames:
-                            try:
-                                size += os.path.getsize(os.path.join(dirpath, filename))
-                            except:
-                                pass
-                    meta_info = f"{count} items • {format_size(size)}"
+                    with os.scandir(fullname) as entries:
+                        count = sum(1 for _ in entries)
+                    meta_info = f"{count} items"
                 except OSError:
                     meta_info = "Folder"
-                
-                rel_path = os.path.relpath(fullname, STORAGE_PATH)
-                r.append(f'<li class="file-item"><input type="checkbox" class="checkbox" name="files" value="{urllib.parse.quote(rel_path)}"><div class="file-info"><a class="file-link" href="{urllib.parse.quote(name + "/")}">{name}/</a><div class="file-meta">{meta_info}</div></div>')
-                r.append(f'<a class="download-btn" href="?zip={urllib.parse.quote(rel_path)}" title="Download ZIP"></a></li>')
+
+                r.append(
+                    f'<li class="file-item">'
+                    f'<input type="checkbox" class="checkbox" name="files" value="{safe_val}">'
+                    f'<div class="file-info" style="flex:1">'
+                    f'<a class="file-link" href="{urllib.parse.quote(name + "/")}">{name}/</a>'
+                    f'<div class="file-meta">{meta_info}</div></div>'
+                    f'<a class="download-btn" href="?zip={urllib.parse.quote(name)}" title="Download ZIP">⬇</a>'
+                    f'</li>'
+                )
             else:
                 try:
                     size_str = format_size(os.path.getsize(fullname))
                 except OSError:
                     size_str = "Unknown"
-                
-                rel_path = os.path.relpath(fullname, STORAGE_PATH)
-                r.append(f'<li class="file-item"><input type="checkbox" class="checkbox" name="files" value="{urllib.parse.quote(rel_path)}"><div class="file-info"><a class="file-link" href="{urllib.parse.quote(name)}">{name}</a><div class="file-meta">{size_str}</div></div></li>')
 
-        r.append('</ul><button type="submit" class="upload-btn" style="margin-top:20px;">Download selected</button></form></div>')
+                r.append(
+                    f'<li class="file-item">'
+                    f'<input type="checkbox" class="checkbox" name="files" value="{safe_val}">'
+                    f'<div class="file-info" style="flex:1">'
+                    f'<a class="file-link" href="{urllib.parse.quote(name)}">{name}</a>'
+                    f'<div class="file-meta">{size_str}</div></div>'
+                    f'</li>'
+                )
+
+        r.append('</ul><button type="submit" class="upload-btn" style="margin-top:20px;">⬇ Download selected</button></form></div>')
         r.append(f'<script>{get_star_script()}{get_upload_script()}{get_theme_script()}</script>')
         r.append('</body></html>')
 
