@@ -51,6 +51,8 @@ jobs:
           unzip -q commandlinetools-linux-11076708_latest.zip
           mv cmdline-tools latest
           rm commandlinetools-linux-11076708_latest.zip
+          mkdir -p ~/.buildozer/android/platform/android-sdk/tools/bin
+          ln -s ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
       
       - name: Build APK
         run: buildozer -v android debug
