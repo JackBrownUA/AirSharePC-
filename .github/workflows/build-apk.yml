@@ -33,7 +33,7 @@ jobs:
           path: |
             ~/.buildozer
             .buildozer
-          key: buildozer-ndk25b-v3-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: buildozer-clean-v4-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
 
       - name: Install system dependencies
         run: |
@@ -50,11 +50,9 @@ jobs:
 
       - name: Install Python build dependencies
         run: |
-          cat << 'EOF' > /tmp/pip-constraints.txt
-          setuptools<70.0.0
-          wheel<0.44.0
-          cython==0.29.33
-          EOF
+          echo "setuptools<70.0.0" > /tmp/pip-constraints.txt
+          echo "wheel<0.44.0" >> /tmp/pip-constraints.txt
+          echo "cython==0.29.33" >> /tmp/pip-constraints.txt
           python -m pip install --upgrade "pip<24.1" "setuptools<70.0.0" "wheel<0.44.0"
           pip install --constraint /tmp/pip-constraints.txt \
             "buildozer==1.5.0" \
@@ -75,19 +73,21 @@ jobs:
             mv cmdline-tools latest
             rm -f commandlinetools-linux-11076708_latest.zip
           fi
-          rm -f "$SDK_DIR/tools/bin/sdkmanager" "$SDK_DIR/tools/bin/avdmanager"
-          cat << 'EOF' > "$SDK_DIR/tools/bin/sdkmanager"
-          #!/usr/bin/env bash
-          SDK_DIR="$HOME/.buildozer/android/platform/android-sdk"
-          for arg in "$@"; do
-            if [ "$arg" = "--list" ]; then
-              "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" "$@" | grep -vE "build-tools;(35|36|37)\."
-              exit 0
-            fi
-          done
-          exec "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" "$@"
-          EOF
-          chmod +x "$SDK_DIR/tools/bin/sdkmanager" "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager"
-          yes | "$SDK_DIR/tools/bin/sdkmanager" --licenses || true
-          yes | "$SDK_DIR/tools/bin/sdkmanager" "platform-tools" "platforms;android-33" "build-tools;33.0.2" "build-tools;34.0.0" || true
-          rm -rf "$SDK_DIR/build-tools/3
+          ln -sf "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" "$SDK_DIR/tools/bin/sdkmanager"
+          ln -sf "$SDK_DIR/cmdline-tools/latest/bin/avdmanager" "$SDK_DIR/tools/bin/avdmanager"
+          chmod +x "$SDK_DIR/cmdline-tools/latest/bin/"* "$SDK_DIR/tools/bin/"* || true
+          yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" --licenses || true
+          yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" "platform-tools" "platforms;android-33" "build-tools;33.0.2" || true
+
+      - name: Build Debug APK
+        run: yes | buildozer -v android debug
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          APP_ANDROID_ACCEPT_SDK_LICENSE: "1"
+          PIP_CONSTRAINT: /tmp/pip-constraints.txt
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: airshare-apk
+          path: bin/*.apk
