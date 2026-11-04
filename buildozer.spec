@@ -7,7 +7,7 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,html,css,js
 
 version = 1.0.0
-requirements = python3,kivy,pyjnius,android
+requirements = python3,kivy,pyjnius,charset-normalizer==2.1.1,android
 
 orientation = portrait
 fullscreen = 0
@@ -19,7 +19,7 @@ android.ndk = 25b
 android.ndk_api = 24
 android.archs = arm64-v8a
 android.accept_sdk_license = True
-p4a.branch = master
+p4a.branch = develop
 
 [buildozer]
 log_level = 2
