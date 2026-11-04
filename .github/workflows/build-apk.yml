@@ -33,7 +33,7 @@ jobs:
           path: |
             ~/.buildozer
             .buildozer
-          key: buildozer-clean-v4-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: buildozer-clean-v6-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
 
       - name: Install system dependencies
         run: |
@@ -50,13 +50,13 @@ jobs:
 
       - name: Install Python build dependencies
         run: |
-          echo "setuptools<70.0.0" > /tmp/pip-constraints.txt
-          echo "wheel<0.44.0" >> /tmp/pip-constraints.txt
-          echo "cython==0.29.33" >> /tmp/pip-constraints.txt
-          python -m pip install --upgrade "pip<24.1" "setuptools<70.0.0" "wheel<0.44.0"
-          pip install --constraint /tmp/pip-constraints.txt \
+          echo "cython<3.1.0" > /tmp/pip-constraints.txt
+          mkdir -p "$HOME/.config/pip"
+          printf "[global]\nconstraint = /tmp/pip-constraints.txt\n" > "$HOME/.config/pip/pip.conf"
+          python -m pip install --upgrade pip setuptools wheel
+          pip install \
             "buildozer==1.5.0" \
-            "cython==0.29.33" \
+            "cython==3.0.11" \
             virtualenv appdirs "colorama>=0.3.3" jinja2 \
             "sh>=1.10,<2.0" meson ninja toml packaging build
           echo "$HOME/.local/bin" >> $GITHUB_PATH
