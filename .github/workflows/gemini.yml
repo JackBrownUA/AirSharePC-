@@ -10,7 +10,7 @@ on:
       prompt:
         description: 'Задание для Gemini (что сделать в коде)'
         required: true
-        default: 'Проверь код проекта, найди ошибки и внеси исправления'
+        default: 'Обнови buildozer.spec: добавь в requirements charset-normalizer==2.1.1 и укажи p4a.branch = develop'
 
 permissions:
   contents: write
@@ -36,3 +36,4 @@ jobs:
           prompt: ${{ github.event.inputs.prompt || github.event.comment.body }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GEMINI_CLI_TRUST_WORKSPACE: "true"
