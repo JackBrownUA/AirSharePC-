@@ -33,7 +33,7 @@ jobs:
           path: |
             ~/.buildozer
             .buildozer
-          key: buildozer-master-v8-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: buildozer-master-v9-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
 
       - name: Install system dependencies
         run: |
@@ -50,6 +50,9 @@ jobs:
 
       - name: Install Python build dependencies
         run: |
+          echo "charset-normalizer==2.1.1" > /tmp/pip-constraints.txt
+          mkdir -p "$HOME/.config/pip"
+          printf "[global]\nconstraint = /tmp/pip-constraints.txt\n" > "$HOME/.config/pip/pip.conf"
           python -m pip install --upgrade pip setuptools wheel
           pip install \
             "buildozer==1.5.0" \
@@ -78,10 +81,13 @@ jobs:
           yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" "platform-tools" "platforms;android-33" "build-tools;33.0.2" || true
 
       - name: Build Debug APK
-        run: yes | buildozer -v android debug
+        run: |
+          find "$HOME/.buildozer" .buildozer "$HOME/.cache" -name "charset_normalizer-3*" -delete 2>/dev/null || true
+          yes | buildozer -v android debug
         env:
           DEBIAN_FRONTEND: noninteractive
           APP_ANDROID_ACCEPT_SDK_LICENSE: "1"
+          PIP_CONSTRAINT: /tmp/pip-constraints.txt
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
