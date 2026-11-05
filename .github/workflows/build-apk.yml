@@ -33,7 +33,7 @@ jobs:
           path: |
             ~/.buildozer
             .buildozer
-          key: buildozer-master-v7-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: buildozer-master-v8-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
 
       - name: Install system dependencies
         run: |
@@ -50,14 +50,10 @@ jobs:
 
       - name: Install Python build dependencies
         run: |
-          echo "cython<3.1.0" > /tmp/pip-constraints.txt
-          echo "charset-normalizer==2.1.1" >> /tmp/pip-constraints.txt
-          mkdir -p "$HOME/.config/pip"
-          printf "[global]\nconstraint = /tmp/pip-constraints.txt\n" > "$HOME/.config/pip/pip.conf"
           python -m pip install --upgrade pip setuptools wheel
           pip install \
             "buildozer==1.5.0" \
-            "cython==3.0.11" \
+            "cython==0.29.33" \
             "charset-normalizer==2.1.1" \
             virtualenv appdirs "colorama>=0.3.3" jinja2 \
             "sh>=1.10,<2.0" meson ninja toml packaging build
@@ -86,7 +82,6 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
           APP_ANDROID_ACCEPT_SDK_LICENSE: "1"
-          PIP_CONSTRAINT: /tmp/pip-constraints.txt
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
