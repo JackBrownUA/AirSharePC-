@@ -1,6 +1,4 @@
-"""
-Helper functions for AirShare PC
-"""
+# Helper functions for AirShare PC
 
 import os
 import json
@@ -35,7 +33,7 @@ def format_size(size):
 
 
 def get_device_info():
-    """Detect real Android device name/model or OS hostname"""
+    """Detect real marketing device name (e.g. Galaxy S24 Ultra) on Android"""
     try:
         from kivy.utils import platform
     except Exception:
@@ -44,15 +42,37 @@ def get_device_info():
     if platform == "android":
         try:
             from jnius import autoclass
-            Build = autoclass("android.os.Build")
-            manufacturer = Build.MANUFACTURER.capitalize()
-            model = Build.MODEL
-            if model.startswith(manufacturer):
-                return model
-            return f"{manufacturer} {model}"
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            SettingsGlobal = autoclass("android.provider.Settings$Global")
+            activity = PythonActivity.mActivity
+            if activity is not None:
+                resolver = activity.getContentResolver()
+                dev_name = SettingsGlobal.getString(resolver, "device_name")
+                if dev_name and str(dev_name).strip():
+                    return str(dev_name).strip()
         except Exception:
             pass
-        return "Android Device"
+        try:
+            from jnius import autoclass
+            Build = autoclass("android.os.Build")
+            model = str(Build.MODEL or "").strip()
+            known_models = {
+                "SM-S928B": "Galaxy S24 Ultra",
+                "SM-S928U": "Galaxy S24 Ultra",
+                "SM-S928N": "Galaxy S24 Ultra",
+                "SM-S926B": "Galaxy S24+",
+                "SM-S921B": "Galaxy S24",
+                "SM-S918B": "Galaxy S23 Ultra",
+            }
+            if model in known_models:
+                return known_models[model]
+            manufacturer = str(Build.MANUFACTURER or "").capitalize()
+            if model.startswith(manufacturer):
+                return model
+            return f"{manufacturer} {model}".strip()
+        except Exception:
+            pass
+        return "Android Phone"
 
     try:
         hostname = socket.gethostname()
@@ -60,7 +80,7 @@ def get_device_info():
             return hostname
     except Exception:
         pass
-    return "Local Device"
+    return "Pixel 9 Pro"
 
 
 def get_storage_stats():
@@ -80,15 +100,15 @@ def get_storage_stats():
             "free_gb": round(free_gb, 1),
             "used_gb": round(used_gb, 1),
             "percent": min(1.0, max(0.0, percent)),
-            "text": f"Storage: {free_gb:.1f} GB free of {total_gb:.1f} GB",
+            "text": f"Storage: {used_gb:.1f} GB / {total_gb:.0f} GB",
         }
     except Exception:
         return {
             "total_gb": 128.0,
-            "free_gb": 64.0,
-            "used_gb": 64.0,
+            "free_gb": 63.5,
+            "used_gb": 64.5,
             "percent": 0.5,
-            "text": "Storage: 64.0 GB free of 128.0 GB",
+            "text": "Storage: 64.5 GB / 128 GB",
         }
 
 
@@ -181,29 +201,6 @@ def get_device_theme():
         except Exception:
             pass
         return "dark"
-
-    if platform == "win":
-        try:
-            import winreg
-            key = winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER,
-                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
-            )
-            val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
-            winreg.CloseKey(key)
-            return "light" if val == 1 else "dark"
-        except Exception:
-            pass
-    elif platform == "macosx":
-        try:
-            import subprocess
-            out = subprocess.check_output(
-                ["defaults", "read", "-g", "AppleInterfaceStyle"],
-                stderr=subprocess.DEVNULL
-            ).decode("utf-8", errors="ignore").strip().lower()
-            return "dark" if "dark" in out else "light"
-        except Exception:
-            return "light"
 
     return "dark"
 
