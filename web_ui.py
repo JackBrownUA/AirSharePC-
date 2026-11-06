@@ -1,26 +1,24 @@
-"""
-Web UI templates and styling for AirShare PC
-Edit design here without touching server code
-"""
-
+# Веб-интерфейс AirShare PC: стили, анимация звёзд (с поддержкой reduced-motion) и скрипты загрузки
 
 def get_css(theme="dark"):
-    """Returns CSS styles supporting both dark and light themes with instant switching"""
-    return """
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
+    # Учитываем переданную тему для цветовой схемы страницы и отключаем анимацию при prefers-reduced-motion
+    scheme = "light" if theme == "light" else "dark"
+    return f"""
+    :root {{ color-scheme: {scheme}; }}
+    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+    body {{
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         min-height: 100vh;
         overflow-x: hidden;
         transition: background-color 0.25s ease, color 0.25s ease;
         background: #000;
         color: #e0e0e0;
-    }
-    body.light {
+    }}
+    body.light {{
         background: #f5f5f7;
         color: #1d1d1f;
-    }
-    #starfield {
+    }}
+    #starfield {{
         position: fixed;
         top: 0;
         left: 0;
@@ -28,52 +26,61 @@ def get_css(theme="dark"):
         height: 100%;
         z-index: 0;
         pointer-events: none;
-    }
-    body.light #starfield {
+    }}
+    body.light #starfield {{
         display: none;
-    }
-    .star {
+    }}
+    .star {{
         position: absolute;
         background: white;
         border-radius: 50%;
         animation: twinkle 3s infinite;
-    }
-    @keyframes twinkle {
-        0%, 100% { opacity: 0.3; }
-        50% { opacity: 1; }
-    }
-    .container {
+    }}
+    @keyframes twinkle {{
+        0%, 100% {{ opacity: 0.3; }}
+        50% {{ opacity: 1; }}
+    }}
+    @media (prefers-reduced-motion: reduce) {{
+        .star {{
+            animation: none !important;
+            opacity: 0.45;
+        }}
+        body, .theme-toggle, .upload-btn, .download-btn {{
+            transition: none !important;
+        }}
+    }}
+    .container {{
         position: relative;
         z-index: 1;
         max-width: 820px;
         margin: 0 auto;
         padding: 60px 20px;
-    }
-    .header {
+    }}
+    .header {{
         text-align: center;
         margin-bottom: 36px;
-    }
-    .header h1 {
+    }}
+    .header h1 {{
         color: #fff;
         font-size: 44px;
         font-weight: 300;
         margin-bottom: 10px;
         text-shadow: 0 0 40px rgba(102, 126, 234, 0.5);
-    }
-    body.light .header h1 {
+    }}
+    body.light .header h1 {{
         color: #1d1d1f;
         text-shadow: none;
-    }
-    .header p {
+    }}
+    .header p {{
         color: rgba(255, 255, 255, 0.55);
         font-size: 14px;
         margin-bottom: 20px;
         word-break: break-all;
-    }
-    body.light .header p {
+    }}
+    body.light .header p {{
         color: rgba(0, 0, 0, 0.55);
-    }
-    .theme-toggle {
+    }}
+    .theme-toggle {{
         position: fixed;
         top: 20px;
         right: 20px;
@@ -90,27 +97,27 @@ def get_css(theme="dark"):
         font-size: 22px;
         color: #fff;
         transition: 0.25s;
-    }
-    .theme-toggle:hover {
+    }}
+    .theme-toggle:hover {{
         background: rgba(102, 126, 234, 0.35);
-    }
-    body.light .theme-toggle {
+    }}
+    body.light .theme-toggle {{
         background: #fff;
         border: 1px solid #d2d2d7;
         color: #1d1d1f;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    }
-    body.light .theme-toggle:hover {
+    }}
+    body.light .theme-toggle:hover {{
         background: #f0f0f5;
-    }
-    .actions-bar {
+    }}
+    .actions-bar {{
         display: flex;
         gap: 12px;
         justify-content: center;
         flex-wrap: wrap;
         margin-top: 8px;
-    }
-    .upload-btn {
+    }}
+    .upload-btn {{
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -124,21 +131,21 @@ def get_css(theme="dark"):
         font-size: 15px;
         text-decoration: none;
         transition: 0.25s;
-    }
-    .upload-btn:hover {
+    }}
+    .upload-btn:hover {{
         background: #667eea;
         color: #fff;
-    }
-    body.light .upload-btn {
+    }}
+    body.light .upload-btn {{
         background: rgba(0, 122, 255, 0.1);
         border: 1px solid #007aff;
         color: #007aff;
-    }
-    body.light .upload-btn:hover {
+    }}
+    body.light .upload-btn:hover {{
         background: #007aff;
         color: #fff;
-    }
-    .toolbar {
+    }}
+    .toolbar {{
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -147,69 +154,69 @@ def get_css(theme="dark"):
         border-radius: 10px;
         background: rgba(255, 255, 255, 0.04);
         font-size: 14px;
-    }
-    body.light .toolbar {
+    }}
+    body.light .toolbar {{
         background: #fff;
         box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
-    }
-    .toolbar label {
+    }}
+    .toolbar label {{
         display: flex;
         align-items: center;
         cursor: pointer;
         user-select: none;
-    }
-    .file-list {
+    }}
+    .file-list {{
         list-style: none;
         border-radius: 12px;
         overflow: hidden;
-    }
-    body.light .file-list {
+    }}
+    body.light .file-list {{
         background: #fff;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-    }
-    .file-item {
+    }}
+    .file-item {{
         padding: 16px 18px;
         border-bottom: 1px solid rgba(255, 255, 255, 0.08);
         display: flex;
         justify-content: space-between;
         align-items: center;
         gap: 12px;
-    }
-    body.light .file-item {
+    }}
+    body.light .file-item {{
         border-bottom: 1px solid #e5e5ea;
-    }
-    .file-item:last-child {
+    }}
+    .file-item:last-child {{
         border-bottom: none;
-    }
-    .file-info {
+    }}
+    .file-info {{
         flex: 1;
         min-width: 0;
-    }
-    .file-link {
+    }}
+    .file-link {{
         color: #fff;
         text-decoration: none;
         font-size: 17px;
         display: block;
         margin-bottom: 4px;
         word-break: break-word;
-    }
-    .file-link:hover {
+    }}
+    .file-link:hover {{
         color: #667eea;
-    }
-    body.light .file-link {
+    }}
+    body.light .file-link {{
         color: #1d1d1f;
-    }
-    body.light .file-link:hover {
+    }}
+    body.light .file-link:hover {{
         color: #007aff;
-    }
-    .file-meta {
+    }}
+    .file-meta {{
         color: rgba(255, 255, 255, 0.45);
         font-size: 13px;
-    }
-    body.light .file-meta {
+    }}
+    body.light .file-meta {{
         color: rgba(0, 0, 0, 0.5);
-    }
-    .download-btn {
+    }}
+    .download-btn {{
         width: 40px;
         height: 40px;
         flex-shrink: 0;
@@ -222,38 +229,38 @@ def get_css(theme="dark"):
         text-decoration: none;
         color: #fff;
         transition: 0.25s;
-    }
-    .download-btn:hover {
+    }}
+    .download-btn:hover {{
         background: #667eea;
         border-color: #667eea;
         color: #fff;
-    }
-    body.light .download-btn {
+    }}
+    body.light .download-btn {{
         background: rgba(0, 122, 255, 0.1);
         border: 1px solid #007aff;
         color: #007aff;
-    }
-    body.light .download-btn:hover {
+    }}
+    body.light .download-btn:hover {{
         background: #007aff;
         color: #fff;
-    }
-    .checkbox {
+    }}
+    .checkbox {{
         width: 20px;
         height: 20px;
         cursor: pointer;
         margin-right: 8px;
         flex-shrink: 0;
-    }
+    }}
     """
 
 
 def get_star_script():
-    """JavaScript for star animation"""
+    # Сокращено до 35 звёзд, чтобы не нагружать GPU/CPU бюджетных устройств и ноутбуков
     return """
     (function(){
         const sf = document.getElementById("starfield");
         if (sf && sf.children.length === 0) {
-            for (let i = 0; i < 120; i++) {
+            for (let i = 0; i < 35; i++) {
                 const s = document.createElement("div");
                 s.className = "star";
                 s.style.left = Math.random() * 100 + "%";
@@ -268,7 +275,6 @@ def get_star_script():
 
 
 def get_upload_script():
-    """JavaScript for reliable file upload and batch download validation"""
     return """
     function triggerUpload() {
         const input = document.getElementById("up");
@@ -347,7 +353,6 @@ def get_upload_script():
 
 
 def get_theme_script():
-    """JavaScript for instant light/dark theme toggle with cookie & localStorage persistence"""
     return """
     function applyTheme(theme) {
         const isLight = (theme === "light");

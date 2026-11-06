@@ -1,6 +1,4 @@
-"""
-Конфигурация AirShare PC
-"""
+# Конфигурация приложения AirShare PC
 
 import os
 
@@ -10,8 +8,17 @@ except Exception:
     platform = "unknown"
 
 SERVER_PORT = 8080
-DEFAULT_PASSWORD = "06102000"
 MAX_RECENT_IPS = 10
+
+# Лимит размера одного загружаемого файла (2 ГБ) для защиты памяти и хранилища
+MAX_UPLOAD_SIZE = 2 * 1024 * 1024 * 1024
+
+# Защита от перебора PIN-кода: максимум 5 неудачных попыток, блокировка IP на 3 минуты
+RATE_LIMIT_MAX_ATTEMPTS = 5
+RATE_LIMIT_BLOCK_SECONDS = 180
+
+# Старый захардкоженный пароль считается скомпрометированным и заменяется при запуске
+COMPROMISED_PASSWORDS = frozenset({"", "06102000"})
 
 if platform == "android":
     _raw_storage = "/storage/emulated/0"
