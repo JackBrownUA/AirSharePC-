@@ -794,7 +794,7 @@ class MacModalContainer(FloatLayout):
         self.scrim_rect.size = self.size
 
     def _upd_alpha(self, *_args):
-        self.scrim_col.rgba = (self.scrim_rgba[0], self.scrim_rgba[1], self.scrim_rgba[2], self.scrim_alpha)
+        self.col.rgba = (self.scrim_rgba[0], self.scrim_rgba[1], self.scrim_rgba[2], self.scrim_alpha)
 
     def animate_open(self):
         cx, cy = Window.width * 0.5, Window.height * 0.5
@@ -909,9 +909,10 @@ class AirShareApp(App):
             self.addr_label.font_size = sp(13.5)
 
     def set_keep_alive(self, enabled):
-        """Enable or disable background wake lock so server stays active when phone screen is locked"""
+        """Enable or disable background wake lock safely without crashing"""
         self.keep_alive_locked = bool(enabled)
-        self.keep_alive_switch.set_active(self.keep_alive_locked, animate=True)
+        if hasattr(self, "keep_alive_switch"):
+            self.keep_alive_switch.set_active(self.keep_alive_locked, animate=True)
         try:
             Window.allow_screensaver = not self.keep_alive_locked
         except Exception:
@@ -922,15 +923,16 @@ class AirShareApp(App):
             if platform == "android":
                 from jnius import autoclass
                 PythonActivity = autoclass("org.kivy.android.PythonActivity")
-                Context = autoclass("android.content.Context")
-                PowerManager = autoclass("android.os.PowerManager")
-                activity = PythonActivity.mActivity
+                activity = getattr(PythonActivity, "mActivity", None)
                 if activity is not None:
+                    Context = autoclass("android.content.Context")
+                    PowerManager = autoclass("android.os.PowerManager")
                     if self.keep_alive_locked:
                         if self._wake_lock is None:
                             pm = activity.getSystemService(Context.POWER_SERVICE)
-                            self._wake_lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AirSharePC::ServerWakeLock")
-                        if not self._wake_lock.isHeld():
+                            if pm is not None:
+                                self._wake_lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AirSharePC::ServerWakeLock")
+                        if self._wake_lock is not None and not self._wake_lock.isHeld():
                             self._wake_lock.acquire()
                     else:
                         if self._wake_lock is not None and self._wake_lock.isHeld():
@@ -1181,4 +1183,26 @@ class AirShareApp(App):
         self.tr2_sub = Label(text="45 MB/s", font_size=sp(11.5), halign="right", valign="middle", size_hint=(1, None), height=dp(16))
         self.tr2_sub.bind(size=lambda i, v: setattr(i, "text_size", v))
         info2.add_widget(top2)
-        info2.add_
+        info2.add_widget(self.tr2_bar)
+        info2.add_widget(self.tr2_sub)
+        row2.add_widget(ico2)
+        row2.add_widget(info2)
+
+        self.transfers_card.add_widget(row1)
+        self.transfers_card.add_widget(row2)
+        self.main_content.add_widget(self.transfers_card)
+
+        # 4. Нижняя навигационная панель с подсветкой выбранной вкладки (Transfer, Files, Devices, Settings)
+        self.bottom_nav = RoundedCard(
+            bg_color=p["card_bg"],
+            border_color=p["card_border"],
+            radius=dp(26),
+            orientation="horizontal",
+            padding=[dp(10), dp(6), dp(10), dp(6)],
+            spacing=dp(4),
+            size_hint=(1, None),
+            height=dp(64),
+        )
+
+        self.nav_transfer = NavTabItem("transfer", "Transfer", is_active=True, pill_color=p["pill_active"], text_color=p["text"])
+        self.nav_transfer.bind(
