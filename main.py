@@ -1,5 +1,5 @@
-# Main application file - Pixel-perfect implementation of 1000250791.jpg and 1000250792.jpg
-# Hardware-accelerated 120 FPS macOS-style spring animations, frosted glass drawer, and auto-auth URL
+# Main application file - Redesigned Radar Card with Connect/Disconnect, WakeLock Switch,
+# Header Status Dot (Green/Red/Yellow), Active Bottom Nav Tabs, and Rounded Glass Modals
 
 import os
 import math
@@ -26,7 +26,6 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.label import Label
-from kivy.uix.button import Button
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
@@ -48,47 +47,49 @@ from utils import (
 THEMES = {
     "dark": {
         "bg": (0.095, 0.102, 0.114, 1),
-        "radar_bg": (0.185, 0.198, 0.218, 1),
-        "radar_glow": (0.32, 0.35, 0.40, 0.18),
+        "radar_bg": (0.18, 0.192, 0.212, 1),
+        "radar_glow": (0.32, 0.35, 0.40, 0.16),
         "card_bg": (0.145, 0.155, 0.172, 1),
         "card_border": (0.27, 0.29, 0.32, 0.85),
-        "radar_ring": (0.62, 0.66, 0.72, 0.14),
-        "drawer_bg": (0.16, 0.175, 0.195, 0.86),
-        "drawer_card": (0.22, 0.24, 0.27, 0.76),
-        "drawer_border": (0.42, 0.45, 0.50, 0.60),
-        "overlay": (0.0, 0.0, 0.0, 0.52),
+        "radar_ring": (0.62, 0.66, 0.72, 0.13),
+        "drawer_bg": (0.15, 0.165, 0.185, 0.88),
+        "drawer_card": (0.22, 0.24, 0.27, 0.78),
+        "drawer_border": (0.40, 0.43, 0.48, 0.62),
+        "modal_bg": (0.155, 0.17, 0.19, 0.96),
+        "overlay": (0.0, 0.0, 0.0, 0.56),
         "text": (0.96, 0.97, 0.98, 1),
         "subtext": (0.62, 0.65, 0.70, 1),
-        "pill_bg": (0.23, 0.248, 0.275, 1),
-        "pill_active": (0.28, 0.305, 0.34, 1),
+        "pill_bg": (0.22, 0.24, 0.27, 1),
+        "pill_active": (0.29, 0.32, 0.36, 1),
         "amber": (0.88, 0.61, 0.22, 1),
-        "amber_glow": (0.88, 0.61, 0.22, 0.12),
-        "silver_bar": (0.68, 0.71, 0.76, 1),
-        "blue": (0.44, 0.69, 0.96, 1),
-        "green": (0.30, 0.84, 0.56, 1),
+        "blue": (0.38, 0.72, 0.98, 1),
+        "green": (0.20, 0.78, 0.46, 1),
+        "red": (0.88, 0.28, 0.30, 1),
+        "yellow": (0.96, 0.78, 0.18, 1),
         "track": (0.22, 0.235, 0.26, 1),
     },
     "light": {
         "bg": (0.93, 0.94, 0.96, 1),
-        "radar_bg": (0.85, 0.87, 0.91, 1),
+        "radar_bg": (0.86, 0.88, 0.92, 1),
         "radar_glow": (1.0, 1.0, 1.0, 0.35),
         "card_bg": (0.99, 0.99, 1.0, 1),
         "card_border": (0.80, 0.82, 0.86, 1),
-        "radar_ring": (0.35, 0.38, 0.44, 0.15),
-        "drawer_bg": (0.96, 0.97, 0.98, 0.88),
-        "drawer_card": (0.90, 0.92, 0.95, 0.78),
-        "drawer_border": (0.76, 0.79, 0.84, 0.70),
-        "overlay": (0.0, 0.0, 0.0, 0.32),
+        "radar_ring": (0.35, 0.38, 0.44, 0.14),
+        "drawer_bg": (0.95, 0.96, 0.98, 0.90),
+        "drawer_card": (0.89, 0.91, 0.95, 0.82),
+        "drawer_border": (0.74, 0.77, 0.82, 0.75),
+        "modal_bg": (0.96, 0.97, 0.99, 0.98),
+        "overlay": (0.0, 0.0, 0.0, 0.36),
         "text": (0.11, 0.12, 0.14, 1),
         "subtext": (0.44, 0.47, 0.53, 1),
         "pill_bg": (0.83, 0.85, 0.89, 1),
-        "pill_active": (0.73, 0.77, 0.83, 1),
+        "pill_active": (0.72, 0.76, 0.82, 1),
         "amber": (0.84, 0.54, 0.14, 1),
-        "amber_glow": (0.84, 0.54, 0.14, 0.12),
-        "silver_bar": (0.46, 0.50, 0.56, 1),
-        "blue": (0.20, 0.54, 0.90, 1),
-        "green": (0.16, 0.68, 0.42, 1),
-        "track": (0.82, 0.84, 0.88, 1),
+        "blue": (0.24, 0.62, 0.94, 1),
+        "green": (0.16, 0.72, 0.42, 1),
+        "red": (0.84, 0.24, 0.26, 1),
+        "yellow": (0.90, 0.68, 0.12, 1),
+        "track": (0.80, 0.82, 0.86, 1),
     },
 }
 
@@ -106,23 +107,118 @@ class DynamicAirShareHandler(AirShareHandler):
         SimpleHTTPRequestHandler.__init__(self, *args, directory=self.real_storage, **kwargs)
 
 
+class StatusDot(Widget):
+    """Glowing status indicator dot next to the device name (Green = Online, Red = Stopped, Yellow = Issue)"""
+
+    def __init__(self, dot_color=(0.88, 0.28, 0.30, 1), **kwargs):
+        super().__init__(**kwargs)
+        self.dot_color = dot_color
+        with self.canvas:
+            self.halo_col = Color(dot_color[0], dot_color[1], dot_color[2], 0.26)
+            self.halo = Ellipse(pos=(0, 0), size=(dp(18), dp(18)))
+            self.core_col = Color(*dot_color)
+            self.core = Ellipse(pos=(0, 0), size=(dp(10), dp(10)))
+        self.bind(pos=self._upd, size=self._upd)
+        Clock.schedule_once(self._upd, 0)
+
+    def _upd(self, *_args):
+        cx, cy = self.center_x, self.center_y
+        hr = dp(8.5)
+        cr = dp(4.8)
+        self.halo.pos = (cx - hr, cy - hr)
+        self.halo.size = (hr * 2, hr * 2)
+        self.core.pos = (cx - cr, cy - cr)
+        self.core.size = (cr * 2, cr * 2)
+
+    def set_status_color(self, rgba):
+        self.dot_color = rgba
+        self.halo_col.rgba = (rgba[0], rgba[1], rgba[2], 0.28)
+        self.core_col.rgba = rgba
+
+
+class AnimatedToggleSwitch(ButtonBehavior, Widget):
+    """Smooth animated toggle switch: thumb glides right & turns light-blue when ON, glides left & turns white when OFF"""
+
+    thumb_pos = NumericProperty(0.0)
+
+    def __init__(self, active=False, **kwargs):
+        super().__init__(**kwargs)
+        self.always_release = True
+        self.is_active = bool(active)
+        self.thumb_pos = 1.0 if self.is_active else 0.0
+        with self.canvas:
+            self.track_col = Color(0.24, 0.26, 0.30, 1)
+            self.track_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(14)])
+            self.border_col = Color(0.40, 0.44, 0.50, 0.65)
+            self.track_line = Line(rounded_rectangle=[self.x, self.y, self.width, self.height, dp(14)], width=dp(1.0))
+            self.thumb_col = Color(0.96, 0.97, 0.98, 1)
+            self.thumb_ellipse = Ellipse(pos=(0, 0), size=(dp(20), dp(20)))
+        self.bind(pos=self._upd, size=self._upd, thumb_pos=self._upd)
+        Clock.schedule_once(self._upd, 0)
+
+    def _upd(self, *_args):
+        w, h = self.width, self.height
+        if w <= 2 or h <= 2:
+            return
+        r = h * 0.5
+        self.track_rect.pos = self.pos
+        self.track_rect.size = self.size
+        self.track_rect.radius = [r]
+        self.track_line.rounded_rectangle = [self.x, self.y, w, h, r]
+
+        # Interpolate colors between OFF (white thumb on dark track) and ON (light-blue thumb & glowing track)
+        t = max(0.0, min(1.0, self.thumb_pos))
+        tr = 0.22 + (0.18 - 0.22) * t
+        tg = 0.24 + (0.36 - 0.24) * t
+        tb = 0.28 + (0.54 - 0.28) * t
+        self.track_col.rgba = (tr, tg, tb, 1.0)
+        self.border_col.rgba = (0.38, 0.72, 0.98, 0.75) if t > 0.5 else (0.40, 0.44, 0.50, 0.55)
+
+        cr = 0.97 + (0.42 - 0.97) * t
+        cg = 0.98 + (0.76 - 0.98) * t
+        cb = 0.99 + (1.00 - 0.99) * t
+        self.thumb_col.rgba = (cr, cg, cb, 1.0)
+
+        pad = dp(3.5)
+        d = h - pad * 2
+        min_x = self.x + pad
+        max_x = self.x + w - pad - d
+        cur_x = min_x + (max_x - min_x) * t
+        cur_y = self.y + pad
+        self.thumb_ellipse.pos = (cur_x, cur_y)
+        self.thumb_ellipse.size = (d, d)
+
+    def set_active(self, active, animate=True):
+        self.is_active = bool(active)
+        target = 1.0 if self.is_active else 0.0
+        Animation.cancel_all(self, "thumb_pos")
+        if animate:
+            Animation(thumb_pos=target, duration=0.22, t="out_cubic").start(self)
+        else:
+            self.thumb_pos = target
+
+
 class VectorIcon(Widget):
-    """Hardware-translated vector canvas icon: moving pos never clears or rebuilds canvas (120 FPS)"""
+    """Hardware-translated vector canvas icon: guaranteed initial draw + 120 FPS zero-rebuild movement"""
 
     def __init__(self, icon_type="pc", color=(0.95, 0.96, 0.98, 1), **kwargs):
         super().__init__(**kwargs)
         self.icon_type = icon_type
         self.icon_color = color
+        self._drawn = False
         with self.canvas.before:
             PushMatrix()
             self._trans = Translate(self.x, self.y)
         with self.canvas.after:
             PopMatrix()
         self.bind(pos=self._update_pos, size=self._redraw)
+        Clock.schedule_once(self._redraw, 0)
 
     def _update_pos(self, *_args):
         self._trans.x = self.x
         self._trans.y = self.y
+        if not self._drawn:
+            self._redraw()
 
     def on_touch_down(self, touch):
         return False
@@ -139,11 +235,14 @@ class VectorIcon(Widget):
             self._redraw()
 
     def _redraw(self, *_args):
+        self._trans.x = self.x
+        self._trans.y = self.y
         self.canvas.clear()
         w_full, h_full = self.width, self.height
         s = min(w_full, h_full)
         if s <= 2:
             return
+        self._drawn = True
         cx, cy = w_full * 0.5, h_full * 0.5
         lw = max(1.2, dp(1.55))
 
@@ -151,14 +250,12 @@ class VectorIcon(Widget):
             Color(*self.icon_color)
 
             if self.icon_type == "pc":
-                # Detailed monitor matching 1000250791.jpg (bezel, dark inner screen, stand, base)
                 mw, mh = s * 0.76, s * 0.52
                 x0, y0 = cx - mw * 0.5, cy - mh * 0.22
                 Color(0.13, 0.14, 0.16, 0.90)
                 RoundedRectangle(pos=(x0 + dp(2), y0 + dp(2)), size=(mw - dp(4), mh - dp(4)), radius=[dp(4)])
                 Color(*self.icon_color)
                 Line(rounded_rectangle=[x0, y0, mw, mh, dp(5)], width=dp(2.0))
-                # Stand neck and base
                 neck_h = s * 0.13
                 Line(points=[cx - mw * 0.08, y0, cx - mw * 0.11, y0 - neck_h], width=dp(1.6))
                 Line(points=[cx + mw * 0.08, y0, cx + mw * 0.11, y0 - neck_h], width=dp(1.6))
@@ -172,7 +269,6 @@ class VectorIcon(Widget):
                 Line(circle=(cx, by, r3, -46, 46), width=dp(1.4))
 
             elif self.icon_type == "gear":
-                # Refined gear icon with compact teeth and smooth inner ring
                 r_outer = s * 0.27
                 r_inner = s * 0.12
                 Line(circle=(cx, cy, r_inner), width=dp(1.5))
@@ -186,7 +282,7 @@ class VectorIcon(Widget):
                     Line(points=[x1, y1, x2, y2], width=dp(2.1))
 
             elif self.icon_type == "copy":
-                w, h = s * 0.34, s * 0.42
+                w, h = s * 0.36, s * 0.44
                 Line(rounded_rectangle=[cx - w * 0.68, cy - h * 0.28, w, h, dp(3)], width=lw)
                 Color(0.18, 0.20, 0.22, 1)
                 RoundedRectangle(pos=(cx - w * 0.28, cy - h * 0.68), size=(w, h), radius=[dp(3)])
@@ -194,96 +290,52 @@ class VectorIcon(Widget):
                 Line(rounded_rectangle=[cx - w * 0.28, cy - h * 0.68, w, h, dp(3)], width=lw)
 
             elif self.icon_type == "download":
-                # Soft golden halo + crisp download arrow + tray matching 1000250791.jpg
-                Color(0.88, 0.61, 0.22, 0.13)
+                Color(0.88, 0.61, 0.22, 0.15)
                 Ellipse(pos=(cx - s * 0.40, cy - s * 0.40), size=(s * 0.80, s * 0.80))
                 Color(*self.icon_color)
                 top_y = cy + s * 0.25
                 bot_y = cy - s * 0.10
                 aw = s * 0.20
-                Line(points=[cx, top_y, cx, bot_y], width=dp(2.2))
-                Line(points=[cx - aw, bot_y + aw * 0.85, cx, bot_y, cx + aw, bot_y + aw * 0.85], width=dp(2.2))
+                Line(points=[cx, top_y, cx, bot_y], width=dp(2.1))
+                Line(points=[cx - aw, bot_y + aw * 0.85, cx, bot_y, cx + aw, bot_y + aw * 0.85], width=dp(2.1))
                 tray_y = cy - s * 0.24
-                Line(points=[cx - s * 0.26, tray_y, cx + s * 0.26, tray_y], width=dp(2.2))
+                Line(points=[cx - s * 0.26, tray_y, cx + s * 0.26, tray_y], width=dp(2.1))
 
             elif self.icon_type == "gallery":
-                # Layered photo stack matching Camera Roll in 1000250791.jpg
                 cw, ch = s * 0.62, s * 0.46
-                # Left and right back cards
                 Color(0.32, 0.35, 0.39, 0.75)
-                RoundedRectangle(pos=(cx - cw * 0.72, cy - ch * 0.44), size=(cw * 0.65, ch * 0.86), radius=[dp(6)])
-                RoundedRectangle(pos=(cx + cw * 0.07, cy - ch * 0.44), size=(cw * 0.65, ch * 0.86), radius=[dp(6)])
-                Color(0.46, 0.49, 0.54, 0.55)
-                Line(rounded_rectangle=[cx - cw * 0.72, cy - ch * 0.44, cw * 0.65, ch * 0.86, dp(6)], width=dp(1.0))
-                Line(rounded_rectangle=[cx + cw * 0.07, cy - ch * 0.44, cw * 0.65, ch * 0.86, dp(6)], width=dp(1.0))
-                # Main center photo card
+                RoundedRectangle(pos=(cx - cw * 0.72, cy - ch * 0.44), size=(cw * 0.65, ch * 0.86), radius=[dp(5)])
+                RoundedRectangle(pos=(cx + cw * 0.07, cy - ch * 0.44), size=(cw * 0.65, ch * 0.86), radius=[dp(5)])
                 Color(0.76, 0.79, 0.84, 0.98)
-                RoundedRectangle(pos=(cx - cw * 0.50, cy - ch * 0.50), size=(cw, ch), radius=[dp(7)])
-                # Mountain silhouettes inside center card
+                RoundedRectangle(pos=(cx - cw * 0.50, cy - ch * 0.50), size=(cw, ch), radius=[dp(6)])
                 Color(0.24, 0.26, 0.30, 0.95)
-                Triangle(
-                    points=[
-                        cx - cw * 0.42,
-                        cy - ch * 0.46,
-                        cx - cw * 0.06,
-                        cy + ch * 0.06,
-                        cx + cw * 0.26,
-                        cy - ch * 0.46,
-                    ]
-                )
-                Color(0.34, 0.37, 0.42, 0.90)
-                Triangle(
-                    points=[
-                        cx - cw * 0.02,
-                        cy - ch * 0.46,
-                        cx + cw * 0.22,
-                        cy - ch * 0.06,
-                        cx + cw * 0.44,
-                        cy - ch * 0.46,
-                    ]
-                )
-                # Warm golden sun dot
+                Triangle(points=[cx - cw * 0.42, cy - ch * 0.46, cx - cw * 0.06, cy + ch * 0.06, cx + cw * 0.26, cy - ch * 0.46])
                 Color(0.90, 0.64, 0.22, 1)
-                Ellipse(pos=(cx - cw * 0.22, cy + ch * 0.06), size=(dp(6.5), dp(6.5)))
+                Ellipse(pos=(cx - cw * 0.22, cy + ch * 0.06), size=(dp(5.5), dp(5.5)))
 
             elif self.icon_type == "document":
-                # Stacked 3D document sheet with folded corner matching Documents in 1000250791.jpg
                 dw, dh = s * 0.50, s * 0.62
                 x0, y0 = cx - dw * 0.5, cy - dh * 0.5
-                # Subtle back page shadow
-                Color(0.34, 0.37, 0.41, 0.65)
-                RoundedRectangle(pos=(x0 - dp(3), y0 - dp(2)), size=(dw, dh), radius=[dp(5)])
-                # Front sheet
                 Color(0.62, 0.65, 0.70, 0.95)
                 RoundedRectangle(pos=(x0, y0), size=(dw, dh), radius=[dp(5)])
-                # Folded corner
                 fold = dw * 0.32
                 Color(0.38, 0.41, 0.46, 1)
                 Triangle(points=[x0 + dw - fold, y0 + dh, x0 + dw, y0 + dh - fold, x0 + dw - fold, y0 + dh - fold])
-                # Subtle text lines
-                Color(0.42, 0.45, 0.50, 0.85)
-                Line(points=[x0 + dw * 0.22, cy + dh * 0.05, x0 + dw * 0.72, cy + dh * 0.05], width=dp(1.4))
-                Line(points=[x0 + dw * 0.22, cy - dh * 0.12, x0 + dw * 0.78, cy - dh * 0.12], width=dp(1.4))
-                Line(points=[x0 + dw * 0.22, cy - dh * 0.28, x0 + dw * 0.58, cy - dh * 0.28], width=dp(1.4))
 
             elif self.icon_type == "zip_badge":
-                # Warm amber archive badge with zipper track & pull tab matching 1000250791.jpg
                 Color(0.68, 0.47, 0.20, 1)
                 RoundedRectangle(pos=(dp(2), dp(2)), size=(w_full - dp(4), h_full - dp(4)), radius=[dp(10)])
                 Color(0.84, 0.62, 0.32, 0.55)
                 Line(rounded_rectangle=[dp(2), dp(2), w_full - dp(4), h_full - dp(4), dp(10)], width=dp(1.0))
                 Color(0.98, 0.90, 0.74, 1)
-                # Zipper teeth
                 for step in range(3):
                     ty = cy + s * 0.24 - step * dp(4.2)
                     Line(points=[cx - dp(2.5), ty, cx + dp(2.5), ty], width=dp(1.4))
-                # Zipper pull tab
                 RoundedRectangle(pos=(cx - dp(3.5), cy - dp(6)), size=(dp(7), dp(8)), radius=[dp(2)])
                 Color(0.68, 0.47, 0.20, 1)
                 Ellipse(pos=(cx - dp(1.5), cy - dp(3.5)), size=(dp(3), dp(3)))
 
             elif self.icon_type == "img_badge":
-                # Dark slate image badge with sun + mountains matching 1000250791.jpg
                 Color(0.24, 0.26, 0.29, 1)
                 RoundedRectangle(pos=(dp(2), dp(2)), size=(w_full - dp(4), h_full - dp(4)), radius=[dp(10)])
                 Color(0.36, 0.39, 0.44, 0.7)
@@ -306,7 +358,6 @@ class VectorIcon(Widget):
                 Line(points=[cx - dx + aw, cy - dy + aw, cx - dx, cy - dy, cx - dx + aw, cy - dy - aw], width=dp(1.8))
 
             elif self.icon_type == "folder":
-                # Clean folder outline with raised left tab
                 fw, fh = s * 0.54, s * 0.38
                 x0, y0 = cx - fw * 0.5, cy - fh * 0.5
                 Line(
@@ -362,11 +413,13 @@ class VectorIcon(Widget):
                 d = s * 0.16
                 Line(points=[cx - d * 0.5, cy + d, cx + d * 0.5, cy, cx - d * 0.5, cy - d], width=lw)
 
+            elif self.icon_type == "check":
+                d = s * 0.22
+                Line(points=[cx - d, cy, cx - d * 0.25, cy - d * 0.75, cx + d, cy + d * 0.65], width=dp(2.0))
+
 
 class VectorIconButton(ButtonBehavior, VectorIcon):
     """Standalone clickable vector icon button with spring press animation"""
-
-    scale_val = NumericProperty(1.0)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -462,11 +515,31 @@ class ClickableCard(ButtonBehavior, RoundedCard):
 
     def on_press(self):
         Animation.cancel_all(self, "scale_val")
-        Animation(scale_val=0.95, duration=0.08, t="out_quad").start(self)
+        Animation(scale_val=0.95, duration=0.07, t="out_quad").start(self)
 
     def on_release(self):
         Animation.cancel_all(self, "scale_val")
         Animation(scale_val=1.0, duration=0.22, t="out_back").start(self)
+
+
+class RoundedActionButton(ClickableCard):
+    """Sleek rounded pill button replacing standard sharp-cornered Kivy Buttons inside modals"""
+
+    def __init__(self, text="", bg_color=(0.38, 0.72, 0.98, 1), border_color=(0, 0, 0, 0), text_color=(1, 1, 1, 1), font_size=sp(14), radius=dp(15), **kwargs):
+        super().__init__(bg_color=bg_color, border_color=border_color, radius=radius, **kwargs)
+        self.lbl = Label(
+            text=f"[b]{text}[/b]",
+            markup=True,
+            font_size=font_size,
+            color=text_color,
+            halign="center",
+            valign="middle",
+        )
+        self.lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+        self.add_widget(self.lbl)
+
+    def set_text(self, text):
+        self.lbl.text = f"[b]{text}[/b]"
 
 
 class DrawerOverlay(Widget):
@@ -583,7 +656,7 @@ class DrawerMenuRow(ButtonBehavior, RoundedCard):
 
 
 class RadarCard(RoundedCard):
-    """Top radar discovery card with soft center glow and 4 concentric rings matching 1000250791.jpg"""
+    """Top radar card with soft center glow and 4 concentric rings"""
 
     def __init__(self, bg_color, border_color, ring_color, glow_color, **kwargs):
         super().__init__(bg_color=bg_color, border_color=border_color, radius=dp(24), **kwargs)
@@ -599,14 +672,14 @@ class RadarCard(RoundedCard):
 
     def _update_rings(self, *_args):
         cx = self.center_x
-        cy = self.y + self.height * 0.56
-        max_r = min(self.width, self.height) * 0.47
+        cy = self.y + self.height * 0.62
+        max_r = min(self.width, self.height) * 0.45
         glow_r = max_r * 0.72
         self.glow_outer.pos = (cx - glow_r, cy - glow_r)
         self.glow_outer.size = (glow_r * 2, glow_r * 2)
-        self.ring1.circle = (cx, cy, max_r * 0.42)
-        self.ring2.circle = (cx, cy, max_r * 0.62)
-        self.ring3.circle = (cx, cy, max_r * 0.82)
+        self.ring1.circle = (cx, cy, max_r * 0.40)
+        self.ring2.circle = (cx, cy, max_r * 0.60)
+        self.ring3.circle = (cx, cy, max_r * 0.80)
         self.ring4.circle = (cx, cy, max_r * 1.00)
 
     def update_radar_colors(self, bg_color, border_color, ring_color, glow_color):
@@ -649,7 +722,7 @@ class SlimProgressBar(Widget):
 class NavTabItem(ButtonBehavior, BoxLayout):
     """Bottom navigation tab item with active pill background, vector icon, and spring bounce"""
 
-    def __init__(self, icon_type, title_text, is_active=False, pill_color=(0.28, 0.305, 0.34, 1), text_color=(1, 1, 1, 1), **kwargs):
+    def __init__(self, icon_type, title_text, is_active=False, pill_color=(0.29, 0.32, 0.36, 1), text_color=(1, 1, 1, 1), **kwargs):
         super().__init__(orientation="vertical", spacing=dp(2), padding=[dp(4), dp(4), dp(4), dp(4)], **kwargs)
         self.always_release = True
         self.is_active = is_active
@@ -658,10 +731,10 @@ class NavTabItem(ButtonBehavior, BoxLayout):
         self.pill_wrap = AnchorLayout(size_hint=(1, 0.58))
         self.pill_bg = RoundedCard(
             bg_color=pill_color if is_active else (0, 0, 0, 0),
-            border_color=(0.40, 0.43, 0.48, 0.45) if is_active else (0, 0, 0, 0),
+            border_color=(0.44, 0.48, 0.54, 0.50) if is_active else (0, 0, 0, 0),
             radius=dp(15),
             size_hint=(None, None),
-            size=(dp(62), dp(30)),
+            size=(dp(64), dp(30)),
         )
         self.icon_widget = VectorIcon(icon_type=icon_type, color=text_color, size_hint=(1, 1))
         self.pill_bg.add_widget(self.icon_widget)
@@ -690,24 +763,10 @@ class NavTabItem(ButtonBehavior, BoxLayout):
 
     def set_active_style(self, is_active, pill_color, text_color):
         self.is_active = is_active
-        border_c = (0.42, 0.45, 0.50, 0.45) if is_active else (0, 0, 0, 0)
+        border_c = (0.44, 0.48, 0.54, 0.50) if is_active else (0, 0, 0, 0)
         self.pill_bg.update_colors(pill_color if is_active else (0, 0, 0, 0), border_c)
         self.icon_widget.set_color(text_color)
         self.label.color = text_color
-
-
-class RadarCenterButton(ButtonBehavior, BoxLayout):
-    """Clickable center area of the Radar Card with subtle press feedback"""
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.always_release = True
-
-    def on_press(self):
-        self.opacity = 0.78
-
-    def on_release(self):
-        self.opacity = 1.0
 
 
 class MacModalContainer(FloatLayout):
@@ -715,11 +774,12 @@ class MacModalContainer(FloatLayout):
 
     scrim_alpha = NumericProperty(0.0)
 
-    def __init__(self, card_widget, origin_pos=None, scrim_rgba=(0, 0, 0, 0.52), **kwargs):
+    def __init__(self, card_widget, origin_pos=None, scrim_rgba=(0, 0, 0, 0.56), on_dismiss_cb=None, **kwargs):
         super().__init__(size_hint=(1, 1), pos_hint={"x": 0, "y": 0}, **kwargs)
         self.card = card_widget
         self.origin_pos = origin_pos
         self.scrim_rgba = scrim_rgba
+        self.on_dismiss_cb = on_dismiss_cb
         self.is_closing = False
 
         with self.canvas.before:
@@ -765,6 +825,9 @@ class MacModalContainer(FloatLayout):
         if self.is_closing:
             return
         self.is_closing = True
+        if callable(self.on_dismiss_cb):
+            self.on_dismiss_cb()
+
         cx, cy = Window.width * 0.5, Window.height * 0.5
         if self.origin_pos:
             ox, oy = self.origin_pos
@@ -809,19 +872,21 @@ class MacModalContainer(FloatLayout):
 class AirShareApp(App):
     server = None
     is_stopping = False
-    connected_pc_title = "Desktop PC"
-    connected_pc_os = "Windows 11"
-    active_folder_key = "Downloads"
+    has_server_error = False
+    active_folder_key = "All Storage"
+    active_nav_tab = "transfer"
+    keep_alive_locked = True
+    _wake_lock = None
     transfer_history = []
     active_modal = None
 
     def _get_folder_map(self):
         base = STORAGE_PATH if os.path.isdir(STORAGE_PATH) else os.path.expanduser("~")
         return {
-            "All Storage": base,
-            "Downloads": os.path.join(base, "Download"),
-            "Camera Roll": os.path.join(base, "DCIM"),
-            "Documents": os.path.join(base, "Documents"),
+            "All Storage": (base, "folder", "Вся память устройства"),
+            "Downloads": (os.path.join(base, "Download"), "download", "Загрузки из браузера и мессенджеров"),
+            "Camera Roll": (os.path.join(base, "DCIM"), "gallery", "Фотографии и видео с камеры"),
+            "Documents": (os.path.join(base, "Documents"), "document", "Документы и рабочие файлы"),
         }
 
     def get_connection_url(self):
@@ -835,10 +900,43 @@ class AirShareApp(App):
     def update_connection_url_display(self):
         url = self.get_connection_url()
         self.addr_label.text = url
-        if "@" in url:
+        length = len(url)
+        if length > 38:
+            self.addr_label.font_size = sp(10.5)
+        elif length > 30:
             self.addr_label.font_size = sp(11.5)
         else:
-            self.addr_label.font_size = sp(13)
+            self.addr_label.font_size = sp(13.5)
+
+    def set_keep_alive(self, enabled):
+        """Enable or disable background wake lock so server stays active when phone screen is locked"""
+        self.keep_alive_locked = bool(enabled)
+        self.keep_alive_switch.set_active(self.keep_alive_locked, animate=True)
+        try:
+            Window.allow_screensaver = not self.keep_alive_locked
+        except Exception:
+            pass
+
+        try:
+            from kivy.utils import platform
+            if platform == "android":
+                from jnius import autoclass
+                PythonActivity = autoclass("org.kivy.android.PythonActivity")
+                Context = autoclass("android.content.Context")
+                PowerManager = autoclass("android.os.PowerManager")
+                activity = PythonActivity.mActivity
+                if activity is not None:
+                    if self.keep_alive_locked:
+                        if self._wake_lock is None:
+                            pm = activity.getSystemService(Context.POWER_SERVICE)
+                            self._wake_lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AirSharePC::ServerWakeLock")
+                        if not self._wake_lock.isHeld():
+                            self._wake_lock.acquire()
+                    else:
+                        if self._wake_lock is not None and self._wake_lock.isHeld():
+                            self._wake_lock.release()
+        except Exception:
+            pass
 
     def build(self):
         self.title = f"{APP_NAME} v{APP_VERSION}"
@@ -854,27 +952,42 @@ class AirShareApp(App):
         self.root_widget = FloatLayout()
 
         # =====================================================================
-        # ГЛАВНЫЙ ЭКРАН (Точное соответствие 1000250791.jpg, без верхней шестерёнки)
+        # ГЛАВНЫЙ ЭКРАН (Без Shared Folders, с индикатором статуса и кнопкой Connect/Disconnect)
         # =====================================================================
         self.main_content = BoxLayout(
             orientation="vertical",
             padding=[dp(18), dp(14), dp(18), dp(16)],
-            spacing=dp(12),
+            spacing=dp(14),
         )
 
-        # 1. Верхняя шапка: слева имя смартфона, справа капсула Wi-Fi 6 • 5GHz (без лишней шестерёнки)
+        # 1. Верхняя шапка: Имя устройства + Индикатор (Зелёный/Красный/Жёлтый) слева, Wi-Fi справа
         header = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(42), spacing=dp(8))
+        name_box = BoxLayout(orientation="horizontal", size_hint=(0.58, 1), spacing=dp(8))
+
+        self.status_dot = StatusDot(
+            dot_color=p["red"],
+            size_hint=(None, None),
+            size=(dp(18), dp(18)),
+            pos_hint={"center_y": 0.5},
+        )
+
+        dev_name = get_device_info()
         self.device_label = Label(
-            text=f"[b]{get_device_info()}[/b]",
+            text=f"[b]{dev_name}[/b]",
             markup=True,
-            font_size=sp(22),
+            font_size=sp(20) if len(dev_name) <= 14 else sp(16.5),
             halign="left",
             valign="middle",
-            size_hint=(0.56, 1),
+            shorten=True,
+            shorten_from="right",
+            size_hint=(1, 1),
         )
         self.device_label.bind(size=lambda i, v: setattr(i, "text_size", v))
 
-        wifi_anchor = AnchorLayout(anchor_x="right", anchor_y="center", size_hint=(0.44, 1))
+        name_box.add_widget(self.status_dot)
+        name_box.add_widget(self.device_label)
+
+        wifi_anchor = AnchorLayout(anchor_x="right", anchor_y="center", size_hint=(0.42, 1))
         self.wifi_pill = ClickableCard(
             bg_color=p["pill_bg"],
             border_color=p["card_border"],
@@ -892,170 +1005,126 @@ class AirShareApp(App):
         self.wifi_pill.bind(on_press=self.refresh_network_status)
         wifi_anchor.add_widget(self.wifi_pill)
 
-        header.add_widget(self.device_label)
+        header.add_widget(name_box)
         header.add_widget(wifi_anchor)
         self.main_content.add_widget(header)
 
-        # 2. Карточка радара (Radar Card с мягким свечением и 4 концентрическими кольцами)
+        # 2. Главная карточка радара: Иконка ПК + Кнопка Connect/Disconnect + Ползунок блокировки + URL
         self.radar_card = RadarCard(
             bg_color=p["radar_bg"],
             border_color=p["card_border"],
             ring_color=p["radar_ring"],
             glow_color=p["radar_glow"],
             orientation="vertical",
-            padding=[dp(16), dp(18), dp(16), dp(14)],
-            spacing=dp(4),
-            size_hint=(1, 0.36),
+            padding=[dp(16), dp(20), dp(16), dp(16)],
+            spacing=dp(10),
+            size_hint=(1, 0.54),
         )
 
-        self.radar_top_btn = RadarCenterButton(orientation="vertical", size_hint=(1, 0.75), spacing=dp(2))
-        self.radar_top_btn.bind(on_press=self.toggle_server)
-
-        icon_holder = AnchorLayout(size_hint=(1, 0.48))
-        self.monitor_icon = VectorIcon(icon_type="pc", color=p["text"], size_hint=(None, None), size=(dp(62), dp(50)))
+        # Иконка монитора в центре колец радара
+        icon_holder = AnchorLayout(size_hint=(1, 0.30))
+        self.monitor_icon = VectorIcon(icon_type="pc", color=p["text"], size_hint=(None, None), size=(dp(68), dp(54)))
         icon_holder.add_widget(self.monitor_icon)
 
-        pc_row_anchor = AnchorLayout(size_hint=(1, 0.28))
-        pc_row = BoxLayout(orientation="horizontal", size_hint=(None, None), size=(dp(216), dp(28)), spacing=dp(8))
-        self.pc_title_label = Label(
-            text=f"[b]{self.connected_pc_title}[/b]",
-            markup=True,
-            font_size=sp(18.5),
-            halign="right",
-            valign="middle",
-            size_hint=(0.58, 1),
+        # Крупная кнопка Connect (зелёная) / Disconnect (красная) с плавной анимацией
+        btn_anchor = AnchorLayout(size_hint=(1, 0.24))
+        self.connect_btn = RoundedActionButton(
+            text="Connect",
+            bg_color=p["green"],
+            border_color=(1, 1, 1, 0.18),
+            text_color=(1, 1, 1, 1),
+            font_size=sp(17),
+            radius=dp(23),
+            size_hint=(None, None),
+            size=(dp(190), dp(46)),
         )
-        self.pc_title_label.bind(size=lambda i, v: setattr(i, "text_size", v))
+        self.connect_btn.bind(on_press=self.toggle_server)
+        btn_anchor.add_widget(self.connect_btn)
 
-        self.os_badge_card = RoundedCard(
+        # Ползунок «Активен при заблокированном экране» под кнопкой Connect/Disconnect
+        keep_alive_anchor = AnchorLayout(size_hint=(1, 0.20))
+        self.keep_alive_row = ClickableCard(
             bg_color=p["pill_bg"],
             border_color=p["card_border"],
-            radius=dp(6),
-            size_hint=(0.42, None),
-            height=dp(22),
+            radius=dp(16),
+            orientation="horizontal",
+            size_hint=(0.92, None),
+            height=dp(40),
+            padding=[dp(14), dp(6), dp(12), dp(6)],
+            spacing=dp(10),
+        )
+        self.keep_alive_label = Label(
+            text="Активен при заблокированном экране",
+            font_size=sp(12),
+            halign="left",
+            valign="middle",
+            size_hint=(1, 1),
+        )
+        self.keep_alive_label.bind(size=lambda i, v: setattr(i, "text_size", v))
+
+        self.keep_alive_switch = AnimatedToggleSwitch(
+            active=self.keep_alive_locked,
+            size_hint=(None, None),
+            size=(dp(48), dp(26)),
             pos_hint={"center_y": 0.5},
-            padding=[dp(6), dp(2), dp(6), dp(2)],
         )
-        self.os_badge_label = Label(text=self.connected_pc_os, font_size=sp(10.5), halign="center", valign="middle")
-        self.os_badge_card.add_widget(self.os_badge_label)
+        self.keep_alive_switch.bind(on_press=lambda *_: self.set_keep_alive(not self.keep_alive_locked))
+        self.keep_alive_row.bind(on_press=lambda *_: self.set_keep_alive(not self.keep_alive_locked))
 
-        pc_row.add_widget(self.pc_title_label)
-        pc_row.add_widget(self.os_badge_card)
-        pc_row_anchor.add_widget(pc_row)
+        self.keep_alive_row.add_widget(self.keep_alive_label)
+        self.keep_alive_row.add_widget(self.keep_alive_switch)
+        keep_alive_anchor.add_widget(self.keep_alive_row)
 
-        self.speed_label = Label(
-            text="850 Mbps",
-            font_size=sp(13.5),
-            halign="center",
-            valign="top",
-            size_hint=(1, 0.24),
+        # Нижняя капсула с адресом (адаптивная ширина + авто-размер шрифта без вылезания за края)
+        addr_row = BoxLayout(
+            orientation="horizontal",
+            size_hint=(1, 0.22),
+            spacing=dp(8),
+            padding=[dp(4), dp(2), dp(4), dp(2)],
         )
-        self.speed_label.bind(size=lambda i, v: setattr(i, "text_size", v))
-
-        self.radar_top_btn.add_widget(icon_holder)
-        self.radar_top_btn.add_widget(pc_row_anchor)
-        self.radar_top_btn.add_widget(self.speed_label)
-
-        # Нижняя капсула с адресом строго по центру и кнопка копирования справа
-        addr_row = FloatLayout(size_hint=(1, 0.25))
         self.addr_pill = ClickableCard(
             bg_color=p["pill_bg"],
             border_color=p["card_border"],
-            radius=dp(18),
-            size_hint=(0.74, None),
-            height=dp(36),
-            pos_hint={"center_x": 0.48, "center_y": 0.5},
+            radius=dp(19),
+            size_hint=(1, None),
+            height=dp(40),
+            pos_hint={"center_y": 0.5},
+            padding=[dp(12), dp(4), dp(12), dp(4)],
         )
         self.addr_label = Label(
-            text=self.get_connection_url(),
-            font_size=sp(11.5) if "@" in self.get_connection_url() else sp(13),
+            text="",
+            font_size=sp(12),
             halign="center",
             valign="middle",
+            shorten=True,
+            shorten_from="center",
         )
+        self.addr_label.bind(size=lambda i, v: setattr(i, "text_size", v))
         self.addr_pill.add_widget(self.addr_label)
         self.addr_pill.bind(on_press=self.copy_address)
 
-        self.copy_btn = VectorIconButton(
-            icon_type="copy",
-            color=p["subtext"],
+        self.copy_btn = ClickableCard(
+            bg_color=p["pill_bg"],
+            border_color=p["card_border"],
+            radius=dp(14),
             size_hint=(None, None),
-            size=(dp(36), dp(36)),
-            pos_hint={"right": 0.98, "center_y": 0.5},
+            size=(dp(40), dp(40)),
+            pos_hint={"center_y": 0.5},
         )
+        self.copy_icon = VectorIcon(icon_type="copy", color=p["text"], size_hint=(1, 1))
+        self.copy_btn.add_widget(self.copy_icon)
         self.copy_btn.bind(on_press=self.copy_address)
 
         addr_row.add_widget(self.addr_pill)
         addr_row.add_widget(self.copy_btn)
 
-        self.radar_card.add_widget(self.radar_top_btn)
+        self.radar_card.add_widget(icon_holder)
+        self.radar_card.add_widget(btn_anchor)
+        self.radar_card.add_widget(keep_alive_anchor)
         self.radar_card.add_widget(addr_row)
         self.main_content.add_widget(self.radar_card)
 
-        # 3. Заголовок и 3 карточки Shared Folders (Downloads, Camera Roll, Documents)
-        self.folders_header = Label(
-            text="[b]Shared Folders[/b]",
-            markup=True,
-            font_size=sp(16),
-            halign="left",
-            valign="middle",
-            size_hint=(1, None),
-            height=dp(24),
-        )
-        self.folders_header.bind(size=lambda i, v: setattr(i, "text_size", v))
-        self.main_content.add_widget(self.folders_header)
-
-        folders_grid = GridLayout(cols=3, spacing=dp(10), size_hint=(1, 0.19))
-        self.folder_cards = []
-        folder_specs = [
-            ("Downloads", "download", 0.42),
-            ("Camera Roll", "gallery", 0.38),
-            ("Documents", "document", 0.28),
-        ]
-        for title_txt, icon_kind, prog in folder_specs:
-            card = ClickableCard(
-                bg_color=p["card_bg"],
-                border_color=p["card_border"],
-                radius=dp(18),
-                orientation="vertical",
-                padding=[dp(12), dp(10), dp(12), dp(10)],
-                spacing=dp(4),
-            )
-            lbl_top = Label(
-                text=title_txt,
-                font_size=sp(12.5),
-                halign="left",
-                valign="middle",
-                size_hint=(1, None),
-                height=dp(18),
-            )
-            lbl_top.bind(size=lambda i, v: setattr(i, "text_size", v))
-
-            ico_wrap = AnchorLayout(size_hint=(1, 1))
-            ico_wid = VectorIcon(
-                icon_type=icon_kind,
-                color=p["amber"] if icon_kind == "download" else p["text"],
-                size_hint=(None, None),
-                size=(dp(56), dp(46)),
-            )
-            ico_wrap.add_widget(ico_wid)
-
-            bar = SlimProgressBar(
-                percent=prog,
-                track_color=p["track"],
-                fill_color=p["amber"] if title_txt == self.active_folder_key else p["silver_bar"],
-                size_hint=(1, None),
-                height=dp(4.5),
-            )
-            card.add_widget(lbl_top)
-            card.add_widget(ico_wrap)
-            card.add_widget(bar)
-            card.bind(on_press=lambda inst, folder_name=title_txt: self.on_folder_card_pressed(folder_name, inst))
-            folders_grid.add_widget(card)
-            self.folder_cards.append((card, lbl_top, ico_wid, bar, icon_kind, title_txt))
-
-        self.main_content.add_widget(folders_grid)
-
-        # 4. Заголовок и карточка Recent Transfers
+        # 3. Заголовок и карточка Recent Transfers
         self.transfers_header = Label(
             text="[b]Recent Transfers[/b]",
             markup=True,
@@ -1075,7 +1144,7 @@ class AirShareApp(App):
             orientation="vertical",
             padding=[dp(14), dp(12), dp(14), dp(12)],
             spacing=dp(10),
-            size_hint=(1, 0.21),
+            size_hint=(1, 0.28),
         )
         self.transfers_card.bind(on_press=self.open_transfers_modal)
 
@@ -1112,682 +1181,4 @@ class AirShareApp(App):
         self.tr2_sub = Label(text="45 MB/s", font_size=sp(11.5), halign="right", valign="middle", size_hint=(1, None), height=dp(16))
         self.tr2_sub.bind(size=lambda i, v: setattr(i, "text_size", v))
         info2.add_widget(top2)
-        info2.add_widget(self.tr2_bar)
-        info2.add_widget(self.tr2_sub)
-        row2.add_widget(ico2)
-        row2.add_widget(info2)
-
-        self.transfers_card.add_widget(row1)
-        self.transfers_card.add_widget(row2)
-        self.main_content.add_widget(self.transfers_card)
-
-        # 5. Нижняя навигационная панель (Transfer, Files, Devices, Settings)
-        self.bottom_nav = RoundedCard(
-            bg_color=p["card_bg"],
-            border_color=p["card_border"],
-            radius=dp(26),
-            orientation="horizontal",
-            padding=[dp(10), dp(6), dp(10), dp(6)],
-            spacing=dp(4),
-            size_hint=(1, None),
-            height=dp(64),
-        )
-
-        self.nav_transfer = NavTabItem("transfer", "Transfer", is_active=True, pill_color=p["pill_active"], text_color=p["text"])
-        self.nav_transfer.bind(on_press=self.toggle_server)
-
-        self.nav_files = NavTabItem("folder", "Files", is_active=False, pill_color=p["pill_active"], text_color=p["subtext"])
-        self.nav_files.bind(on_press=self.open_shared_folders_modal)
-
-        self.nav_devices = NavTabItem("phone", "Devices", is_active=False, pill_color=p["pill_active"], text_color=p["subtext"])
-        self.nav_devices.bind(on_press=self.open_devices_modal)
-
-        self.nav_settings = NavTabItem("gear", "Settings", is_active=False, pill_color=p["pill_active"], text_color=p["subtext"])
-        self.nav_settings.bind(on_press=self.toggle_drawer)
-
-        self.bottom_nav.add_widget(self.nav_transfer)
-        self.bottom_nav.add_widget(self.nav_files)
-        self.bottom_nav.add_widget(self.nav_devices)
-        self.bottom_nav.add_widget(self.nav_settings)
-        self.main_content.add_widget(self.bottom_nav)
-
-        self.root_widget.add_widget(self.main_content)
-
-        # =====================================================================
-        # ПАРЯЩАЯ БОКОВАЯ ШТОРКА (1000250792.jpg с матовым полупрозрачным стеклом)
-        # =====================================================================
-        self.overlay = DrawerOverlay(close_callback=self.close_drawer, size_hint=(1, 1), pos_hint={"x": 0, "y": 0})
-        self.root_widget.add_widget(self.overlay)
-
-        self.drawer_width = dp(285)
-        self.drawer = DrawerPanel(
-            bg_color=p["drawer_bg"],
-            border_color=p["drawer_border"],
-            radius=dp(26),
-            orientation="vertical",
-            padding=[dp(20), dp(22), dp(20), dp(18)],
-            spacing=dp(14),
-            size_hint=(None, None),
-            width=self.drawer_width,
-            height=Window.height - dp(48),
-            pos=(-self.drawer_width - dp(40), dp(24)),
-        )
-        self.drawer.opacity = 0.0
-        Window.bind(size=self._on_window_resize)
-
-        self.drawer_title = Label(
-            text=f"[b]{APP_NAME}[/b]",
-            markup=True,
-            font_size=sp(23),
-            halign="left",
-            valign="middle",
-            size_hint=(1, None),
-            height=dp(32),
-        )
-        self.drawer_title.bind(size=lambda i, v: setattr(i, "text_size", v))
-        self.drawer.add_widget(self.drawer_title)
-
-        phone_row = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(30), spacing=dp(10))
-        self.drawer_phone_icon = VectorIcon(icon_type="phone", color=p["subtext"], size_hint=(None, 1), width=dp(22))
-        self.drawer_phone_label = Label(
-            text=get_device_info(),
-            font_size=sp(15),
-            halign="left",
-            valign="middle",
-        )
-        self.drawer_phone_label.bind(size=lambda i, v: setattr(i, "text_size", v))
-        phone_row.add_widget(self.drawer_phone_icon)
-        phone_row.add_widget(self.drawer_phone_label)
-        self.drawer.add_widget(phone_row)
-
-        stats = get_storage_stats()
-        self.drawer_storage_card = ClickableCard(
-            bg_color=p["drawer_card"],
-            border_color=p["drawer_border"],
-            radius=dp(15),
-            orientation="vertical",
-            padding=[dp(14), dp(10), dp(14), dp(12)],
-            spacing=dp(8),
-            size_hint=(1, None),
-            height=dp(64),
-        )
-        self.drawer_storage_label = Label(
-            text=f"Storage: [b]{stats['used_gb']} GB[/b] / {stats['total_gb']:.0f} GB",
-            markup=True,
-            font_size=sp(13),
-            halign="left",
-            valign="middle",
-            size_hint=(1, None),
-            height=dp(20),
-        )
-        self.drawer_storage_label.bind(size=lambda i, v: setattr(i, "text_size", v))
-        self.drawer_storage_bar = SlimProgressBar(
-            percent=stats["percent"],
-            track_color=p["pill_bg"],
-            fill_color=p["text"],
-            size_hint=(1, None),
-            height=dp(5),
-        )
-        self.drawer_storage_card.add_widget(self.drawer_storage_label)
-        self.drawer_storage_card.add_widget(self.drawer_storage_bar)
-        self.drawer_storage_card.bind(on_press=self.open_shared_folders_modal)
-        self.drawer.add_widget(self.drawer_storage_card)
-
-        self.drawer_pc_card = ClickableCard(
-            bg_color=p["drawer_card"],
-            border_color=p["drawer_border"],
-            radius=dp(15),
-            orientation="horizontal",
-            padding=[dp(14), dp(10), dp(14), dp(10)],
-            spacing=dp(12),
-            size_hint=(1, None),
-            height=dp(68),
-        )
-        self.drawer_pc_icon = VectorIcon(icon_type="pc", color=p["text"], size_hint=(None, 1), width=dp(32))
-        self.drawer_pc_label = Label(
-            text=f"[b]{self.connected_pc_title}[/b]\n[size={int(sp(12))}]{self.connected_pc_os}[/size]",
-            markup=True,
-            font_size=sp(15),
-            halign="left",
-            valign="middle",
-            size_hint=(1, 1),
-        )
-        self.drawer_pc_label.bind(size=lambda i, v: setattr(i, "text_size", v))
-        self.drawer_pc_card.add_widget(self.drawer_pc_icon)
-        self.drawer_pc_card.add_widget(self.drawer_pc_label)
-        self.drawer_pc_card.bind(on_press=self.open_devices_modal)
-        self.drawer.add_widget(self.drawer_pc_card)
-
-        menu_box = BoxLayout(orientation="vertical", spacing=dp(4), size_hint=(1, 1))
-        self.menu_items_refs = []
-        menu_rows = [
-            ("folder", "Shared Folders", self.open_shared_folders_modal),
-            ("lock", "Security & PIN", self.open_security_modal),
-            ("sliders", "Port Settings", self.open_port_modal),
-            ("info", "Help & Feedback", self.open_help_modal),
-        ]
-        for ico_name, label_text, callback in menu_rows:
-            row = DrawerMenuRow(
-                icon_name=ico_name,
-                label_text=label_text,
-                text_color=p["text"],
-                sub_color=p["subtext"],
-                highlight_rgba=p["pill_bg"],
-            )
-            row.bind(on_press=callback)
-            menu_box.add_widget(row)
-            self.menu_items_refs.append(row)
-
-        self.drawer.add_widget(menu_box)
-
-        self.theme_pill_container = RoundedCard(
-            bg_color=p["drawer_card"],
-            border_color=p["drawer_border"],
-            radius=dp(20),
-            orientation="horizontal",
-            padding=dp(4),
-            spacing=dp(4),
-            size_hint=(1, None),
-            height=dp(44),
-        )
-        self.t_btn_dark = Button(text="Dark", font_size=sp(13), background_normal="")
-        self.t_btn_dark.bind(on_press=lambda *_: self.set_theme_mode("dark"))
-        self.t_btn_light = Button(text="Light", font_size=sp(13), background_normal="")
-        self.t_btn_light.bind(on_press=lambda *_: self.set_theme_mode("light"))
-        self.t_btn_auto = Button(text="Auto", font_size=sp(13), background_normal="")
-        self.t_btn_auto.bind(on_press=lambda *_: self.set_theme_mode("system"))
-
-        self.theme_pill_container.add_widget(self.t_btn_dark)
-        self.theme_pill_container.add_widget(self.t_btn_light)
-        self.theme_pill_container.add_widget(self.t_btn_auto)
-        self.drawer.add_widget(self.theme_pill_container)
-
-        self.root_widget.add_widget(self.drawer)
-
-        DynamicAirShareHandler.on_client_connected = self._on_client_connected
-        DynamicAirShareHandler.on_file_transfer = self._on_file_transfer
-        self.apply_theme()
-
-        Clock.schedule_once(lambda _dt: self.start_server_if_needed(), 0.25)
-        return self.root_widget
-
-    def start_server_if_needed(self):
-        if self.server is None and not self.is_stopping:
-            self.toggle_server()
-
-    def _on_window_resize(self, *_args):
-        self.drawer.height = Window.height - dp(48)
-
-    def refresh_network_status(self, *_args):
-        self.update_connection_url_display()
-        ip = get_local_ip()
-        self.wifi_label.text = f"Wi-Fi • {ip}"
-        Clock.schedule_once(lambda _dt: setattr(self.wifi_label, "text", "Wi-Fi 6 • 5GHz"), 2.0)
-
-    def toggle_drawer(self, *_args):
-        if not self.drawer.is_open:
-            self.open_drawer()
-        else:
-            self.close_drawer()
-
-    def open_drawer(self, *_args):
-        self.drawer.is_open = True
-        self.overlay.is_open = True
-        stats = get_storage_stats()
-        self.drawer_storage_label.text = f"Storage: [b]{stats['used_gb']} GB[/b] / {stats['total_gb']:.0f} GB"
-        self.drawer_storage_bar.set_percent(stats["percent"])
-        eff = self._get_effective_theme()
-        palette = THEMES.get(eff, THEMES["dark"])
-        self.overlay.animate_to(palette["overlay"], duration=0.32)
-
-        Animation.cancel_all(self.drawer)
-        self.drawer.scale_val = 0.96
-        Animation(
-            x=dp(16),
-            scale_val=1.0,
-            opacity=1.0,
-            duration=0.32,
-            t="out_cubic",
-        ).start(self.drawer)
-
-    def close_drawer(self, *_args):
-        if not self.drawer.is_open:
-            return
-        self.drawer.is_open = False
-        self.overlay.is_open = False
-        self.overlay.animate_to((0, 0, 0, 0), duration=0.25)
-        Animation.cancel_all(self.drawer)
-        Animation(
-            x=-self.drawer_width - dp(35),
-            scale_val=0.96,
-            opacity=0.0,
-            duration=0.26,
-            t="out_cubic",
-        ).start(self.drawer)
-
-    def _get_effective_theme(self):
-        if self.theme_mode == "system":
-            return get_device_theme()
-        return self.theme_mode
-
-    def set_theme_mode(self, mode):
-        self.theme_mode = mode
-        save_settings(theme_mode=mode)
-        self.apply_theme()
-
-    def apply_theme(self):
-        eff = self._get_effective_theme()
-        p = THEMES.get(eff, THEMES["dark"])
-        DynamicAirShareHandler.default_theme = eff
-
-        Window.clearcolor = p["bg"]
-        self.device_label.color = p["text"]
-        self.wifi_pill.update_colors(p["pill_bg"], p["card_border"])
-        self.wifi_icon.set_color(p["text"])
-        self.wifi_label.color = p["text"]
-
-        self.radar_card.update_radar_colors(p["radar_bg"], p["card_border"], p["radar_ring"], p["radar_glow"])
-        self.monitor_icon.set_color(p["text"])
-        self.pc_title_label.color = p["text"]
-        self.os_badge_card.update_colors(p["pill_bg"], p["card_border"])
-        self.os_badge_label.color = p["subtext"]
-        self.speed_label.color = p["subtext"]
-        self.addr_pill.update_colors(p["pill_bg"], p["card_border"])
-        self.addr_label.color = p["text"]
-        self.copy_btn.set_color(p["subtext"])
-
-        self.folders_header.color = p["text"]
-        for card, lbl_top, ico_wid, bar, icon_kind, title_txt in self.folder_cards:
-            is_sel = (title_txt == self.active_folder_key)
-            card.update_colors(p["card_bg"], p["card_border"])
-            lbl_top.color = p["text"]
-            ico_wid.set_color(p["amber"] if icon_kind == "download" else p["text"])
-            bar.update_bar_colors(p["track"], p["amber"] if is_sel else p["silver_bar"])
-
-        self.transfers_header.color = p["text"]
-        self.transfers_card.update_colors(p["card_bg"], p["card_border"])
-        self.tr1_name.color = p["text"]
-        self.tr1_pct.color = p["subtext"]
-        self.tr1_sub.color = p["subtext"]
-        self.tr1_bar.update_bar_colors(p["track"], p["amber"])
-        self.tr2_name.color = p["text"]
-        self.tr2_pct.color = p["subtext"]
-        self.tr2_sub.color = p["subtext"]
-        self.tr2_bar.update_bar_colors(p["track"], p["blue"])
-
-        self.bottom_nav.update_colors(p["card_bg"], p["card_border"])
-        self.nav_transfer.set_active_style(True, p["pill_active"], p["text"])
-        self.nav_files.set_active_style(False, p["pill_active"], p["subtext"])
-        self.nav_devices.set_active_style(False, p["pill_active"], p["subtext"])
-        self.nav_settings.set_active_style(False, p["pill_active"], p["subtext"])
-
-        self.drawer.update_colors(p["drawer_bg"], p["drawer_border"])
-        self.drawer_title.color = p["text"]
-        self.drawer_phone_icon.set_color(p["subtext"])
-        self.drawer_phone_label.color = p["text"]
-        self.drawer_storage_card.update_colors(p["drawer_card"], p["drawer_border"])
-        self.drawer_storage_label.color = p["text"]
-        self.drawer_storage_bar.update_bar_colors(p["pill_bg"], p["text"])
-        self.drawer_pc_card.update_colors(p["drawer_card"], p["drawer_border"])
-        self.drawer_pc_icon.set_color(p["text"])
-        self.drawer_pc_label.color = p["text"]
-
-        for row in self.menu_items_refs:
-            row.highlight_rgba = p["pill_bg"]
-            row.ico_w.set_color(p["subtext"])
-            row.lbl_w.color = p["text"]
-            row.chev_w.set_color(p["subtext"])
-
-        self.theme_pill_container.update_colors(p["drawer_card"], p["drawer_border"])
-        self.t_btn_dark.background_color = p["pill_active"] if self.theme_mode == "dark" else (0, 0, 0, 0)
-        self.t_btn_light.background_color = p["pill_active"] if self.theme_mode == "light" else (0, 0, 0, 0)
-        self.t_btn_auto.background_color = p["pill_active"] if self.theme_mode == "system" else (0, 0, 0, 0)
-        for tb in (self.t_btn_dark, self.t_btn_light, self.t_btn_auto):
-            tb.color = p["text"]
-
-    def on_folder_card_pressed(self, folder_name, card_inst=None):
-        folder_map = self._get_folder_map()
-        self.active_folder_key = folder_name
-        target_path = folder_map.get(folder_name, STORAGE_PATH)
-        if not os.path.isdir(target_path):
-            try:
-                os.makedirs(target_path, exist_ok=True)
-            except Exception:
-                target_path = STORAGE_PATH
-
-        DynamicAirShareHandler.active_storage_path = target_path
-        self.apply_theme()
-        self.open_shared_folders_modal(card_inst)
-
-    def copy_address(self, *_args):
-        url = self.get_connection_url()
-        try:
-            from kivy.core.clipboard import Clipboard
-            Clipboard.copy(url)
-        except Exception:
-            pass
-        self.addr_label.text = "Copied to clipboard!"
-        Clock.schedule_once(lambda _dt: self.update_connection_url_display(), 1.4)
-
-    def _on_client_connected(self, device_title, os_badge, ip):
-        def _upd(_dt):
-            self.connected_pc_title = device_title
-            self.connected_pc_os = os_badge
-            self.pc_title_label.text = f"[b]{device_title}[/b]"
-            self.os_badge_label.text = os_badge
-            self.speed_label.text = "850 Mbps"
-            self.drawer_pc_label.text = f"[b]{device_title}[/b]\n[size={int(sp(12))}]{os_badge} • {ip}[/size]"
-        Clock.schedule_once(_upd, 0)
-
-    def _on_file_transfer(self, filename, size_str, direction):
-        def _upd(_dt):
-            self.tr2_name.text = self.tr1_name.text
-            self.tr2_pct.text = self.tr1_pct.text
-            self.tr2_sub.text = self.tr1_sub.text
-            self.tr2_bar.set_percent(1.0)
-
-            self.tr1_name.text = filename
-            self.tr1_pct.text = "100%"
-            action_str = "Uploaded" if direction == "upload" else "Downloaded"
-            self.tr1_sub.text = f"{action_str} • {size_str}"
-            self.tr1_bar.set_percent(1.0)
-            self.transfer_history.insert(0, f"{filename} ({action_str} • {size_str})")
-        Clock.schedule_once(_upd, 0)
-
-    def toggle_server(self, *_args):
-        if self.is_stopping:
-            return
-
-        if self.server is None:
-            settings = load_settings()
-            self.saved_password = settings.get("password", "")
-            self.server_port = settings.get("port", SERVER_PORT)
-            DynamicAirShareHandler.current_password = self.saved_password
-            DynamicAirShareHandler.default_theme = self._get_effective_theme()
-
-            self.update_connection_url_display()
-
-            try:
-                self.server = ReusableThreadingServer(("", self.server_port), DynamicAirShareHandler)
-                threading.Thread(target=self.server.serve_forever, daemon=True).start()
-            except OSError as e:
-                self.server = None
-                self.speed_label.text = f"Port error: {e}"
-                return
-
-            self.speed_label.text = "850 Mbps"
-            self.apply_theme()
-        else:
-            self.is_stopping = True
-            srv = self.server
-            self.server = None
-            self.speed_label.text = "Stopping..."
-
-            def _stop():
-                try:
-                    srv.shutdown()
-                    srv.server_close()
-                except Exception:
-                    pass
-                Clock.schedule_once(self._on_server_stopped, 0)
-
-            threading.Thread(target=_stop, daemon=True).start()
-
-    def _on_server_stopped(self, _dt):
-        self.is_stopping = False
-        self.speed_label.text = "Paused • Tap to Start"
-        self.apply_theme()
-
-    # =====================================================================
-    # ПЛАВНЫЕ ОКНА В СТИЛЕ macOS ("ВУХ" ИЗ ТОЧКИ НАЖАТИЯ)
-    # =====================================================================
-    def _create_mac_modal(self, title_text, height_dp=250, source_widget=None):
-        origin = None
-        if source_widget is not None and hasattr(source_widget, "to_window"):
-            try:
-                origin = source_widget.to_window(source_widget.center_x, source_widget.center_y)
-            except Exception:
-                origin = None
-
-        self.close_drawer()
-        if self.active_modal is not None and self.active_modal.parent:
-            self.root_widget.remove_widget(self.active_modal)
-            self.active_modal = None
-
-        p = THEMES.get(self._get_effective_theme(), THEMES["dark"])
-        card = RoundedCard(
-            bg_color=p["drawer_bg"],
-            border_color=p["drawer_border"],
-            radius=dp(24),
-            orientation="vertical",
-            padding=dp(20),
-            spacing=dp(12),
-            size_hint=(0.88, None),
-            height=dp(height_dp),
-            pos_hint={"center_x": 0.5, "center_y": 0.5},
-        )
-        hdr = Label(
-            text=f"[b]{title_text}[/b]",
-            markup=True,
-            font_size=sp(17.5),
-            color=p["text"],
-            size_hint=(1, None),
-            height=dp(28),
-        )
-        card.add_widget(hdr)
-
-        modal = MacModalContainer(card_widget=card, origin_pos=origin, scrim_rgba=p["overlay"])
-        self.active_modal = modal
-        self.root_widget.add_widget(modal)
-        modal.animate_open()
-        return modal, card, p
-
-    def open_shared_folders_modal(self, source_widget=None, *_args):
-        modal, card, p = self._create_mac_modal("Shared Folders", height_dp=320, source_widget=source_widget)
-        folder_map = self._get_folder_map()
-        cur_path = DynamicAirShareHandler.active_storage_path
-
-        info_lbl = Label(
-            text=f"Активный раздел: [b]{self.active_folder_key}[/b]\n{cur_path}",
-            markup=True,
-            font_size=sp(12.5),
-            color=p["subtext"],
-            halign="center",
-            valign="middle",
-            size_hint=(1, None),
-            height=dp(40),
-        )
-        info_lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
-        card.add_widget(info_lbl)
-
-        grid = GridLayout(cols=2, spacing=dp(8), size_hint=(1, None), height=dp(96))
-        for key_name, path_val in folder_map.items():
-            is_cur = (key_name == self.active_folder_key)
-            btn = Button(
-                text=key_name,
-                font_size=sp(13.5),
-                background_normal="",
-                background_color=p["amber"] if is_cur else p["pill_bg"],
-                color=(1, 1, 1, 1) if is_cur else p["text"],
-            )
-
-            def _pick(_b, k=key_name, pv=path_val):
-                self.active_folder_key = k
-                if not os.path.isdir(pv):
-                    try:
-                        os.makedirs(pv, exist_ok=True)
-                    except Exception:
-                        pv = STORAGE_PATH
-                DynamicAirShareHandler.active_storage_path = pv
-                self.apply_theme()
-                modal.dismiss()
-
-            btn.bind(on_press=_pick)
-            grid.add_widget(btn)
-
-        card.add_widget(grid)
-
-        btn_ok = Button(
-            text="Готово",
-            font_size=sp(14),
-            size_hint=(1, None),
-            height=dp(42),
-            background_normal="",
-            background_color=p["blue"],
-            color=(1, 1, 1, 1),
-        )
-        btn_ok.bind(on_press=lambda *_: modal.dismiss())
-        card.add_widget(btn_ok)
-
-    def open_transfers_modal(self, source_widget=None, *_args):
-        modal, card, p = self._create_mac_modal("Recent Transfers", height_dp=270, source_widget=source_widget)
-        if self.transfer_history:
-            txt = "\n".join(f"• {x}" for x in self.transfer_history[:6])
-        else:
-            txt = (
-                f"• {self.tr1_name.text} ({self.tr1_sub.text})\n"
-                f"• {self.tr2_name.text} ({self.tr2_sub.text})\n\n"
-                "Переданные с ПК и скачанные файлы отображаются здесь."
-            )
-        lbl = Label(text=txt, font_size=sp(13), color=p["text"], halign="left", valign="top")
-        lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
-        card.add_widget(lbl)
-
-        btn_ok = Button(
-            text="Закрыть",
-            font_size=sp(14),
-            size_hint=(1, None),
-            height=dp(42),
-            background_normal="",
-            background_color=p["blue"],
-            color=(1, 1, 1, 1),
-        )
-        btn_ok.bind(on_press=lambda *_: modal.dismiss())
-        card.add_widget(btn_ok)
-
-    def open_security_modal(self, source_widget=None, *_args):
-        modal, card, p = self._create_mac_modal("Security & PIN", height_dp=240, source_widget=source_widget)
-        settings = load_settings()
-        inp = TextInput(
-            text=settings.get("password", ""),
-            hint_text="Введите PIN или пароль (пусто — без пароля)",
-            multiline=False,
-            size_hint=(1, None),
-            height=dp(44),
-            font_size=sp(15),
-            background_color=p["drawer_card"],
-            foreground_color=p["text"],
-            padding=[dp(12), dp(10), dp(12), dp(10)],
-        )
-        card.add_widget(inp)
-
-        btn_row = BoxLayout(orientation="horizontal", spacing=dp(10), size_hint=(1, None), height=dp(42))
-        btn_clear = Button(text="Без пароля", font_size=sp(14), background_normal="", background_color=p["pill_bg"], color=p["text"])
-        btn_save = Button(text="Сохранить PIN", font_size=sp(14), background_normal="", background_color=p["blue"], color=(1, 1, 1, 1))
-
-        def _save_pwd(_b):
-            new_pwd = inp.text.strip()
-            save_settings(password=new_pwd)
-            self.saved_password = new_pwd
-            DynamicAirShareHandler.current_password = new_pwd
-            self.update_connection_url_display()
-            modal.dismiss()
-
-        def _no_pwd(_b):
-            inp.text = ""
-            _save_pwd(_b)
-
-        btn_clear.bind(on_press=_no_pwd)
-        btn_save.bind(on_press=_save_pwd)
-        btn_row.add_widget(btn_clear)
-        btn_row.add_widget(btn_save)
-        card.add_widget(btn_row)
-
-    def open_port_modal(self, source_widget=None, *_args):
-        modal, card, p = self._create_mac_modal("Port Settings", height_dp=230, source_widget=source_widget)
-        inp = TextInput(
-            text=str(self.server_port),
-            hint_text="Порт HTTP-сервера (8080)",
-            input_filter="int",
-            multiline=False,
-            size_hint=(1, None),
-            height=dp(44),
-            font_size=sp(15),
-            background_color=p["drawer_card"],
-            foreground_color=p["text"],
-            padding=[dp(12), dp(10), dp(12), dp(10)],
-        )
-        card.add_widget(inp)
-
-        btn_save = Button(
-            text="Сохранить порт",
-            font_size=sp(14),
-            size_hint=(1, None),
-            height=dp(42),
-            background_normal="",
-            background_color=p["blue"],
-            color=(1, 1, 1, 1),
-        )
-
-        def _save_port(_b):
-            try:
-                val = int(inp.text.strip())
-                if 1024 <= val <= 65535:
-                    self.server_port = val
-                    save_settings(port=val)
-                    self.update_connection_url_display()
-                    if self.server is not None:
-                        self.toggle_server()
-                        Clock.schedule_once(lambda _dt: self.start_server_if_needed(), 0.4)
-            except Exception:
-                pass
-            modal.dismiss()
-
-        btn_save.bind(on_press=_save_port)
-        card.add_widget(btn_save)
-
-    def open_devices_modal(self, source_widget=None, *_args):
-        modal, card, p = self._create_mac_modal("Connected Devices (IP History)", height_dp=285, source_widget=source_widget)
-        ips = load_settings().get("recent_ips", [])
-        txt = "\n".join(f"• {x}" for x in ips[:6]) if ips else "Пока нет сохранённых подключений.\nОткройте адрес со смартфона в браузере на ПК."
-        lbl = Label(text=txt, font_size=sp(13.5), color=p["text"], halign="left", valign="top")
-        lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
-        card.add_widget(lbl)
-
-        btn_row = BoxLayout(orientation="horizontal", spacing=dp(10), size_hint=(1, None), height=dp(42))
-        btn_clr = Button(text="Очистить", font_size=sp(14), background_normal="", background_color=p["pill_bg"], color=p["text"])
-        btn_ok = Button(text="Закрыть", font_size=sp(14), background_normal="", background_color=p["blue"], color=(1, 1, 1, 1))
-
-        def _clear(_b):
-            save_settings(recent_ips=[])
-            lbl.text = "История очищена"
-
-        btn_clr.bind(on_press=_clear)
-        btn_ok.bind(on_press=lambda *_: modal.dismiss())
-        btn_row.add_widget(btn_clr)
-        btn_row.add_widget(btn_ok)
-        card.add_widget(btn_row)
-
-    def open_help_modal(self, source_widget=None, *_args):
-        modal, card, p = self._create_mac_modal("Help & Feedback", height_dp=255, source_widget=source_widget)
-        lbl = Label(
-            text=(
-                f"[b]{APP_NAME} v{APP_VERSION}[/b]\n\n"
-                "1. Сервер активен (нажатие по центру радара или «Transfer» ставит на паузу / запускает).\n"
-                "2. Откройте адрес со страницы в браузере на ПК в одной сети Wi-Fi.\n"
-                "3. Нажимайте на карточки папок для выбора раздела."
-            ),
-            markup=True,
-            font_size=sp(13),
-            color=p["text"],
-            halign="left",
-        )
-        lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
-        card.add_widget(lbl)
-        btn_ok = Button(text="Понятно", font_size=sp(14), size_hint=(1, None), height=dp(42), background_normal="", background_color=p["blue"], color=(1, 1, 1, 1))
-        btn_ok.bind(on_press=lambda *_: modal.dismiss())
-        card.add_widget(btn_ok)
-
-
-if __name__ == "__main__":
-    AirShareApp().run()
+        info2.add_
