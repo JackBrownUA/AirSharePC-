@@ -1,7 +1,5 @@
-       """
-HTTP server for AirShare PC
-Handles file serving, ZIP streaming, device detection, and transfer notifications
-"""
+# HTTP server for AirShare PC
+# Handles file serving, ZIP streaming, device detection, and transfer notifications
 
 import os
 import html
@@ -64,7 +62,6 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=self.real_storage, **kwargs)
 
     def _parse_client_device(self):
-        """Parse client IP and OS/Device name from User-Agent"""
         try:
             client_ip = self.client_address[0] if self.client_address else "127.0.0.1"
             if client_ip in ("127.0.0.1", "::1"):
@@ -456,4 +453,3 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             self.send_header("Set-Cookie", f"airshare_theme={theme}; Path=/; Max-Age=31536000; SameSite=Lax")
         self.end_headers()
         return BytesIO(encoded)
-               
