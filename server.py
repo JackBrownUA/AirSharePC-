@@ -1,6 +1,6 @@
-"""
+       """
 HTTP server for AirShare PC
-Handles file serving, ZIP creation, and file uploads
+Handles file serving, ZIP streaming, device detection, and transfer notifications
 """
 
 import os
@@ -19,8 +19,6 @@ from web_ui import get_css, get_star_script, get_upload_script, get_theme_script
 
 
 class _ZipStream:
-    """Streams ZIP directly to socket without loading into RAM"""
-
     def __init__(self, wfile):
         self.wfile = wfile
         self.offset = 0
@@ -46,7 +44,6 @@ class ReusableThreadingServer(ThreadingHTTPServer):
 
 
 def _make_content_disposition(filename):
-    """Build RFC 5987 Content-Disposition header safe for latin-1 HTTP headers"""
     clean_name = os.path.basename(filename).replace('"', "_").replace("\r", "").replace("\n", "")
     ascii_fallback = clean_name.encode("ascii", "ignore").decode("ascii").strip()
     if not ascii_fallback or ascii_fallback.startswith("."):
@@ -59,19 +56,55 @@ def _make_content_disposition(filename):
 class AirShareHandler(SimpleHTTPRequestHandler):
     current_password = ""
     default_theme = "dark"
-    on_client_ip = None
+    on_client_connected = None
+    on_file_transfer = None
 
     def __init__(self, *args, **kwargs):
         self.real_storage = os.path.realpath(STORAGE_PATH)
         super().__init__(*args, directory=self.real_storage, **kwargs)
 
-    def _record_client_ip(self):
+    def _parse_client_device(self):
+        """Parse client IP and OS/Device name from User-Agent"""
         try:
-            client_ip = self.client_address[0] if self.client_address else None
-            if client_ip and client_ip not in ("127.0.0.1", "::1"):
-                add_recent_ip(client_ip)
-                if callable(self.on_client_ip):
-                    self.on_client_ip(client_ip)
+            client_ip = self.client_address[0] if self.client_address else "127.0.0.1"
+            if client_ip in ("127.0.0.1", "::1"):
+                return
+            ua = self.headers.get("User-Agent", "")
+            device_title = "Desktop PC"
+            os_badge = "Windows 11"
+            if "Windows NT 10.0" in ua or "Windows NT 11.0" in ua:
+                device_title = "Desktop PC"
+                os_badge = "Windows 11"
+            elif "Windows" in ua:
+                device_title = "Desktop PC"
+                os_badge = "Windows"
+            elif "Macintosh" in ua or "Mac OS X" in ua:
+                device_title = "MacBook"
+                os_badge = "macOS"
+            elif "Android" in ua:
+                device_title = "Smartphone"
+                os_badge = "Android"
+            elif "iPhone" in ua or "iPad" in ua:
+                device_title = "iPhone / iPad"
+                os_badge = "iOS"
+            elif "Linux" in ua:
+                device_title = "Desktop PC"
+                os_badge = "Linux"
+            else:
+                device_title = "Connected Device"
+                os_badge = client_ip
+
+            entry = f"{device_title} ({os_badge}) • {client_ip}"
+            add_recent_ip(entry)
+            if callable(self.on_client_connected):
+                self.on_client_connected(device_title, os_badge, client_ip)
+        except Exception:
+            pass
+
+    def _notify_transfer(self, filename, size_bytes, direction="done"):
+        try:
+            if callable(self.on_file_transfer):
+                self.on_file_transfer(filename, format_size(size_bytes), direction)
         except Exception:
             pass
 
@@ -83,7 +116,6 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             return False
 
     def translate_path(self, path):
-        """Resolve URL path securely within STORAGE_PATH"""
         resolved = os.path.realpath(super().translate_path(path))
         if not self._is_within_storage(resolved):
             return self.real_storage
@@ -121,7 +153,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             return False
 
     def request_auth(self):
-        body = "<h3>Требуется авторизация (введите пароль в поле пароля или логина)</h3>".encode("utf-8")
+        body = "<h3>Требуется авторизация (AirShare PC)</h3>".encode("utf-8")
         self.send_response(401)
         self.send_header("WWW-Authenticate", 'Basic realm="AirShare PC"')
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -133,7 +165,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         if not self.is_authenticated():
             self.request_auth()
             return
-        self._record_client_ip()
+        self._parse_client_device()
         super().do_HEAD()
 
     def do_GET(self):
@@ -141,7 +173,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             self.request_auth()
             return
 
-        self._record_client_ip()
+        self._parse_client_device()
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
 
@@ -162,12 +194,11 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self):
-        """Receive files from PC/browser to phone/storage"""
         if not self.is_authenticated():
             self.request_auth()
             return
 
-        self._record_client_ip()
+        self._parse_client_device()
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
         raw_name = None
@@ -211,6 +242,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                         break
                     f.write(chunk)
                     remaining -= len(chunk)
+            self._notify_transfer(filename, length, "upload")
             resp = b"OK"
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -221,7 +253,6 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             self.send_error(500, str(e))
 
     def stream_single_file(self, current_url_path, target_name):
-        """Download a single file with Content-Disposition: attachment"""
         rel_dir = urllib.parse.unquote(current_url_path).lstrip("/")
         base_dir = os.path.realpath(os.path.join(self.real_storage, rel_dir))
         target_file = os.path.realpath(os.path.join(base_dir, urllib.parse.unquote(target_name)))
@@ -244,13 +275,13 @@ class AirShareHandler(SimpleHTTPRequestHandler):
 
             with open(target_file, "rb") as f:
                 shutil.copyfileobj(f, self.wfile, length=65536)
+            self._notify_transfer(os.path.basename(target_file), file_size, "download")
         except (BrokenPipeError, ConnectionResetError):
             pass
         except OSError as e:
             self.send_error(500, str(e))
 
     def stream_folder_zip(self, current_url_path, target_name):
-        """Download folder as ZIP archive"""
         rel_dir = urllib.parse.unquote(current_url_path).lstrip("/")
         base_dir = os.path.realpath(os.path.join(self.real_storage, rel_dir))
         target_dir = os.path.realpath(os.path.join(base_dir, urllib.parse.unquote(target_name)))
@@ -280,11 +311,11 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                             zf.write(full_path, arcname=rel_path)
                         except OSError:
                             continue
+            self._notify_transfer(f"{folder_basename}.zip", stream.tell(), "download")
         except (BrokenPipeError, ConnectionResetError):
             pass
 
     def download_selected_files(self, files):
-        """Download selected files and folders as ZIP"""
         self.send_response(200)
         self.send_header("Content-Type", "application/zip")
         self.send_header("Content-Disposition", _make_content_disposition("selected_files.zip"))
@@ -314,11 +345,11 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                                     zf.write(fp, arcname=os.path.relpath(fp, parent_dir))
                                 except OSError:
                                     continue
+            self._notify_transfer("selected_files.zip", stream.tell(), "download")
         except (BrokenPipeError, ConnectionResetError):
             pass
 
     def list_directory(self, path):
-        """Display file list with theme support and instant directory scan"""
         real_path = os.path.realpath(path)
         if not self._is_within_storage(real_path):
             self.send_error(403, "Forbidden")
@@ -425,3 +456,4 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             self.send_header("Set-Cookie", f"airshare_theme={theme}; Path=/; Max-Age=31536000; SameSite=Lax")
         self.end_headers()
         return BytesIO(encoded)
+               
