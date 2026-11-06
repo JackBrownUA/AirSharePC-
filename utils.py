@@ -5,7 +5,7 @@ Helper functions for AirShare PC
 import os
 import json
 import socket
-from config import DEFAULT_PASSWORD, MAX_RECENT_IPS, SETTINGS_FILE
+from config import DEFAULT_PASSWORD, MAX_RECENT_IPS, SETTINGS_FILE, STORAGE_PATH
 
 
 def get_local_ip():
@@ -34,12 +34,71 @@ def format_size(size):
     return f"{size:.1f} PB"
 
 
+def get_device_info():
+    """Detect real Android device name/model or OS hostname"""
+    try:
+        from kivy.utils import platform
+    except Exception:
+        platform = "unknown"
+
+    if platform == "android":
+        try:
+            from jnius import autoclass
+            Build = autoclass("android.os.Build")
+            manufacturer = Build.MANUFACTURER.capitalize()
+            model = Build.MODEL
+            if model.startswith(manufacturer):
+                return model
+            return f"{manufacturer} {model}"
+        except Exception:
+            pass
+        return "Android Device"
+
+    try:
+        hostname = socket.gethostname()
+        if hostname:
+            return hostname
+    except Exception:
+        pass
+    return "Local Device"
+
+
+def get_storage_stats():
+    """Get total, used, free storage and percent for device storage bar"""
+    try:
+        target = STORAGE_PATH if os.path.exists(STORAGE_PATH) else os.path.expanduser("~")
+        stat = os.statvfs(target)
+        free_bytes = stat.f_bavail * stat.f_frsize
+        total_bytes = stat.f_blocks * stat.f_frsize
+        used_bytes = total_bytes - free_bytes
+        total_gb = total_bytes / (1024 ** 3)
+        free_gb = free_bytes / (1024 ** 3)
+        used_gb = used_bytes / (1024 ** 3)
+        percent = (used_bytes / total_bytes) if total_bytes > 0 else 0.5
+        return {
+            "total_gb": round(total_gb, 1),
+            "free_gb": round(free_gb, 1),
+            "used_gb": round(used_gb, 1),
+            "percent": min(1.0, max(0.0, percent)),
+            "text": f"Storage: {free_gb:.1f} GB free of {total_gb:.1f} GB",
+        }
+    except Exception:
+        return {
+            "total_gb": 128.0,
+            "free_gb": 64.0,
+            "used_gb": 64.0,
+            "percent": 0.5,
+            "text": "Storage: 64.0 GB free of 128.0 GB",
+        }
+
+
 def load_settings():
-    """Load persisted user password, recent IP list, and theme preference"""
+    """Load persisted user password, recent IP list, theme, and port"""
     defaults = {
         "password": DEFAULT_PASSWORD,
         "recent_ips": [],
-        "theme_mode": "system",
+        "theme_mode": "dark",
+        "port": 8080,
     }
     try:
         if os.path.isfile(SETTINGS_FILE):
@@ -50,16 +109,17 @@ def load_settings():
                 ips = data.get("recent_ips", [])
                 if isinstance(ips, list):
                     defaults["recent_ips"] = [str(x) for x in ips if x][:MAX_RECENT_IPS]
-                mode = data.get("theme_mode", "system")
+                mode = data.get("theme_mode", "dark")
                 if mode in ("system", "dark", "light"):
                     defaults["theme_mode"] = mode
+                defaults["port"] = int(data.get("port", 8080))
     except Exception:
         pass
     return defaults
 
 
-def save_settings(password=None, recent_ips=None, theme_mode=None):
-    """Save user password, recent IP list, and theme preference to disk"""
+def save_settings(password=None, recent_ips=None, theme_mode=None, port=None):
+    """Save user password, recent IP list, theme, and port to disk"""
     current = load_settings()
     if password is not None:
         current["password"] = str(password)
@@ -67,6 +127,11 @@ def save_settings(password=None, recent_ips=None, theme_mode=None):
         current["recent_ips"] = [str(x) for x in recent_ips if x][:MAX_RECENT_IPS]
     if theme_mode in ("system", "dark", "light"):
         current["theme_mode"] = theme_mode
+    if port is not None:
+        try:
+            current["port"] = int(port)
+        except Exception:
+            pass
     try:
         parent = os.path.dirname(SETTINGS_FILE)
         if parent:
@@ -79,7 +144,7 @@ def save_settings(password=None, recent_ips=None, theme_mode=None):
 
 
 def add_recent_ip(ip_entry):
-    """Add an IP address or server URL to the remembered list (most recent first)"""
+    """Add an IP address or device record to remembered list (most recent first)"""
     if not ip_entry:
         return load_settings()["recent_ips"]
     ip_entry = str(ip_entry).strip()
@@ -139,19 +204,6 @@ def get_device_theme():
             return "dark" if "dark" in out else "light"
         except Exception:
             return "light"
-    else:
-        try:
-            import subprocess
-            out = subprocess.check_output(
-                ["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"],
-                stderr=subprocess.DEVNULL
-            ).decode("utf-8", errors="ignore").strip().lower()
-            if "light" in out:
-                return "light"
-            if "dark" in out:
-                return "dark"
-        except Exception:
-            pass
 
     return "dark"
 
