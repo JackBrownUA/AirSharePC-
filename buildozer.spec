@@ -6,7 +6,7 @@ package.domain = com.airshare
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,html,css,js
 
-version = 1.0.0
+version = 1.1.0
 requirements = python3,kivy,pyjnius,charset-normalizer==2.1.1,android
 
 orientation = portrait
