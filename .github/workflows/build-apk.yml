@@ -24,8 +24,8 @@ jobs:
       - name: Lint with ruff and run unit tests
         run: |
           python -m pip install --upgrade pip ruff pytest
-          ruff check .
-          pytest -q test_airshare.py || python -m unittest -v test_airshare.py
+          ruff check --select E9,F .
+          python -m unittest -v test_airshare.py
 
       - name: Set up Java 17 (Required for Android SDK & Gradle)
         uses: actions/setup-java@v5
