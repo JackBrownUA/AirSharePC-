@@ -39,7 +39,9 @@ jobs:
           path: |
             ~/.buildozer
             .buildozer
-          key: buildozer-master-v7-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: buildozer-master-v9-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            buildozer-master-v9-${{ runner.os }}-
 
       - name: Install system dependencies
         run: |
@@ -56,14 +58,13 @@ jobs:
 
       - name: Install Python build dependencies
         run: |
-          echo "cython<3.1.0" > /tmp/pip-constraints.txt
-          echo "charset-normalizer==2.1.1" >> /tmp/pip-constraints.txt
+          echo "charset-normalizer==2.1.1" > /tmp/pip-constraints.txt
           mkdir -p "$HOME/.config/pip"
           printf "[global]\nconstraint = /tmp/pip-constraints.txt\n" > "$HOME/.config/pip/pip.conf"
           python -m pip install --upgrade pip setuptools wheel
           pip install \
             "buildozer==1.5.0" \
-            "cython==3.0.11" \
+            "cython==0.29.33" \
             "charset-normalizer==2.1.1" \
             virtualenv appdirs "colorama>=0.3.3" jinja2 \
             "sh>=1.10,<2.0" meson ninja toml packaging build
@@ -88,7 +89,9 @@ jobs:
           yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" "platform-tools" "platforms;android-33" "build-tools;33.0.2" || true
 
       - name: Build Debug APK
-        run: yes | buildozer -v android debug
+        run: |
+          find "$HOME/.buildozer" .buildozer "$HOME/.cache" -name "charset_normalizer-3*" -delete 2>/dev/null || true
+          yes | buildozer -v android debug
         env:
           DEBIAN_FRONTEND: noninteractive
           APP_ANDROID_ACCEPT_SDK_LICENSE: "1"
