@@ -1183,7 +1183,6 @@ class AirShareApp(App):
         modal, card, p = self._create_mac_modal(
             self._t("devices_title"), self._t("devices_subtitle"), 345, source_widget
         )
-        ips = load_settings().get("recent_ips", [])
         list_box = BoxLayout(orientation="vertical", spacing=dp(8), size_hint=(1, 1))
 
         def _populate():
