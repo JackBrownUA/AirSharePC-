@@ -1,4 +1,4 @@
-# Автоматические тесты безопасности, загрузки файлов, ZIP-архивации и атомарных настроек AirShare PC
+# Автоматические тесты безопасности, HTTP Range (206), локализации (i18n), фильтрации Wi-Fi IP и ZIP-архивации
 
 import base64
 import io
@@ -10,6 +10,7 @@ import zipfile
 from unittest import mock
 
 import config
+import i18n
 import server
 import utils
 import web_ui
@@ -27,6 +28,9 @@ class _DummySocket:
 
     def sendall(self, data):
         self._wfile.write(data)
+
+    def settimeout(self, timeout):
+        self.timeout = timeout
 
     def close(self):
         pass
@@ -60,6 +64,8 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
 
         utils._seen_recent_ips.clear()
         server.AirShareHandler.reset_rate_limits()
+        server.AirShareHandler._disconnected_ips.clear()
+        server.AirShareHandler._notified_ips.clear()
         server.AirShareHandler.current_password = "918273"
 
     def tearDown(self):
@@ -69,7 +75,6 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.tmp_dir.cleanup()
 
     def test_01_random_pin_generation_and_compromised_replacement(self):
-        # Первый запуск генерирует 6-значный PIN, а старый "06102000" или пустой заменяется
         s1 = utils.load_settings()
         self.assertEqual(len(s1["password"]), 6)
         self.assertTrue(s1["password"].isdigit())
@@ -92,7 +97,6 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertEqual(len(loaded["password"]), 6)
 
     def test_03_auth_checks_only_password_and_blocks_brute_force(self):
-        # Совпадение логина с паролем при неверном пароле больше не пускает
         bad_req = (
             "GET / HTTP/1.1\r\nHost: localhost\r\n"
             + _basic_auth_header("918273", "wrong_pass")
@@ -101,13 +105,11 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         resp = _run_request(self.storage_dir, bad_req, client_ip="10.0.0.99")
         self.assertIn(b"401", resp.splitlines()[0])
 
-        # После 5 неудачных попыток возвращается 429 Too Many Requests
         for _ in range(4):
             _run_request(self.storage_dir, bad_req, client_ip="10.0.0.99")
         resp_blocked = _run_request(self.storage_dir, bad_req, client_ip="10.0.0.99")
         self.assertIn(b"429", resp_blocked.splitlines()[0])
 
-        # Другой IP с правильным паролем проходит успешно
         good_req = (
             "GET / HTTP/1.1\r\nHost: localhost\r\n"
             + _basic_auth_header("airshare", "918273")
@@ -117,7 +119,6 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn(b"200 OK", resp_ok.splitlines()[0])
 
     def test_04_upload_no_overwrite_and_411_without_content_length(self):
-        # Запрос без Content-Length возвращает 411 и не создаёт пустой файл
         req_no_len = (
             "POST /?upload=empty.txt HTTP/1.1\r\nHost: localhost\r\n"
             + _basic_auth_header("airshare", "918273")
@@ -127,7 +128,6 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn(b"411", resp_411.splitlines()[0])
         self.assertFalse(os.path.exists(os.path.join(self.storage_dir, "empty.txt")))
 
-        # Повторная загрузка одноимённого файла создаёт " (1)" и " (2)"
         for idx, body in enumerate([b"first", b"second", b"third"]):
             req = (
                 f"POST /?upload=report.txt HTTP/1.1\r\nHost: localhost\r\n"
@@ -146,7 +146,6 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
             self.assertEqual(f.read(), b"third")
 
     def test_05_percent_and_cyrillic_filenames_not_double_decoded(self):
-        # Проверяем файлы "скидка50%.pdf" и "a%20b.txt" при загрузке и скачивании
         for fname in ("скидка50%.pdf", "a%20b.txt"):
             payload = f"content-of-{fname}".encode("utf-8")
             q_name = urllib.parse.quote(fname, safe="")
@@ -181,7 +180,6 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         with open(os.path.join(sub_b, "same.txt"), "wb") as f:
             f.write(b"from_B")
 
-        # Создаём внешний файл за пределами хранилища и симлинк на него внутри folderA
         outside_file = os.path.join(self.tmp_dir.name, "secret_outside.txt")
         with open(outside_file, "wb") as f:
             f.write(b"TOP_SECRET")
@@ -206,11 +204,40 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
             self.assertEqual(zf.read("folderA/same.txt"), b"from_A")
             self.assertEqual(zf.read("folderB/same.txt"), b"from_B")
 
-    def test_07_web_ui_reduced_motion_and_theme_css(self):
+    def test_07_http_range_206_and_security_headers_and_disconnect(self):
+        video_path = os.path.join(self.storage_dir, "clip.mp4")
+        with open(video_path, "wb") as f:
+            f.write(b"0123456789ABCDEFGHIJ")
+
+        range_req = (
+            "GET /?download=clip.mp4 HTTP/1.1\r\nHost: localhost\r\n"
+            "Range: bytes=5-14\r\n"
+            + _basic_auth_header("airshare", "918273")
+            + "\r\n"
+        ).encode("utf-8")
+        resp = _run_request(self.storage_dir, range_req, client_ip="192.168.1.77")
+        hdr, _, body = resp.partition(b"\r\n\r\n")
+        self.assertIn(b"206 Partial Content", hdr.splitlines()[0])
+        self.assertIn(b"Content-Range: bytes 5-14/20", hdr)
+        self.assertIn(b"X-Content-Type-Options: nosniff", hdr)
+        self.assertEqual(body, b"56789ABCDE")
+
+        # Проверяем кнопку «Отключить» для IP
+        server.AirShareHandler.set_ip_disconnected("192.168.1.77", True)
+        resp_disc = _run_request(self.storage_dir, range_req, client_ip="192.168.1.77")
+        self.assertIn(b"403", resp_disc.splitlines()[0])
+
+    def test_08_wifi_ip_filter_and_integer_bytes_and_i18n(self):
+        # CG-NAT мобильного оператора (100.71.184.228) не должен считаться Wi-Fi LAN IP
+        self.assertFalse(utils.is_private_lan_ip("100.71.184.228"))
+        self.assertFalse(utils.is_private_lan_ip("127.0.0.1"))
+        self.assertTrue(utils.is_private_lan_ip("192.168.1.55"))
+        self.assertTrue(utils.is_private_lan_ip("10.246.82.39"))
+        self.assertEqual(utils.format_size(604), "604 B")
+        for code in ("en", "es", "de", "lt", "ru", "uk"):
+            self.assertTrue(len(i18n.tr("connect", code)) > 0)
         css_light = web_ui.get_css("light")
         self.assertIn("color-scheme: light", css_light)
-        self.assertIn("prefers-reduced-motion: reduce", css_light)
-        self.assertIn("35", web_ui.get_star_script())
 
 
 if __name__ == "__main__":

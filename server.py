@@ -1,13 +1,13 @@
-# HTTP-сервер AirShare PC: безопасная авторизация, защита от перебора, потоковый ZIP и атомарная загрузка
+# HTTP-сервер AirShare PC: авторизация, HTTP Range (206), потоковый ZIP, пагинация и отключение клиентов
 
 import base64
 import hmac
 import html
 import logging
+import math
 import mimetypes
 import os
 import secrets
-import shutil
 import threading
 import time
 import urllib.parse
@@ -17,15 +17,22 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 
 from config import (
+    MAX_CONCURRENT_CONNECTIONS,
+    MAX_DIR_ITEMS_PER_PAGE,
     MAX_UPLOAD_SIZE,
     RATE_LIMIT_BLOCK_SECONDS,
     RATE_LIMIT_MAX_ATTEMPTS,
+    SOCKET_TIMEOUT_SECONDS,
     STORAGE_PATH,
 )
+from i18n import tr
 from utils import add_recent_ip, format_size, load_settings
 from web_ui import get_css, get_star_script, get_theme_script, get_upload_script
 
 logger = logging.getLogger("airshare.server")
+
+# Расширения файлов, которые браузер может попытаться выполнить в контексте origin сервера
+_SANDBOX_EXTENSIONS = frozenset({".html", ".htm", ".svg", ".xhtml", ".js", ".mjs", ".xml"})
 
 
 class _ZipStream:
@@ -52,19 +59,39 @@ class ReusableThreadingServer(ThreadingHTTPServer):
     allow_reuse_address = True
     daemon_threads = True
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Ограничиваем число одновременных HTTP-соединений для защиты от исчерпания потоков
+        self._conn_semaphore = threading.BoundedSemaphore(MAX_CONCURRENT_CONNECTIONS)
 
-def _make_content_disposition(filename):
+    def process_request(self, request, client_address):
+        if not self._conn_semaphore.acquire(blocking=False):
+            try:
+                request.close()
+            except OSError:
+                pass
+            return
+        t = threading.Thread(target=self._process_request_guarded, args=(request, client_address), daemon=True)
+        t.start()
+
+    def _process_request_guarded(self, request, client_address):
+        try:
+            self.process_request_thread(request, client_address)
+        finally:
+            self._conn_semaphore.release()
+
+
+def _make_content_disposition(filename, disposition="attachment"):
     clean_name = os.path.basename(filename).replace('"', "_").replace("\r", "").replace("\n", "")
     ascii_fallback = clean_name.encode("ascii", "ignore").decode("ascii").strip()
     if not ascii_fallback or ascii_fallback.startswith("."):
         _, ext = os.path.splitext(clean_name)
         ascii_fallback = f"download{ext}"
     utf8_quoted = urllib.parse.quote(clean_name, safe="")
-    return f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{utf8_quoted}'
+    return f'{disposition}; filename="{ascii_fallback}"; filename*=UTF-8\'\'{utf8_quoted}'
 
 
 def _get_unique_filepath(target_dir, filename):
-    # Не перезаписываем существующий файл: добавляем « (1)», « (2)» перед расширением
     candidate = os.path.realpath(os.path.join(target_dir, filename))
     if not os.path.exists(candidate):
         return candidate, filename
@@ -79,23 +106,48 @@ def _get_unique_filepath(target_dir, filename):
 
 
 class AirShareHandler(SimpleHTTPRequestHandler):
+    # Таймаут чтения/записи сокета против зависших подключений (п. 11)
+    timeout = SOCKET_TIMEOUT_SECONDS
+
     current_password = ""
     default_theme = "dark"
+    current_language = "en"
     on_client_connected = None
     on_file_transfer = None
+    on_bad_pin_attempt = None
 
-    # Состояние защиты от перебора пароля по IP-адресу клиента
     _auth_lock = threading.Lock()
     _failed_attempts = {}
+    _disconnected_ips = set()
+    _notified_ips = set()
 
     def __init__(self, *args, **kwargs):
         self.real_storage = os.path.realpath(STORAGE_PATH)
         super().__init__(*args, directory=self.real_storage, **kwargs)
 
+    def end_headers(self):
+        # Защитные HTTP-заголовки для каждого ответа сервера (п. 10)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        super().end_headers()
+
     @classmethod
     def reset_rate_limits(cls):
         with cls._auth_lock:
             cls._failed_attempts.clear()
+
+    @classmethod
+    def set_ip_disconnected(cls, ip_str, disconnected=True):
+        with cls._auth_lock:
+            if disconnected:
+                cls._disconnected_ips.add(str(ip_str).strip())
+            else:
+                cls._disconnected_ips.discard(str(ip_str).strip())
+
+    @classmethod
+    def is_ip_disconnected(cls, ip_str):
+        with cls._auth_lock:
+            return str(ip_str).strip() in cls._disconnected_ips
 
     def _get_client_ip(self):
         if self.client_address and len(self.client_address) > 0:
@@ -124,18 +176,27 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             count += 1
             if count >= RATE_LIMIT_MAX_ATTEMPTS:
                 blocked_until = now + RATE_LIMIT_BLOCK_SECONDS
-                logger.warning("IP %s заблокирован на %d сек после %d неудачных попыток входа",
-                               client_ip, RATE_LIMIT_BLOCK_SECONDS, count)
+                logger.warning(
+                    "IP %s заблокирован на %d сек после %d неудачных попыток входа",
+                    client_ip,
+                    RATE_LIMIT_BLOCK_SECONDS,
+                    count,
+                )
             else:
                 blocked_until = 0.0
             self._failed_attempts[client_ip] = (count, blocked_until)
+
+        if callable(self.on_bad_pin_attempt):
+            try:
+                self.on_bad_pin_attempt(client_ip)
+            except Exception as exc:
+                logger.debug("Ошибка уведомления UI о неверном PIN: %s", exc)
 
     def _clear_auth_failures(self, client_ip):
         with self._auth_lock:
             self._failed_attempts.pop(client_ip, None)
 
     def _ensure_password_loaded(self):
-        # Обработчик никогда не работает без пароля: если пароль не задан в классе, берём из настроек
         pwd = str(self.current_password or "").strip()
         if not pwd:
             pwd = str(load_settings().get("password", "")).strip()
@@ -144,6 +205,15 @@ class AirShareHandler(SimpleHTTPRequestHandler):
 
     def check_auth_or_respond(self):
         client_ip = self._get_client_ip()
+        if self.is_ip_disconnected(client_ip):
+            body = f"<h3>{html.escape(tr('web_dev_blocked', self.current_language))}</h3>".encode("utf-8")
+            self.send_response(403, "Forbidden")
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return False
+
         blocked, retry_after = self._is_ip_blocked(client_ip)
         if blocked:
             self.send_rate_limit_response(retry_after)
@@ -169,17 +239,14 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             _user, sep, pwd = raw.partition(":")
             if not sep:
                 return False
-            # Проверяем только пароль через hmac.compare_digest для защиты от timing-атак
             return hmac.compare_digest(pwd.encode("utf-8"), expected_pwd.encode("utf-8"))
         except Exception as exc:
             logger.warning("Ошибка разбора заголовка Authorization: %s", exc)
             return False
 
     def send_rate_limit_response(self, retry_after=RATE_LIMIT_BLOCK_SECONDS):
-        body = (
-            "<h3>Слишком много неверных попыток ввода PIN-кода. "
-            f"Повторите через {retry_after} сек.</h3>"
-        ).encode("utf-8")
+        msg = tr("web_rate_limit", self.current_language, sec=retry_after)
+        body = f"<h3>{html.escape(msg)}</h3>".encode("utf-8")
         self.send_response(429, "Too Many Requests")
         self.send_header("Retry-After", str(retry_after))
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -188,7 +255,8 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def request_auth(self):
-        body = "<h3>Требуется авторизация (AirShare PC)</h3>".encode("utf-8")
+        msg = tr("web_auth_req", self.current_language)
+        body = f"<h3>{html.escape(msg)}</h3>".encode("utf-8")
         self.send_response(401)
         self.send_header("WWW-Authenticate", 'Basic realm="AirShare PC"')
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -219,8 +287,13 @@ class AirShareHandler(SimpleHTTPRequestHandler):
 
             entry = f"{device_title} ({os_badge}) • {client_ip}"
             add_recent_ip(entry)
+            is_first_notify = False
+            with self._auth_lock:
+                if client_ip not in self._notified_ips:
+                    self._notified_ips.add(client_ip)
+                    is_first_notify = True
             if callable(self.on_client_connected):
-                self.on_client_connected(device_title, os_badge, client_ip)
+                self.on_client_connected(device_title, os_badge, client_ip, is_first_notify)
         except Exception as exc:
             logger.warning("Не удалось определить устройство клиента: %s", exc)
 
@@ -277,8 +350,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         params = urllib.parse.parse_qs(parsed.query)
 
         if "download" in params and params["download"]:
-            # parse_qs уже декодирует query-параметр, повторный unquote не вызываем
-            self.stream_single_file(parsed.path, params["download"][0])
+            self.stream_single_file(parsed.path, params["download"][0], as_attachment=True)
             return
 
         if "zip" in params and params["zip"]:
@@ -291,6 +363,14 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 self.download_selected_files(selected)
                 return
 
+        # Если запрашивается конкретный файл по прямому пути, отдаём его через stream_single_file
+        # с поддержкой HTTP Range (206) и защитой от выполнения чужого HTML/JS (п. 10, 23)
+        target_path = self.translate_path(parsed.path)
+        if os.path.isfile(target_path):
+            parent_url = os.path.dirname(urllib.parse.unquote(parsed.path))
+            self.stream_single_file(parent_url, os.path.basename(target_path), as_attachment=False)
+            return
+
         super().do_GET()
 
     def do_POST(self):
@@ -301,7 +381,6 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
 
-        # Для query-параметра ?upload= parse_qs уже выполнил декодирование, а для заголовка X-File-Name нужен unquote
         raw_name = None
         if "upload" in params and params["upload"]:
             raw_name = params["upload"][0]
@@ -317,7 +396,6 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             self.send_error(400, "Invalid filename")
             return
 
-        # Проверяем наличие и корректность Content-Length до создания файла
         raw_len = self.headers.get("Content-Length")
         if raw_len is None:
             self.send_error(411, "Length Required")
@@ -346,7 +424,6 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             self.send_error(403, "Forbidden")
             return
 
-        # Пишем во временный файл и переименовываем только после полной загрузки всех байт
         tmp_name = f".airshare_upload_{secrets.token_hex(6)}.part"
         tmp_path = os.path.join(target_dir, tmp_name)
         try:
@@ -364,11 +441,12 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 os.fsync(f.fileno())
 
             if bytes_received != length:
-                logger.warning("Загрузка файла %s прервана (%d из %d байт)", final_filename, bytes_received, length)
+                logger.warning(
+                    "Загрузка файла %s прервана (%d из %d байт)", final_filename, bytes_received, length
+                )
                 self.send_error(400, "Incomplete upload")
                 return
 
-            # Повторно проверяем уникальность имени перед финальным переименованием
             dest_path, final_filename = _get_unique_filepath(target_dir, filename)
             os.replace(tmp_path, dest_path)
 
@@ -389,7 +467,31 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 except OSError as cleanup_exc:
                     logger.warning("Не удалось удалить временный файл %s: %s", tmp_path, cleanup_exc)
 
-    def stream_single_file(self, current_url_path, target_name):
+    def _parse_byte_range(self, range_header, file_size):
+        # Разбираем заголовок Range: bytes=start-end для докачки и перемотки видео (п. 23)
+        if not range_header or not range_header.startswith("bytes="):
+            return None
+        spec = range_header[6:].strip().split(",")[0].strip()
+        if "-" not in spec:
+            return None
+        start_str, _, end_str = spec.partition("-")
+        try:
+            if start_str == "":
+                suffix_len = int(end_str)
+                if suffix_len <= 0:
+                    return None
+                start = max(0, file_size - suffix_len)
+                end = file_size - 1
+            else:
+                start = int(start_str)
+                end = int(end_str) if end_str else (file_size - 1)
+        except ValueError:
+            return None
+        if start < 0 or start >= file_size or end < start:
+            return "invalid"
+        return start, min(end, file_size - 1)
+
+    def stream_single_file(self, current_url_path, target_name, as_attachment=True):
         rel_dir = urllib.parse.unquote(current_url_path).lstrip("/")
         base_dir = os.path.realpath(os.path.join(self.real_storage, rel_dir))
         clean_target = os.path.basename(target_name)
@@ -405,15 +507,54 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             if not ctype:
                 ctype = "application/octet-stream"
 
-            self.send_response(200)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(file_size))
-            self.send_header("Content-Disposition", _make_content_disposition(os.path.basename(target_file)))
+            _, ext = os.path.splitext(target_file)
+            force_attachment = as_attachment or (ext.lower() in _SANDBOX_EXTENSIONS)
+
+            range_hdr = self.headers.get("Range")
+            byte_range = self._parse_byte_range(range_hdr, file_size) if file_size > 0 else None
+
+            if byte_range == "invalid":
+                self.send_response(416, "Requested Range Not Satisfiable")
+                self.send_header("Content-Range", f"bytes */{file_size}")
+                self.end_headers()
+                return
+
+            if byte_range is not None:
+                start, end = byte_range
+                chunk_len = end - start + 1
+                self.send_response(206, "Partial Content")
+                self.send_header("Content-Type", ctype)
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
+                self.send_header("Content-Length", str(chunk_len))
+            else:
+                start, chunk_len = 0, file_size
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Content-Length", str(file_size))
+
+            if ext.lower() in _SANDBOX_EXTENSIONS:
+                self.send_header("Content-Security-Policy", "sandbox")
+            if force_attachment:
+                self.send_header(
+                    "Content-Disposition", _make_content_disposition(os.path.basename(target_file), "attachment")
+                )
             self.end_headers()
 
             with open(target_file, "rb") as f:
-                shutil.copyfileobj(f, self.wfile, length=65536)
-            self._notify_transfer(os.path.basename(target_file), file_size, "download")
+                if start > 0:
+                    f.seek(start)
+                remaining = chunk_len
+                while remaining > 0:
+                    buf = f.read(min(65536, remaining))
+                    if not buf:
+                        break
+                    self.wfile.write(buf)
+                    remaining -= len(buf)
+
+            if start == 0:
+                self._notify_transfer(os.path.basename(target_file), file_size, "download")
         except (BrokenPipeError, ConnectionResetError):
             logger.debug("Клиент прервал скачивание файла %s", clean_target)
         except OSError as exc:
@@ -446,7 +587,6 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 for root, _, files in os.walk(target_dir, followlinks=False):
                     for file in files:
                         full_path = os.path.join(root, file)
-                        # Игнорируем симлинки и файлы, указывающие за пределы разрешённого хранилища
                         if os.path.islink(full_path):
                             real_fp = os.path.realpath(full_path)
                             if not self._is_within_storage(real_fp):
@@ -465,6 +605,44 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             logger.debug("Клиент прервал скачивание ZIP-архива %s", folder_basename)
 
     def download_selected_files(self, files):
+        # Сначала собираем проверенный список файлов и только потом отправляем 200 OK (п. 8)
+        valid_entries = []
+        seen_arcnames = set()
+
+        for item_rel_path in files:
+            clean_rel = str(item_rel_path).replace("\\", "/").lstrip("/")
+            candidate_path = os.path.join(self.real_storage, clean_rel)
+            if os.path.islink(candidate_path):
+                real_cand = os.path.realpath(candidate_path)
+                if not self._is_within_storage(real_cand):
+                    logger.warning("Пропущен внешний симлинк: %s", item_rel_path)
+                    continue
+            full_path = os.path.realpath(candidate_path)
+            if not self._is_within_storage(full_path):
+                logger.warning("Пропущен путь вне хранилища при скачивании выбранного: %s", item_rel_path)
+                continue
+            if os.path.isfile(full_path):
+                arcname = os.path.relpath(full_path, self.real_storage).replace("\\", "/")
+                if arcname not in seen_arcnames:
+                    seen_arcnames.add(arcname)
+                    valid_entries.append((full_path, arcname))
+            elif os.path.isdir(full_path):
+                for root, _, subfiles in os.walk(full_path, followlinks=False):
+                    for f in subfiles:
+                        fp = os.path.join(root, f)
+                        real_fp = os.path.realpath(fp)
+                        if not self._is_within_storage(real_fp) or not os.path.isfile(real_fp):
+                            logger.warning("Пропущен внешний симлинк/файл в папке: %s", fp)
+                            continue
+                        arcname = os.path.relpath(real_fp, self.real_storage).replace("\\", "/")
+                        if arcname not in seen_arcnames:
+                            seen_arcnames.add(arcname)
+                            valid_entries.append((real_fp, arcname))
+
+        if not valid_entries:
+            self.send_error(404, "No valid files selected")
+            return
+
         self.send_response(200)
         self.send_header("Content-Type", "application/zip")
         self.send_header("Content-Disposition", _make_content_disposition("selected_files.zip"))
@@ -475,43 +653,12 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         stream = _ZipStream(self.wfile)
         try:
             with zipfile.ZipFile(stream, mode="w", compression=zipfile.ZIP_STORED) as zf:
-                seen_arcnames = set()
-                for item_rel_path in files:
-                    # parse_qs уже декодировал значения files, поэтому повторный unquote не используем
-                    clean_rel = str(item_rel_path).replace("\\", "/").lstrip("/")
-                    candidate_path = os.path.join(self.real_storage, clean_rel)
-                    full_path = os.path.realpath(candidate_path)
-                    if not self._is_within_storage(full_path):
-                        logger.warning("Пропущен путь вне хранилища при скачивании выбранного: %s", item_rel_path)
+                for full_path, arcname in valid_entries:
+                    try:
+                        zf.write(full_path, arcname=arcname)
+                    except OSError as exc:
+                        logger.warning("Не удалось упаковать файл %s: %s", full_path, exc)
                         continue
-                    if os.path.isfile(full_path):
-                        # Сохраняем относительный путь внутри хранилища, чтобы одноимённые файлы из разных папок не конфликтовали
-                        arcname = os.path.relpath(full_path, self.real_storage).replace("\\", "/")
-                        if arcname in seen_arcnames:
-                            continue
-                        try:
-                            zf.write(full_path, arcname=arcname)
-                            seen_arcnames.add(arcname)
-                        except OSError as exc:
-                            logger.warning("Не удалось добавить выбранный файл %s в ZIP: %s", full_path, exc)
-                            continue
-                    elif os.path.isdir(full_path):
-                        for root, _, subfiles in os.walk(full_path, followlinks=False):
-                            for f in subfiles:
-                                fp = os.path.join(root, f)
-                                real_fp = os.path.realpath(fp)
-                                if not self._is_within_storage(real_fp) or not os.path.isfile(real_fp):
-                                    logger.warning("Пропущен внешний симлинк/файл в папке: %s", fp)
-                                    continue
-                                arcname = os.path.relpath(real_fp, self.real_storage).replace("\\", "/")
-                                if arcname in seen_arcnames:
-                                    continue
-                                try:
-                                    zf.write(real_fp, arcname=arcname)
-                                    seen_arcnames.add(arcname)
-                                except OSError as exc:
-                                    logger.warning("Не удалось упаковать файл %s: %s", fp, exc)
-                                    continue
             self._notify_transfer("selected_files.zip", stream.tell(), "download")
         except (BrokenPipeError, ConnectionResetError):
             logger.debug("Клиент прервал скачивание выбранных файлов")
@@ -526,17 +673,29 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             list_dir = os.listdir(real_path)
         except OSError as exc:
             logger.warning("Нет доступа к директории %s: %s", real_path, exc)
-            self.send_error(404, "Access denied")
+            self.send_error(403, "Access denied")
             return None
 
         list_dir.sort(key=lambda a: (not os.path.isdir(os.path.join(real_path, a)), a.lower()))
-        r = []
 
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
         theme = self._get_request_theme(params)
+        lang = self.current_language
         displaypath = html.escape(urllib.parse.unquote(parsed.path))
 
+        # Пагинация для быстрого открытия больших папок (DCIM) без пересчёта содержимого подпапок (п. 22)
+        total_items = len(list_dir)
+        total_pages = max(1, math.ceil(total_items / MAX_DIR_ITEMS_PER_PAGE))
+        try:
+            page = int(params.get("page", ["1"])[0])
+        except ValueError:
+            page = 1
+        page = max(1, min(total_pages, page))
+        start_idx = (page - 1) * MAX_DIR_ITEMS_PER_PAGE
+        page_items = list_dir[start_idx : start_idx + MAX_DIR_ITEMS_PER_PAGE]
+
+        r = []
         r.append('<!DOCTYPE html><html><head><meta charset="utf-8">')
         r.append('<meta name="viewport" content="width=device-width, initial-scale=1.0">')
         r.append('<title>AirShare PC</title>')
@@ -549,25 +708,30 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         r.append('<div class="container">')
         r.append(f'<div class="header"><h1>AirShare PC</h1><p>{displaypath}</p>')
         r.append('<div class="actions-bar">')
-        r.append('<button type="button" class="upload-btn" onclick="triggerUpload()">⬆ Загрузить файлы на устройство</button>')
+        r.append(
+            f'<button type="button" class="upload-btn" onclick="triggerUpload()">'
+            f'{html.escape(tr("web_upload_btn", lang))}</button>'
+        )
         r.append('<input type="file" id="up" multiple style="display:none" onchange="uploadFiles(this.files)">')
         if real_path != self.real_storage:
-            r.append('<a class="upload-btn" href="../">⬅ Назад</a>')
+            r.append(f'<a class="upload-btn" href="../">{html.escape(tr("web_back_btn", lang))}</a>')
         r.append('</div>')
         r.append('<p id="status" style="margin-top:12px;color:#667eea;min-height:20px;"></p></div>')
 
         r.append('<form id="fileForm" method="GET" onsubmit="return submitSelectedDownload(event)">')
         r.append('<input type="hidden" name="download_selected" value="1">')
-        if list_dir:
+        if total_items > 0:
             r.append(
                 '<div class="toolbar">'
-                '<label><input type="checkbox" class="checkbox" onchange="toggleSelectAll(this)"> Выбрать все</label>'
-                f'<span>Всего объектов: {len(list_dir)}</span>'
+                f'<label><input type="checkbox" class="checkbox" onchange="toggleSelectAll(this)"> '
+                f'{html.escape(tr("web_select_all", lang))}</label>'
+                f'<span>{html.escape(tr("web_total_items", lang, count=total_items))}</span>'
                 '</div>'
             )
         r.append('<ul class="file-list">')
 
-        for name in list_dir:
+        folder_label = html.escape(tr("web_folder", lang))
+        for name in page_items:
             fullname = os.path.join(real_path, name)
             rel_path = os.path.relpath(fullname, self.real_storage).replace("\\", "/")
             safe_val = html.escape(rel_path, quote=True)
@@ -575,27 +739,20 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             quoted_name = urllib.parse.quote(name, safe="")
 
             if os.path.isdir(fullname):
-                try:
-                    with os.scandir(fullname) as entries:
-                        count = sum(1 for _ in entries)
-                    meta_info = f"Папка • {count} объект(ов)"
-                except OSError:
-                    meta_info = "Папка"
-
                 r.append(
                     f'<li class="file-item">'
                     f'<input type="checkbox" class="checkbox" name="files" value="{safe_val}">'
                     f'<div class="file-info">'
                     f'<a class="file-link" href="{urllib.parse.quote(name + "/")}">📁 {safe_name}</a>'
-                    f'<div class="file-meta">{meta_info}</div></div>'
-                    f'<a class="download-btn" href="?zip={quoted_name}" title="Скачать папку ZIP">⬇</a>'
+                    f'<div class="file-meta">{folder_label}</div></div>'
+                    f'<a class="download-btn" href="?zip={quoted_name}" title="ZIP">⬇</a>'
                     f'</li>'
                 )
             else:
                 try:
                     size_str = format_size(os.path.getsize(fullname))
                 except OSError:
-                    size_str = "Неизвестно"
+                    size_str = "—"
 
                 r.append(
                     f'<li class="file-item">'
@@ -603,22 +760,34 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                     f'<div class="file-info">'
                     f'<a class="file-link" href="{quoted_name}" target="_blank">📄 {safe_name}</a>'
                     f'<div class="file-meta">{size_str}</div></div>'
-                    f'<a class="download-btn" href="?download={quoted_name}" download="{safe_name}" title="Скачать файл">⬇</a>'
+                    f'<a class="download-btn" href="?download={quoted_name}" download="{safe_name}">⬇</a>'
                     f'</li>'
                 )
 
         r.append('</ul>')
-        if list_dir:
+        if total_pages > 1:
+            r.append('<div class="pagination">')
+            if page > 1:
+                r.append(f'<a class="upload-btn" href="?page={page - 1}">{html.escape(tr("web_page_prev", lang))}</a>')
+            r.append(f'<span>{html.escape(tr("web_page_info", lang, page=page, total=total_pages))}</span>')
+            if page < total_pages:
+                r.append(f'<a class="upload-btn" href="?page={page + 1}">{html.escape(tr("web_page_next", lang))}</a>')
+            r.append('</div>')
+
+        if total_items > 0:
             r.append('<div style="text-align:center;margin-top:20px;">')
-            r.append('<button type="submit" class="upload-btn">⬇ Скачать выбранное (ZIP)</button>')
+            r.append(
+                f'<button type="submit" class="upload-btn">{html.escape(tr("web_download_zip", lang))}</button>'
+            )
             r.append('</div>')
         r.append('</form></div>')
-        r.append(f'<script>{get_star_script()}{get_upload_script()}{get_theme_script()}</script>')
+        r.append(f'<script>{get_star_script()}{get_upload_script(lang)}{get_theme_script()}</script>')
         r.append('</body></html>')
 
         encoded = "\n".join(r).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(encoded)))
         if "theme" in params and params["theme"]:
             self.send_header("Set-Cookie", f"airshare_theme={theme}; Path=/; Max-Age=31536000; SameSite=Lax")

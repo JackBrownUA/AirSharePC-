@@ -1,11 +1,22 @@
-# Пользовательские Kivy-виджеты для AirShare PC (иконки, карточки, волнистый сигнал вокруг ПК, экран загрузки и модальные окна)
+# Пользовательские Kivy-виджеты для AirShare PC (иконки, флаги, 3D радио-кнопки, тост-уведомления, экран загрузки и модальные окна)
 
 import math
 import os
 from kivy.animation import Animation
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.graphics import Color, Ellipse, Line, PopMatrix, PushMatrix, RoundedRectangle, Scale, Translate, Triangle
+from kivy.graphics import (
+    Color,
+    Ellipse,
+    Line,
+    PopMatrix,
+    PushMatrix,
+    Rectangle,
+    RoundedRectangle,
+    Scale,
+    Translate,
+    Triangle,
+)
 from kivy.metrics import dp, sp
 from kivy.properties import NumericProperty
 from kivy.uix.anchorlayout import AnchorLayout
@@ -15,6 +26,8 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.image import Image
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
+
+from i18n import tr
 
 
 def make_label(text="", size=14, halign="left", valign="middle", markup=False, **kw):
@@ -42,6 +55,137 @@ class StatusDot(Widget):
     def set_status_color(self, rgba):
         self.halo_col.rgba = (rgba[0], rgba[1], rgba[2], 0.28)
         self.core_col.rgba = rgba
+
+
+class FlagBadge(Widget):
+    # Векторный значок флага страны (Kivy на Android не рендерит эмодзи-флаги из шрифта)
+    on_touch_down = on_touch_move = on_touch_up = lambda self, touch: False
+
+    def __init__(self, lang_code="en", **kwargs):
+        super().__init__(**kwargs)
+        self.lang_code = lang_code
+        self.bind(pos=self._redraw, size=self._redraw)
+        Clock.schedule_once(self._redraw, 0)
+
+    def _redraw(self, *_args):
+        self.canvas.clear()
+        w, h = self.width, self.height
+        if w <= 2 or h <= 2:
+            return
+        fw, fh = min(w, dp(28)), min(h, dp(20))
+        x0 = self.center_x - fw * 0.5
+        y0 = self.center_y - fh * 0.5
+        code = self.lang_code
+
+        with self.canvas:
+            if code == "uk":
+                Color(1.0, 0.84, 0.0, 1)
+                Rectangle(pos=(x0, y0), size=(fw, fh * 0.5))
+                Color(0.0, 0.36, 0.74, 1)
+                Rectangle(pos=(x0, y0 + fh * 0.5), size=(fw, fh * 0.5))
+            elif code == "ru":
+                sh = fh / 3.0
+                Color(0.84, 0.16, 0.12, 1)
+                Rectangle(pos=(x0, y0), size=(fw, sh))
+                Color(0.0, 0.24, 0.66, 1)
+                Rectangle(pos=(x0, y0 + sh), size=(fw, sh))
+                Color(0.96, 0.97, 0.99, 1)
+                Rectangle(pos=(x0, y0 + sh * 2.0), size=(fw, sh))
+            elif code == "lt":
+                sh = fh / 3.0
+                Color(0.76, 0.15, 0.18, 1)
+                Rectangle(pos=(x0, y0), size=(fw, sh))
+                Color(0.0, 0.42, 0.27, 1)
+                Rectangle(pos=(x0, y0 + sh), size=(fw, sh))
+                Color(0.99, 0.73, 0.07, 1)
+                Rectangle(pos=(x0, y0 + sh * 2.0), size=(fw, sh))
+            elif code == "de":
+                sh = fh / 3.0
+                Color(1.0, 0.80, 0.0, 1)
+                Rectangle(pos=(x0, y0), size=(fw, sh))
+                Color(0.86, 0.12, 0.12, 1)
+                Rectangle(pos=(x0, y0 + sh), size=(fw, sh))
+                Color(0.10, 0.11, 0.13, 1)
+                Rectangle(pos=(x0, y0 + sh * 2.0), size=(fw, sh))
+            elif code == "es":
+                Color(0.78, 0.08, 0.12, 1)
+                Rectangle(pos=(x0, y0), size=(fw, fh))
+                Color(1.0, 0.77, 0.0, 1)
+                Rectangle(pos=(x0, y0 + fh * 0.25), size=(fw, fh * 0.50))
+            else:
+                # English (UK flag motif)
+                Color(0.04, 0.16, 0.46, 1)
+                Rectangle(pos=(x0, y0), size=(fw, fh))
+                Color(0.96, 0.97, 0.99, 1)
+                Line(points=[x0 + dp(1), y0 + dp(1), x0 + fw - dp(1), y0 + fh - dp(1)], width=dp(1.8))
+                Line(points=[x0 + dp(1), y0 + fh - dp(1), x0 + fw - dp(1), y0 + dp(1)], width=dp(1.8))
+                Rectangle(pos=(x0, y0 + fh * 0.36), size=(fw, fh * 0.28))
+                Rectangle(pos=(x0 + fw * 0.40, y0), size=(fw * 0.20, fh))
+                Color(0.82, 0.10, 0.16, 1)
+                Rectangle(pos=(x0, y0 + fh * 0.42), size=(fw, fh * 0.16))
+                Rectangle(pos=(x0 + fw * 0.44, y0), size=(fw * 0.12, fh))
+
+            Color(1, 1, 1, 0.22)
+            Line(rounded_rectangle=[x0, y0, fw, fh, dp(3)], width=dp(1.0))
+
+
+class RadioCircle(Widget):
+    # Полуобъёмный серый кружочек, который при выборе плавно заполняется изумрудно-зелёным цветом
+    fill_val = NumericProperty(0.0)
+    on_touch_down = on_touch_move = on_touch_up = lambda self, touch: False
+
+    def __init__(self, selected=False, **kwargs):
+        super().__init__(**kwargs)
+        self.is_selected = bool(selected)
+        self.fill_val = 1.0 if self.is_selected else 0.0
+        self.bind(pos=self._redraw, size=self._redraw, fill_val=self._redraw)
+        Clock.schedule_once(self._redraw, 0)
+
+    def set_selected(self, selected, animate=True):
+        self.is_selected = bool(selected)
+        target = 1.0 if self.is_selected else 0.0
+        Animation.cancel_all(self, "fill_val")
+        if animate:
+            Animation(fill_val=target, duration=0.22, t="out_back").start(self)
+        else:
+            self.fill_val = target
+
+    def _redraw(self, *_args):
+        self.canvas.clear()
+        cx, cy = self.center_x, self.center_y
+        r = dp(10.5)
+        t = max(0.0, min(1.0, self.fill_val))
+        with self.canvas:
+            # Внешняя мягкая тень для полуобъёма
+            Color(0.05, 0.06, 0.07, 0.48)
+            Ellipse(pos=(cx - r - dp(1), cy - r - dp(1.5)), size=((r + dp(1)) * 2, (r + dp(1)) * 2))
+
+            # Основа кружочка (серый градиентный тон)
+            Color(0.22, 0.24, 0.28, 1.0)
+            Ellipse(pos=(cx - r, cy - r), size=(r * 2, r * 2))
+
+            # Внутренний верхний блик для 3D-эффекта
+            Color(0.65, 0.70, 0.78, 0.25 * (1.0 - t * 0.5))
+            Line(circle=(cx, cy, r - dp(1.2), -65, 65), width=dp(1.2))
+
+            # Контур серого кружочка
+            Color(0.46 * (1.0 - t) + 0.20 * t, 0.50 * (1.0 - t) + 0.78 * t, 0.56 * (1.0 - t) + 0.46 * t, 0.90)
+            Line(circle=(cx, cy, r), width=dp(1.35))
+
+            if t > 0.01:
+                # Свечение и зелёное заполнение при выборе
+                glow_r = (r + dp(3.0)) * min(1.0, t)
+                Color(0.20, 0.78, 0.46, 0.24 * min(1.0, t))
+                Ellipse(pos=(cx - glow_r, cy - glow_r), size=(glow_r * 2, glow_r * 2))
+
+                fill_r = (r - dp(2.2)) * t
+                Color(0.20, 0.78, 0.46, 1.0)
+                Ellipse(pos=(cx - fill_r, cy - fill_r), size=(fill_r * 2, fill_r * 2))
+
+                # Лёгкий глянцевый блик поверх зелёного кружочка
+                hl_r = fill_r * 0.45
+                Color(0.75, 0.98, 0.85, 0.38 * min(1.0, t))
+                Ellipse(pos=(cx - hl_r * 0.8, cy + fill_r * 0.18 - hl_r * 0.5), size=(hl_r * 1.6, hl_r))
 
 
 class AnimatedToggleSwitch(ButtonBehavior, Widget):
@@ -137,14 +281,27 @@ class VectorIcon(Widget):
                 Ellipse(pos=(cx - dp(1.8), by - dp(1.8)), size=(dp(3.6), dp(3.6)))
                 Line(circle=(cx, by, s * 0.26, -44, 44), width=dp(1.4))
                 Line(circle=(cx, by, s * 0.42, -46, 46), width=dp(1.4))
+            elif t == "globe":
+                r = s * 0.32
+                Line(circle=(cx, cy, r), width=lw)
+                Line(ellipse=(cx - r * 0.48, cy - r, r * 0.96, r * 2.0), width=dp(1.3))
+                Line(points=[cx - r, cy, cx + r, cy], width=dp(1.3))
+                Line(points=[cx, cy - r, cx, cy + r], width=dp(1.3))
             elif t == "gear":
                 ro, ri = s * 0.27, s * 0.12
                 Line(circle=(cx, cy, ri), width=dp(1.5))
                 Line(circle=(cx, cy, ro * 0.82), width=dp(1.7))
                 for deg in range(0, 360, 45):
                     rad = math.radians(deg)
-                    Line(points=[cx + math.cos(rad) * ro * 0.8, cy + math.sin(rad) * ro * 0.8,
-                                 cx + math.cos(rad) * ro * 1.02, cy + math.sin(rad) * ro * 1.02], width=dp(2.1))
+                    Line(
+                        points=[
+                            cx + math.cos(rad) * ro * 0.8,
+                            cy + math.sin(rad) * ro * 0.8,
+                            cx + math.cos(rad) * ro * 1.02,
+                            cy + math.sin(rad) * ro * 1.02,
+                        ],
+                        width=dp(2.1),
+                    )
             elif t == "copy":
                 w, h = s * 0.36, s * 0.44
                 Line(rounded_rectangle=[cx - w * 0.68, cy - h * 0.28, w, h, dp(3)], width=lw)
@@ -168,7 +325,16 @@ class VectorIcon(Widget):
                 Color(0.76, 0.79, 0.84, 0.98)
                 RoundedRectangle(pos=(cx - cw * 0.50, cy - ch * 0.50), size=(cw, ch), radius=[dp(6)])
                 Color(0.24, 0.26, 0.30, 0.95)
-                Triangle(points=[cx - cw * 0.42, cy - ch * 0.46, cx - cw * 0.06, cy + ch * 0.06, cx + cw * 0.26, cy - ch * 0.46])
+                Triangle(
+                    points=[
+                        cx - cw * 0.42,
+                        cy - ch * 0.46,
+                        cx - cw * 0.06,
+                        cy + ch * 0.06,
+                        cx + cw * 0.26,
+                        cy - ch * 0.46,
+                    ]
+                )
                 Color(0.90, 0.64, 0.22, 1)
                 Ellipse(pos=(cx - cw * 0.22, cy + ch * 0.06), size=(dp(5.5), dp(5.5)))
             elif t == "document":
@@ -191,9 +357,27 @@ class VectorIcon(Widget):
                 RoundedRectangle(pos=(dp(2), dp(2)), size=(w_full - dp(4), h_full - dp(4)), radius=[dp(10)])
                 Color(0.72, 0.75, 0.80, 0.95)
                 mw, mh = s * 0.52, s * 0.32
-                Triangle(points=[cx - mw * 0.52, cy - mh * 0.55, cx - mw * 0.10, cy + mh * 0.32, cx + mw * 0.28, cy - mh * 0.55])
+                Triangle(
+                    points=[
+                        cx - mw * 0.52,
+                        cy - mh * 0.55,
+                        cx - mw * 0.10,
+                        cy + mh * 0.32,
+                        cx + mw * 0.28,
+                        cy - mh * 0.55,
+                    ]
+                )
                 Color(0.54, 0.57, 0.62, 0.95)
-                Triangle(points=[cx - mw * 0.02, cy - mh * 0.55, cx + mw * 0.26, cy + mh * 0.12, cx + mw * 0.54, cy - mh * 0.55])
+                Triangle(
+                    points=[
+                        cx - mw * 0.02,
+                        cy - mh * 0.55,
+                        cx + mw * 0.26,
+                        cy + mh * 0.12,
+                        cx + mw * 0.54,
+                        cy - mh * 0.55,
+                    ]
+                )
                 Color(0.82, 0.85, 0.90, 1)
                 Ellipse(pos=(cx - mw * 0.38, cy + mh * 0.18), size=(dp(4.2), dp(4.2)))
             elif t == "transfer":
@@ -205,9 +389,28 @@ class VectorIcon(Widget):
             elif t == "folder":
                 fw, fh = s * 0.54, s * 0.38
                 x0, y0 = cx - fw * 0.5, cy - fh * 0.5
-                Line(points=[x0, y0 + fh * 0.82, x0, y0, x0 + fw, y0, x0 + fw, y0 + fh * 0.72,
-                             x0 + fw * 0.46, y0 + fh * 0.72, x0 + fw * 0.36, y0 + fh * 0.95,
-                             x0, y0 + fh * 0.95, x0, y0 + fh * 0.82], width=lw, joint="round")
+                Line(
+                    points=[
+                        x0,
+                        y0 + fh * 0.82,
+                        x0,
+                        y0,
+                        x0 + fw,
+                        y0,
+                        x0 + fw,
+                        y0 + fh * 0.72,
+                        x0 + fw * 0.46,
+                        y0 + fh * 0.72,
+                        x0 + fw * 0.36,
+                        y0 + fh * 0.95,
+                        x0,
+                        y0 + fh * 0.95,
+                        x0,
+                        y0 + fh * 0.82,
+                    ],
+                    width=lw,
+                    joint="round",
+                )
             elif t == "phone":
                 w, h = s * 0.36, s * 0.60
                 Line(rounded_rectangle=[cx - w * 0.5, cy - h * 0.5, w, h, dp(3.5)], width=lw)
@@ -259,10 +462,18 @@ class RoundedCard(BoxLayout):
             self.col = Color(*self.bg_color)
             self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[self.radius_val])
             self.b_col = Color(*self.border_color)
-            self.line = Line(rounded_rectangle=[self.x, self.y, self.width, self.height, max(1, self.radius_val)], width=dp(1.0))
+            self.line = Line(
+                rounded_rectangle=[self.x, self.y, self.width, self.height, max(1, self.radius_val)], width=dp(1.0)
+            )
         with self.canvas.after:
             PopMatrix()
-        self.bind(pos=self._update, size=self._update, scale_val=self._update_matrix, offset_x=self._update_matrix, offset_y=self._update_matrix)
+        self.bind(
+            pos=self._update,
+            size=self._update,
+            scale_val=self._update_matrix,
+            offset_x=self._update_matrix,
+            offset_y=self._update_matrix,
+        )
 
     def _update_matrix(self, *_args):
         cx, cy = self.center_x, self.center_y
@@ -273,7 +484,13 @@ class RoundedCard(BoxLayout):
     def _update(self, *_args):
         self.rect.pos, self.rect.size = self.pos, self.size
         if self.width > 2 and self.height > 2:
-            self.line.rounded_rectangle = [self.x, self.y, self.width, self.height, min(self.radius_val, self.height * 0.5)]
+            self.line.rounded_rectangle = [
+                self.x,
+                self.y,
+                self.width,
+                self.height,
+                min(self.radius_val, self.height * 0.5),
+            ]
         self._update_matrix()
 
     def update_colors(self, bg_color, border_color=(0, 0, 0, 0)):
@@ -296,7 +513,16 @@ class ClickableCard(ButtonBehavior, RoundedCard):
 
 
 class RoundedActionButton(ClickableCard):
-    def __init__(self, text="", bg_color=(0.38, 0.72, 0.98, 1), border_color=(0, 0, 0, 0), text_color=(1, 1, 1, 1), font_size=sp(14), radius=dp(15), **kwargs):
+    def __init__(
+        self,
+        text="",
+        bg_color=(0.38, 0.72, 0.98, 1),
+        border_color=(0, 0, 0, 0),
+        text_color=(1, 1, 1, 1),
+        font_size=sp(14),
+        radius=dp(15),
+        **kwargs,
+    ):
         super().__init__(bg_color=bg_color, border_color=border_color, radius=radius, **kwargs)
         self.lbl = make_label(f"[b]{text}[/b]", size=font_size / sp(1), halign="center", markup=True, color=text_color)
         self.add_widget(self.lbl)
@@ -370,8 +596,17 @@ class DrawerPanel(RoundedCard):
 
 class DrawerMenuRow(ButtonBehavior, RoundedCard):
     def __init__(self, icon_name, label_text, text_color, sub_color, highlight_rgba, **kwargs):
-        super().__init__(bg_color=(0, 0, 0, 0), border_color=(0, 0, 0, 0), radius=dp(12), orientation="horizontal",
-                         size_hint=(1, None), height=dp(46), padding=[dp(8), dp(4), dp(8), dp(4)], spacing=dp(12), **kwargs)
+        super().__init__(
+            bg_color=(0, 0, 0, 0),
+            border_color=(0, 0, 0, 0),
+            radius=dp(12),
+            orientation="horizontal",
+            size_hint=(1, None),
+            height=dp(46),
+            padding=[dp(8), dp(4), dp(8), dp(4)],
+            spacing=dp(12),
+            **kwargs,
+        )
         self.always_release, self.highlight_rgba = True, highlight_rgba
         self.ico_w = VectorIcon(icon_type=icon_name, color=sub_color, size_hint=(None, 1), width=dp(24))
         self.lbl_w = make_label(label_text, size=15, color=text_color)
@@ -391,7 +626,6 @@ class DrawerMenuRow(ButtonBehavior, RoundedCard):
 
 
 class RadarCard(RoundedCard):
-    # Карточка с компактными волнистыми кругами сигнала непосредственно вокруг иконки монитора ПК
     def __init__(self, bg_color, border_color, ring_color, glow_color, **kwargs):
         super().__init__(bg_color=bg_color, border_color=border_color, radius=dp(24), **kwargs)
         self.target_widget = None
@@ -431,7 +665,6 @@ class RadarCard(RoundedCard):
         else:
             cx, cy = self.center_x, self.y + self.height * 0.78
 
-        # Ограничиваем радиус волн, чтобы они аккуратно обрамляли монитор и никогда не выходили за пределы карточки или на кнопку Connect
         top_room = max(dp(24), self.top - cy - dp(8))
         max_r = min(dp(44), top_room * 0.92, self.width * 0.22)
         glow_r = max_r * 0.78
@@ -447,7 +680,6 @@ class RadarCard(RoundedCard):
             pts = []
             for s in range(steps):
                 ang = (2.0 * math.pi * s) / steps
-                # Плавная синусоидальная волна вокруг иконки компьютера
                 wave = amp * math.sin(6.0 * ang + phase) + (amp * 0.35) * math.cos(3.0 * ang - phase)
                 r = base_r + wave
                 pts.extend((cx + math.cos(ang) * r, cy + math.sin(ang) * r))
@@ -469,7 +701,9 @@ class SlimProgressBar(Widget):
             self.t_col = Color(*track_color)
             self.t_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(2.5)])
             self.f_col = Color(*fill_color)
-            self.f_rect = RoundedRectangle(pos=self.pos, size=(self.width * self.percent, self.height), radius=[dp(2.5)])
+            self.f_rect = RoundedRectangle(
+                pos=self.pos, size=(self.width * self.percent, self.height), radius=[dp(2.5)]
+            )
         self.bind(pos=self._upd, size=self._upd)
 
     def _upd(self, *_args):
@@ -486,13 +720,25 @@ class SlimProgressBar(Widget):
 
 
 class NavTabItem(ButtonBehavior, BoxLayout):
-    def __init__(self, icon_type, title_text, is_active=False, pill_color=(0.29, 0.32, 0.36, 1), text_color=(1, 1, 1, 1), **kwargs):
+    def __init__(
+        self,
+        icon_type,
+        title_text,
+        is_active=False,
+        pill_color=(0.29, 0.32, 0.36, 1),
+        text_color=(1, 1, 1, 1),
+        **kwargs,
+    ):
         super().__init__(orientation="vertical", spacing=dp(2), padding=[dp(4), dp(4), dp(4), dp(4)], **kwargs)
         self.always_release = True
         self.pill_wrap = AnchorLayout(size_hint=(1, 0.58))
-        self.pill_bg = RoundedCard(bg_color=pill_color if is_active else (0, 0, 0, 0),
-                                   border_color=(0.44, 0.48, 0.54, 0.50) if is_active else (0, 0, 0, 0),
-                                   radius=dp(15), size_hint=(None, None), size=(dp(64), dp(30)))
+        self.pill_bg = RoundedCard(
+            bg_color=pill_color if is_active else (0, 0, 0, 0),
+            border_color=(0.44, 0.48, 0.54, 0.50) if is_active else (0, 0, 0, 0),
+            radius=dp(15),
+            size_hint=(None, None),
+            size=(dp(64), dp(30)),
+        )
         self.icon_widget = VectorIcon(icon_type=icon_type, color=text_color, size_hint=(1, 1))
         self.pill_bg.add_widget(self.icon_widget)
         self.pill_wrap.add_widget(self.pill_bg)
@@ -515,11 +761,52 @@ class NavTabItem(ButtonBehavior, BoxLayout):
         self.label.color = text_color
 
 
+class ToastBanner(RoundedCard):
+    # Всплывающее сверху уведомление о подключении устройства или неверном PIN
+    on_touch_down = on_touch_move = on_touch_up = lambda self, touch: False
+
+    def __init__(self, **kwargs):
+        super().__init__(
+            bg_color=(0.16, 0.18, 0.21, 0.96),
+            border_color=(0.20, 0.78, 0.46, 0.80),
+            radius=dp(18),
+            orientation="horizontal",
+            padding=[dp(14), dp(8), dp(14), dp(8)],
+            spacing=dp(10),
+            size_hint=(0.88, None),
+            height=dp(42),
+            pos_hint={"center_x": 0.5},
+            **kwargs,
+        )
+        self.opacity = 0.0
+        self.y = Window.height + dp(20)
+        self.dot = StatusDot(dot_color=(0.20, 0.78, 0.46, 1), size_hint=(None, None), size=(dp(16), dp(16)), pos_hint={"center_y": 0.5})
+        self.lbl = make_label("", size=12.5, halign="left", markup=True, shorten=True)
+        self.add_widget(self.dot)
+        self.add_widget(self.lbl)
+        self._hide_ev = None
+
+    def show_message(self, text, dot_color=(0.20, 0.78, 0.46, 1), text_color=(0.96, 0.97, 0.98, 1), bg_color=(0.16, 0.18, 0.21, 0.96)):
+        if self._hide_ev is not None:
+            self._hide_ev.cancel()
+        self.lbl.text = f"[b]{text}[/b]"
+        self.lbl.color = text_color
+        self.dot.set_status_color(dot_color)
+        self.update_colors(bg_color, (dot_color[0], dot_color[1], dot_color[2], 0.75))
+        Animation.cancel_all(self)
+        self.y = Window.height + dp(10)
+        target_y = Window.height - dp(58)
+        Animation(y=target_y, opacity=1.0, duration=0.25, t="out_back").start(self)
+        self._hide_ev = Clock.schedule_once(self._hide, 2.8)
+
+    def _hide(self, *_args):
+        Animation(y=Window.height + dp(20), opacity=0.0, duration=0.22, t="in_quad").start(self)
+
+
 class AppSplashScreen(FloatLayout):
-    # Плавный загрузочный экран с логотипом, неоновым свечением, полосой прогресса и fade-out анимацией
     progress = NumericProperty(0.0)
 
-    def __init__(self, on_dismiss=None, **kwargs):
+    def __init__(self, lang="en", version="1.2.0", on_dismiss=None, **kwargs):
         super().__init__(size_hint=(1, 1), pos_hint={"x": 0, "y": 0}, **kwargs)
         self.on_dismiss = on_dismiss
         self.is_dismissed = False
@@ -533,7 +820,7 @@ class AppSplashScreen(FloatLayout):
             orientation="vertical",
             spacing=dp(14),
             size_hint=(None, None),
-            size=(dp(240), dp(290)),
+            size=(dp(260), dp(305)),
             pos_hint={"center_x": 0.5, "center_y": 0.52},
         )
 
@@ -548,7 +835,9 @@ class AppSplashScreen(FloatLayout):
             self.icon_img = Image(source=icon_path, size_hint=(None, None), size=(dp(156), dp(128)), keep_ratio=True)
             icon_anchor.add_widget(self.icon_img)
         else:
-            self.icon_img = VectorIcon(icon_type="pc", color=(0.20, 0.78, 0.46, 1), size_hint=(None, None), size=(dp(90), dp(90)))
+            self.icon_img = VectorIcon(
+                icon_type="pc", color=(0.20, 0.78, 0.46, 1), size_hint=(None, None), size=(dp(90), dp(90))
+            )
             icon_anchor.add_widget(self.icon_img)
         center_box.add_widget(icon_anchor)
 
@@ -562,7 +851,7 @@ class AppSplashScreen(FloatLayout):
             height=dp(32),
         )
         self.sub_lbl = make_label(
-            "Беспроводной обмен файлами",
+            tr("splash_sub", lang),
             size=13,
             halign="center",
             color=(0.58, 0.62, 0.68, 1),
@@ -584,7 +873,7 @@ class AppSplashScreen(FloatLayout):
         center_box.add_widget(bar_anchor)
 
         self.version_lbl = make_label(
-            "Версия 1.1.0 • Запуск...",
+            tr("splash_ver", lang, ver=version),
             size=11,
             halign="center",
             color=(0.40, 0.44, 0.50, 1),
@@ -610,11 +899,13 @@ class AppSplashScreen(FloatLayout):
             return
         self.is_dismissed = True
         fade = Animation(opacity=0.0, duration=0.32, t="out_quad")
+
         def _cleanup(*_):
             if self.parent:
                 self.parent.remove_widget(self)
             if callable(self.on_dismiss):
                 self.on_dismiss()
+
         fade.bind(on_complete=_cleanup)
         fade.start(self)
 
@@ -633,7 +924,13 @@ class MacModalContainer(FloatLayout):
 
     def __init__(self, card_widget, origin_pos=None, scrim_rgba=(0, 0, 0, 0.56), on_dismiss_cb=None, **kwargs):
         super().__init__(size_hint=(1, 1), pos_hint={"x": 0, "y": 0}, **kwargs)
-        self.card, self.origin_pos, self.scrim_rgba, self.on_dismiss_cb, self.is_closing = card_widget, origin_pos, scrim_rgba, on_dismiss_cb, False
+        self.card, self.origin_pos, self.scrim_rgba, self.on_dismiss_cb, self.is_closing = (
+            card_widget,
+            origin_pos,
+            scrim_rgba,
+            on_dismiss_cb,
+            False,
+        )
         with self.canvas.before:
             self.scrim_col = Color(scrim_rgba[0], scrim_rgba[1], scrim_rgba[2], 0.0)
             self.scrim_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[0])
@@ -648,7 +945,9 @@ class MacModalContainer(FloatLayout):
 
     def animate_open(self):
         cx, cy = Window.width * 0.5, Window.height * 0.5
-        dx, dy = ((self.origin_pos[0] - cx) * 0.55, (self.origin_pos[1] - cy) * 0.55) if self.origin_pos else (0, -dp(45))
+        dx, dy = (
+            ((self.origin_pos[0] - cx) * 0.55, (self.origin_pos[1] - cy) * 0.55) if self.origin_pos else (0, -dp(45))
+        )
         self.card.scale_val, self.card.offset_x, self.card.offset_y, self.card.opacity = 0.22, dx, dy, 0.0
         Animation(scrim_alpha=self.scrim_rgba[3], duration=0.22, t="out_quad").start(self)
         Animation(scale_val=1.0, offset_x=0.0, offset_y=0.0, opacity=1.0, duration=0.30, t="out_back").start(self.card)
@@ -660,7 +959,9 @@ class MacModalContainer(FloatLayout):
         if callable(self.on_dismiss_cb):
             self.on_dismiss_cb()
         cx, cy = Window.width * 0.5, Window.height * 0.5
-        dx, dy = ((self.origin_pos[0] - cx) * 0.45, (self.origin_pos[1] - cy) * 0.45) if self.origin_pos else (0, -dp(35))
+        dx, dy = (
+            ((self.origin_pos[0] - cx) * 0.45, (self.origin_pos[1] - cy) * 0.45) if self.origin_pos else (0, -dp(35))
+        )
         Animation(scrim_alpha=0.0, duration=0.18, t="in_quad").start(self)
         anim = Animation(scale_val=0.25, offset_x=dx, offset_y=dy, opacity=0.0, duration=0.18, t="in_back")
         anim.bind(on_complete=lambda *_: self.parent and self.parent.remove_widget(self))

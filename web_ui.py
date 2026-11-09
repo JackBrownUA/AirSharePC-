@@ -1,7 +1,10 @@
-# Веб-интерфейс AirShare PC: стили, анимация звёзд (с поддержкой reduced-motion) и скрипты загрузки
+# Веб-интерфейс AirShare PC: стили, анимация звёзд, пагинация и локализованные скрипты загрузки
+
+import json
+from i18n import tr
+
 
 def get_css(theme="dark"):
-    # Учитываем переданную тему для цветовой схемы страницы и отключаем анимацию при prefers-reduced-motion
     scheme = "light" if theme == "light" else "dark"
     return f"""
     :root {{ color-scheme: {scheme}; }}
@@ -154,6 +157,8 @@ def get_css(theme="dark"):
         border-radius: 10px;
         background: rgba(255, 255, 255, 0.04);
         font-size: 14px;
+        flex-wrap: wrap;
+        gap: 8px;
     }}
     body.light .toolbar {{
         background: #fff;
@@ -164,6 +169,14 @@ def get_css(theme="dark"):
         align-items: center;
         cursor: pointer;
         user-select: none;
+    }}
+    .pagination {{
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 14px;
+        margin: 18px 0;
+        font-size: 14px;
     }}
     .file-list {{
         list-style: none;
@@ -255,7 +268,6 @@ def get_css(theme="dark"):
 
 
 def get_star_script():
-    # Сокращено до 35 звёзд, чтобы не нагружать GPU/CPU бюджетных устройств и ноутбуков
     return """
     (function(){
         const sf = document.getElementById("starfield");
@@ -274,81 +286,86 @@ def get_star_script():
     """
 
 
-def get_upload_script():
-    return """
-    function triggerUpload() {
+def get_upload_script(lang="en"):
+    msg_uploading = json.dumps(tr("web_uploading", lang))
+    msg_done = json.dumps(tr("web_upload_done", lang))
+    msg_err = json.dumps(tr("web_upload_err", lang))
+    msg_warn = json.dumps(tr("web_select_warn", lang))
+    msg_prep = json.dumps(tr("web_prep_zip", lang))
+    return f"""
+    function triggerUpload() {{
         const input = document.getElementById("up");
-        if (input) {
+        if (input) {{
             input.value = "";
             input.click();
-        }
-    }
+        }}
+    }}
 
-    async function uploadFiles(files) {
+    async function uploadFiles(files) {{
         if (!files || files.length === 0) return;
         const st = document.getElementById("status");
         const basePath = window.location.pathname || "/";
         let uploadedCount = 0;
 
-        for (let i = 0; i < files.length; i++) {
+        for (let i = 0; i < files.length; i++) {{
             const file = files[i];
-            if (st) {
+            if (st) {{
                 st.style.color = "#667eea";
-                st.innerText = "Загрузка " + file.name + " (" + (i + 1) + "/" + files.length + ")...";
-            }
-            try {
-                const res = await fetch(basePath + "?upload=" + encodeURIComponent(file.name), {
+                st.innerText = {msg_uploading} + " " + file.name + " (" + (i + 1) + "/" + files.length + ")...";
+            }}
+            try {{
+                const res = await fetch(basePath + "?upload=" + encodeURIComponent(file.name), {{
                     method: "POST",
                     body: file,
                     credentials: "same-origin",
-                    headers: {
+                    headers: {{
                         "X-File-Name": encodeURIComponent(file.name)
-                    }
-                });
-                if (!res.ok) {
+                    }}
+                }});
+                if (!res.ok) {{
                     const errText = await res.text();
                     throw new Error(errText || ("HTTP " + res.status));
-                }
+                }}
                 uploadedCount++;
-            } catch (err) {
-                if (st) {
+            }} catch (err) {{
+                if (st) {{
                     st.style.color = "#ff453a";
-                    st.innerText = "Ошибка загрузки " + file.name + ": " + err.message;
-                }
+                    st.innerText = {msg_err} + file.name + ": " + err.message;
+                }}
                 return;
-            }
-        }
-        if (st && uploadedCount > 0) {
+            }}
+        }}
+        if (st && uploadedCount > 0) {{
             st.style.color = "#30d158";
-            st.innerText = "Загружено файлов: " + uploadedCount + ". Обновление...";
-        }
+            st.innerText = {msg_done} + uploadedCount;
+        }}
         window.location.href = basePath + window.location.search;
-    }
+    }}
 
-    function toggleSelectAll(masterCheckbox) {
+    function toggleSelectAll(masterCheckbox) {{
         const boxes = document.querySelectorAll('input[name="files"]');
-        for (let i = 0; i < boxes.length; i++) {
+        for (let i = 0; i < boxes.length; i++) {{
             boxes[i].checked = masterCheckbox.checked;
-        }
-    }
+        }}
+    }}
 
-    function submitSelectedDownload(event) {
+    function submitSelectedDownload(event) {{
         const checked = document.querySelectorAll('input[name="files"]:checked');
         const st = document.getElementById("status");
-        if (!checked || checked.length === 0) {
+        if (!checked || checked.length === 0) {{
             if (event) event.preventDefault();
-            if (st) {
+            if (st) {{
                 st.style.color = "#ff9f0a";
-                st.innerText = "Отметьте галочками хотя бы один файл или папку для скачивания.";
-            }
+                st.innerText = {msg_warn};
+            }}
             return false;
-        }
-        if (st) {
+        }}
+        if (st) {{
             st.style.color = "#667eea";
-            st.innerText = "Подготовка архива (" + checked.length + " поз.)...";
-        }
+            st.innerText = {msg_prep};
+        }}
         return true;
-    }
+    }}
     """
 
 
@@ -361,7 +378,6 @@ def get_theme_script():
         const btn = document.getElementById("themeBtn");
         if (btn) {
             btn.innerText = isLight ? "🌙" : "☀️";
-            btn.title = isLight ? "Переключить на тёмную тему" : "Переключить на светлую тему";
         }
         try {
             localStorage.setItem("airshare_theme", isLight ? "light" : "dark");

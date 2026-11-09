@@ -1,4 +1,4 @@
-# Главный модуль приложения AirShare PC: управление жизненным циклом Kivy UI и фоновым HTTP-сервером
+# Главный модуль приложения AirShare PC: многоязычный интерфейс, контроль Wi-Fi, выбор папки и управление сервером
 
 import logging
 import os
@@ -17,24 +17,28 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.textinput import TextInput
 
 from config import APP_NAME, APP_VERSION, SERVER_PORT, STORAGE_PATH
+from i18n import SUPPORTED_LANGUAGES, tr
 from server import AirShareHandler, ReusableThreadingServer
 from themes import THEMES
 from ui_widgets import (
     AnimatedToggleSwitch,
+    AppSplashScreen,
     ClickableCard,
     DrawerMenuRow,
     DrawerOverlay,
     DrawerPanel,
+    FlagBadge,
     MacModalContainer,
     NavTabItem,
     RadarCard,
+    RadioCircle,
     RoundedActionButton,
     RoundedCard,
     SlimProgressBar,
     StatusDot,
+    ToastBanner,
     VectorIcon,
     make_label,
-    AppSplashScreen,
 )
 from utils import (
     generate_pin,
@@ -43,6 +47,7 @@ from utils import (
     get_local_ip,
     get_network_label,
     get_storage_stats,
+    is_wifi_connected,
     load_settings,
     request_android_full_storage,
     save_settings,
@@ -52,7 +57,6 @@ logger = logging.getLogger("airshare.app")
 
 
 class DynamicAirShareHandler(AirShareHandler):
-    # Позволяет менять раздаваемую папку (All Storage, Downloads, DCIM, Documents) без перезапуска приложения
     active_storage_path = STORAGE_PATH
 
     def __init__(self, *args, **kwargs):
@@ -66,11 +70,11 @@ class DynamicAirShareHandler(AirShareHandler):
 class AirShareApp(App):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # Все изменяемые состояния храним на экземпляре приложения, а не в атрибутах класса
         self.server = None
         self.is_stopping = False
         self.has_server_error = False
-        self.active_folder_key = "All Storage"
+        # По умолчанию раздаём безопасную папку Downloads (п. 28.b); весь накопитель включается с предупреждением
+        self.active_folder_key = "Downloads"
         self.active_nav_tab = "transfer"
         self.keep_alive_locked = True
         self._wake_lock = None
@@ -78,20 +82,35 @@ class AirShareApp(App):
         self.transfer_history = []
         self.active_modal = None
         self.theme_mode = "dark"
+        self.language = "en"
         self.server_port = SERVER_PORT
         self.saved_password = ""
+
+    def _t(self, key, **kwargs):
+        return tr(key, self.language, **kwargs)
 
     def _get_folder_map(self):
         base = STORAGE_PATH if os.path.isdir(STORAGE_PATH) else os.path.expanduser("~")
         return {
-            "All Storage": (base, "folder", "Вся память устройства"),
-            "Downloads": (os.path.join(base, "Download"), "download", "Загрузки из браузера и мессенджеров"),
-            "Camera Roll": (os.path.join(base, "DCIM"), "gallery", "Фотографии и видео с камеры"),
-            "Documents": (os.path.join(base, "Documents"), "document", "Документы и рабочие файлы"),
+            "Downloads": (os.path.join(base, "Download"), "download", self._t("folder_dl_title"), self._t("folder_dl_desc")),
+            "Camera Roll": (os.path.join(base, "DCIM"), "gallery", self._t("folder_cam_title"), self._t("folder_cam_desc")),
+            "Documents": (os.path.join(base, "Documents"), "document", self._t("folder_doc_title"), self._t("folder_doc_desc")),
+            "All Storage": (base, "folder", self._t("folder_all_title"), self._t("folder_all_desc")),
         }
 
+    def _resolve_folder_path(self, folder_key):
+        fmap = self._get_folder_map()
+        path_val = fmap.get(folder_key, fmap["Downloads"])[0]
+        if not os.path.isdir(path_val):
+            try:
+                os.makedirs(path_val, exist_ok=True)
+            except OSError:
+                path_val = STORAGE_PATH
+        return path_val
+
     def get_connection_url(self):
-        # Экранируем PIN через urllib.parse.quote, чтобы спецсимволы не ломали URL авторизации
+        if not is_wifi_connected():
+            return self._t("no_wifi_url")
         ip = get_local_ip()
         pwd = (self.saved_password or "").strip()
         if not pwd:
@@ -103,10 +122,9 @@ class AirShareApp(App):
     def update_connection_url_display(self):
         url = self.get_connection_url()
         self.addr_label.text = url
-        self.addr_label.font_size = sp(10.5) if len(url) > 38 else (sp(11.5) if len(url) > 30 else sp(13.5))
+        self.addr_label.font_size = sp(10.5) if len(url) > 38 else (sp(11.5) if len(url) > 30 else sp(13.0))
 
     def set_keep_alive(self, enabled):
-        # Удерживаем CPU WakeLock и высокопроизводительный WifiLock, чтобы передача не обрывалась при гашении экрана
         self.keep_alive_locked = bool(enabled)
         if hasattr(self, "keep_alive_switch"):
             self.keep_alive_switch.set_active(self.keep_alive_locked, animate=True)
@@ -153,13 +171,14 @@ class AirShareApp(App):
     def build(self):
         self.title = f"{APP_NAME} v{APP_VERSION}"
         self.transfer_history = []
-        request_android_full_storage()
         settings = load_settings()
         self.theme_mode = settings.get("theme_mode", "dark")
+        self.language = settings.get("language", "en")
         self.server_port = settings.get("port", SERVER_PORT)
         self.saved_password = settings.get("password", "")
-        DynamicAirShareHandler.active_storage_path = STORAGE_PATH
+        DynamicAirShareHandler.active_storage_path = self._resolve_folder_path(self.active_folder_key)
         DynamicAirShareHandler.current_password = self.saved_password
+        DynamicAirShareHandler.current_language = self.language
 
         p = THEMES["dark"]
         self.root_widget = FloatLayout()
@@ -192,12 +211,12 @@ class AirShareApp(App):
             radius=dp(17),
             orientation="horizontal",
             size_hint=(None, None),
-            size=(dp(148), dp(34)),
+            size=(dp(136), dp(34)),
             padding=[dp(10), dp(4), dp(10), dp(4)],
             spacing=dp(6),
         )
         self.wifi_icon = VectorIcon(icon_type="wifi", color=p["text"], size_hint=(None, 1), width=dp(18))
-        self.wifi_label = make_label(get_network_label(), size=11.5, halign="center", shorten=True)
+        self.wifi_label = make_label(get_network_label(self.language), size=12, halign="center", shorten=True)
         self.wifi_pill.add_widget(self.wifi_icon)
         self.wifi_pill.add_widget(self.wifi_label)
         self.wifi_pill.bind(on_press=self.refresh_network_status)
@@ -216,7 +235,6 @@ class AirShareApp(App):
             spacing=dp(8),
             size_hint=(1, 0.55),
         )
-        # Компактная иконка монитора с запасом места сверху и снизу, чтобы волнистые круги не задевали края и кнопку Connect
         icon_holder = AnchorLayout(size_hint=(1, 0.34))
         self.monitor_icon = VectorIcon(
             icon_type="pc", color=p["text"], size_hint=(None, None), size=(dp(56), dp(44))
@@ -226,13 +244,13 @@ class AirShareApp(App):
 
         btn_anchor = AnchorLayout(size_hint=(1, 0.22))
         self.connect_btn = RoundedActionButton(
-            text="Connect",
+            text=self._t("connect"),
             bg_color=p["green"],
             border_color=(1, 1, 1, 0.18),
-            font_size=sp(17),
+            font_size=sp(16.5),
             radius=dp(23),
             size_hint=(None, None),
-            size=(dp(190), dp(45)),
+            size=(dp(196), dp(45)),
         )
         self.connect_btn.bind(on_press=self.toggle_server)
         btn_anchor.add_widget(self.connect_btn)
@@ -248,7 +266,7 @@ class AirShareApp(App):
             padding=[dp(14), dp(5), dp(12), dp(5)],
             spacing=dp(10),
         )
-        self.keep_alive_label = make_label("Активен при заблокированном экране", size=12)
+        self.keep_alive_label = make_label(self._t("keep_alive"), size=12)
         self.keep_alive_switch = AnimatedToggleSwitch(
             active=self.keep_alive_locked,
             size_hint=(None, None),
@@ -294,9 +312,8 @@ class AirShareApp(App):
         addr_row.add_widget(self.addr_pill)
         addr_row.add_widget(self.copy_btn)
 
-        # Короткое предупреждение о том, что HTTP не шифруется и предназначен для домашней сети
         self.http_warn_label = make_label(
-            "HTTP без шифрования • используйте в домашней сети",
+            self._t("http_warn"),
             size=10.5,
             halign="center",
             size_hint=(1, 0.08),
@@ -307,7 +324,7 @@ class AirShareApp(App):
         self.main_content.add_widget(self.radar_card)
 
         self.transfers_header = make_label(
-            "[b]Recent Transfers[/b]", size=16, markup=True, size_hint=(1, None), height=dp(24)
+            f"[b]{self._t('recent_transfers')}[/b]", size=16, markup=True, size_hint=(1, None), height=dp(24)
         )
         self.main_content.add_widget(self.transfers_header)
 
@@ -322,48 +339,47 @@ class AirShareApp(App):
         )
         self.transfers_card.bind(on_press=self.open_transfers_modal)
 
-        row1 = BoxLayout(orientation="horizontal", spacing=dp(12), size_hint=(1, 0.5))
+        self.tr_row1 = BoxLayout(orientation="horizontal", spacing=dp(12), size_hint=(1, 0.5))
         ico1 = VectorIcon(
             icon_type="zip_badge", size_hint=(None, None), size=(dp(42), dp(42)), pos_hint={"center_y": 0.5}
         )
         info1 = BoxLayout(orientation="vertical", spacing=dp(3), pos_hint={"center_y": 0.5})
         top1 = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(20))
-        self.tr1_name = make_label("Нет активных передач", size=14, size_hint=(0.76, 1))
+        self.tr1_name = make_label(self._t("no_active_transfers"), size=14, size_hint=(0.76, 1))
         self.tr1_pct = make_label("—", size=13, halign="right", size_hint=(0.24, 1))
         top1.add_widget(self.tr1_name)
         top1.add_widget(self.tr1_pct)
         self.tr1_bar = SlimProgressBar(
             percent=0.0, track_color=p["track"], fill_color=p["amber"], size_hint=(1, None), height=dp(4.2)
         )
-        self.tr1_sub = make_label("Ожидание подключения с ПК", size=11.5, size_hint=(1, None), height=dp(16))
+        self.tr1_sub = make_label(self._t("waiting_pc"), size=11.5, size_hint=(1, None), height=dp(16))
         for w in (top1, self.tr1_bar, self.tr1_sub):
             info1.add_widget(w)
-        row1.add_widget(ico1)
-        row1.add_widget(info1)
+        self.tr_row1.add_widget(ico1)
+        self.tr_row1.add_widget(info1)
 
-        row2 = BoxLayout(orientation="horizontal", spacing=dp(12), size_hint=(1, 0.5))
+        # Вторая строка передач скрыта, пока в сессии меньше 2 переданных файлов (п. 19)
+        self.tr_row2 = BoxLayout(orientation="horizontal", spacing=dp(12), size_hint=(1, 0.5), opacity=0.0)
         ico2 = VectorIcon(
             icon_type="img_badge", size_hint=(None, None), size=(dp(42), dp(42)), pos_hint={"center_y": 0.5}
         )
         info2 = BoxLayout(orientation="vertical", spacing=dp(3), pos_hint={"center_y": 0.5})
         top2 = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(20))
-        self.tr2_name = make_label("История сессии", size=14, size_hint=(0.76, 1))
-        self.tr2_pct = make_label("—", size=13, halign="right", size_hint=(0.24, 1))
+        self.tr2_name = make_label("", size=14, size_hint=(0.76, 1))
+        self.tr2_pct = make_label("", size=13, halign="right", size_hint=(0.24, 1))
         top2.add_widget(self.tr2_name)
         top2.add_widget(self.tr2_pct)
         self.tr2_bar = SlimProgressBar(
             percent=0.0, track_color=p["track"], fill_color=p["blue"], size_hint=(1, None), height=dp(4.2)
         )
-        self.tr2_sub = make_label(
-            "Переданные файлы появятся здесь", size=11.5, halign="left", size_hint=(1, None), height=dp(16)
-        )
+        self.tr2_sub = make_label("", size=11.5, halign="left", size_hint=(1, None), height=dp(16))
         for w in (top2, self.tr2_bar, self.tr2_sub):
             info2.add_widget(w)
-        row2.add_widget(ico2)
-        row2.add_widget(info2)
+        self.tr_row2.add_widget(ico2)
+        self.tr_row2.add_widget(info2)
 
-        self.transfers_card.add_widget(row1)
-        self.transfers_card.add_widget(row2)
+        self.transfers_card.add_widget(self.tr_row1)
+        self.transfers_card.add_widget(self.tr_row2)
         self.main_content.add_widget(self.transfers_card)
 
         self.bottom_nav = RoundedCard(
@@ -377,19 +393,19 @@ class AirShareApp(App):
             height=dp(64),
         )
         self.nav_transfer = NavTabItem(
-            "transfer", "Transfer", is_active=True, pill_color=p["pill_active"], text_color=p["text"]
+            "transfer", self._t("nav_transfer"), is_active=True, pill_color=p["pill_active"], text_color=p["text"]
         )
         self.nav_transfer.bind(on_press=self._on_nav_transfer)
         self.nav_files = NavTabItem(
-            "folder", "Files", is_active=False, pill_color=p["pill_active"], text_color=p["subtext"]
+            "folder", self._t("nav_files"), is_active=False, pill_color=p["pill_active"], text_color=p["subtext"]
         )
         self.nav_files.bind(on_press=self._on_nav_files)
         self.nav_devices = NavTabItem(
-            "phone", "Devices", is_active=False, pill_color=p["pill_active"], text_color=p["subtext"]
+            "phone", self._t("nav_devices"), is_active=False, pill_color=p["pill_active"], text_color=p["subtext"]
         )
         self.nav_devices.bind(on_press=self._on_nav_devices)
         self.nav_settings = NavTabItem(
-            "gear", "Settings", is_active=False, pill_color=p["pill_active"], text_color=p["subtext"]
+            "gear", self._t("nav_settings"), is_active=False, pill_color=p["pill_active"], text_color=p["subtext"]
         )
         self.nav_settings.bind(on_press=self._on_nav_settings)
         for tab in (self.nav_transfer, self.nav_files, self.nav_devices, self.nav_settings):
@@ -432,7 +448,7 @@ class AirShareApp(App):
         phone_row.add_widget(self.drawer_phone_label)
         self.drawer.add_widget(phone_row)
 
-        stats = get_storage_stats()
+        stats = get_storage_stats(self.language)
         self.drawer_storage_card = ClickableCard(
             bg_color=p["drawer_card"],
             border_color=p["drawer_border"],
@@ -469,23 +485,23 @@ class AirShareApp(App):
             height=dp(66),
         )
         self.drawer_status_icon = VectorIcon(icon_type="pc", color=p["text"], size_hint=(None, 1), width=dp(32))
-        self.drawer_status_label = make_label(
-            "[b]Server Stopped[/b]\n[size=12sp]Tap to start[/size]", size=14.5, markup=True
-        )
+        self.drawer_status_label = make_label("", size=14.0, markup=True)
         self.drawer_status_card.add_widget(self.drawer_status_icon)
         self.drawer_status_card.add_widget(self.drawer_status_label)
         self.drawer_status_card.bind(on_press=self.toggle_server)
         self.drawer.add_widget(self.drawer_status_card)
 
+        # В боковой панели вместо дублирующего Shared Folders первой строкой стоит выбор языка (Language) с иконкой глобуса
         menu_box = BoxLayout(orientation="vertical", spacing=dp(4), size_hint=(1, 1))
         self.menu_items_refs = []
-        for ico_name, label_text, cb in [
-            ("folder", "Shared Folders", self.open_shared_folders_modal),
-            ("lock", "Security & PIN", self.open_security_modal),
-            ("sliders", "Port Settings", self.open_port_modal),
-            ("info", "Help & Feedback", self.open_help_modal),
+        for menu_key, ico_name, cb in [
+            ("menu_language", "globe", self.open_language_modal),
+            ("menu_security", "lock", self.open_security_modal),
+            ("menu_port", "sliders", self.open_port_modal),
+            ("menu_help", "info", self.open_help_modal),
         ]:
-            row = DrawerMenuRow(ico_name, label_text, p["text"], p["subtext"], p["pill_bg"])
+            row = DrawerMenuRow(ico_name, self._t(menu_key), p["text"], p["subtext"], p["pill_bg"])
+            row.menu_key = menu_key
             row.bind(on_press=cb)
             menu_box.add_widget(row)
             self.menu_items_refs.append(row)
@@ -501,28 +517,70 @@ class AirShareApp(App):
             size_hint=(1, None),
             height=dp(44),
         )
-        self.t_btn_dark = RoundedActionButton(text="Dark", radius=dp(16), font_size=sp(13))
+        self.t_btn_dark = RoundedActionButton(text=self._t("theme_dark"), radius=dp(16), font_size=sp(12.5))
         self.t_btn_dark.bind(on_press=lambda *_: self.set_theme_mode("dark"))
-        self.t_btn_light = RoundedActionButton(text="Light", radius=dp(16), font_size=sp(13))
+        self.t_btn_light = RoundedActionButton(text=self._t("theme_light"), radius=dp(16), font_size=sp(12.5))
         self.t_btn_light.bind(on_press=lambda *_: self.set_theme_mode("light"))
-        self.t_btn_auto = RoundedActionButton(text="Auto", radius=dp(16), font_size=sp(13))
+        self.t_btn_auto = RoundedActionButton(text=self._t("theme_auto"), radius=dp(16), font_size=sp(12.5))
         self.t_btn_auto.bind(on_press=lambda *_: self.set_theme_mode("system"))
         for b in (self.t_btn_dark, self.t_btn_light, self.t_btn_auto):
             self.theme_pill_container.add_widget(b)
         self.drawer.add_widget(self.theme_pill_container)
         self.root_widget.add_widget(self.drawer)
 
+        self.toast_banner = ToastBanner()
+        self.root_widget.add_widget(self.toast_banner)
+
         DynamicAirShareHandler.on_client_connected = self._on_client_connected
         DynamicAirShareHandler.on_file_transfer = self._on_file_transfer
+        DynamicAirShareHandler.on_bad_pin_attempt = self._on_bad_pin_attempt
         self.update_connection_url_display()
         self.apply_theme()
-        # Показываем плавный экран приветствия при запуске с логотипом, полосой прогресса и fade-out
-        self.splash_screen = AppSplashScreen()
+
+        self.splash_screen = AppSplashScreen(lang=self.language, version=APP_VERSION)
         self.root_widget.add_widget(self.splash_screen)
+
         return self.root_widget
 
+    def show_toast(self, message, kind="info"):
+        p = THEMES.get(self._get_effective_theme(), THEMES["dark"])
+        dot_c = p["red"] if kind == "error" else (p["amber"] if kind == "warn" else p["green"])
+        self.toast_banner.show_message(message, dot_color=dot_c, text_color=p["text"], bg_color=p["modal_bg"])
+
+    def set_language(self, lang_code):
+        self.language = lang_code
+        save_settings(language=lang_code)
+        DynamicAirShareHandler.current_language = lang_code
+        self.apply_language()
+        self.apply_theme()
+
+    def apply_language(self):
+        self.wifi_label.text = get_network_label(self.language)
+        self.keep_alive_label.text = self._t("keep_alive")
+        self.http_warn_label.text = self._t("http_warn")
+        self.transfers_header.text = f"[b]{self._t('recent_transfers')}[/b]"
+        if not self.transfer_history:
+            self.tr1_name.text = self._t("no_active_transfers")
+            self.tr1_sub.text = self._t("waiting_pc")
+            self.tr_row2.opacity = 0.0
+
+        self.nav_transfer.label.text = self._t("nav_transfer")
+        self.nav_files.label.text = self._t("nav_files")
+        self.nav_devices.label.text = self._t("nav_devices")
+        self.nav_settings.label.text = self._t("nav_settings")
+
+        stats = get_storage_stats(self.language)
+        self.drawer_storage_label.text = stats["text"]
+
+        for row in self.menu_items_refs:
+            row.lbl_w.text = self._t(row.menu_key)
+
+        self.t_btn_dark.set_text(self._t("theme_dark"))
+        self.t_btn_light.set_text(self._t("theme_light"))
+        self.t_btn_auto.set_text(self._t("theme_auto"))
+        self.update_connection_url_display()
+
     def on_stop(self):
-        # Корректно освобождаем WakeLock/WifiLock и останавливаем сервер при закрытии приложения
         self.radar_card.set_wave_active(False)
         self.set_keep_alive(False)
         if self.server is not None:
@@ -569,12 +627,14 @@ class AirShareApp(App):
 
     def refresh_network_status(self, *_args):
         self.update_connection_url_display()
-        self.wifi_label.text = get_network_label()
+        self.wifi_label.text = get_network_label(self.language)
+        p = THEMES.get(self._get_effective_theme(), THEMES["dark"])
+        self._update_status_indicators(p)
 
     def open_drawer(self, *_args):
         self.drawer.is_open = self.overlay.is_open = True
         self.set_active_nav("settings")
-        stats = get_storage_stats()
+        stats = get_storage_stats(self.language)
         self.drawer_storage_label.text = stats["text"]
         self.drawer_storage_bar.set_percent(stats["percent"])
         palette = THEMES.get(self._get_effective_theme(), THEMES["dark"])
@@ -604,25 +664,28 @@ class AirShareApp(App):
         self.apply_theme()
 
     def _update_status_indicators(self, p):
-        ip = get_local_ip()
+        wifi_ok = is_wifi_connected()
         is_online = self.server is not None
-        has_issue = self.has_server_error or (is_online and ip in ("127.0.0.1", "0.0.0.0"))
+        has_issue = self.has_server_error or (is_online and not wifi_ok)
         self.status_dot.set_status_color(p["yellow"] if has_issue else (p["green"] if is_online else p["red"]))
-        self.radar_card.set_wave_active(is_online)
-        self.wifi_label.text = get_network_label()
+        self.radar_card.set_wave_active(is_online and wifi_ok)
+        self.wifi_label.text = get_network_label(self.language)
+        self.wifi_icon.set_color(p["green"] if wifi_ok else p["subtext"])
+
+        fmap = self._get_folder_map()
+        cur_folder_title = fmap.get(self.active_folder_key, fmap["Downloads"])[2]
+
         if is_online:
-            self.connect_btn.set_text("Disconnect")
+            self.connect_btn.set_text(self._t("disconnect"))
             self.connect_btn.update_colors(p["red"], (1, 1, 1, 0.22))
-            self.drawer_status_label.text = (
-                f"[b]Server Active[/b]\n[size={int(sp(12))}]Port {self.server_port} • {self.active_folder_key}[/size]"
-            )
+            sub = self._t("port_folder_fmt", port=self.server_port, folder=cur_folder_title)
+            self.drawer_status_label.text = f"[b]{self._t('server_active')}[/b]\n[size={int(sp(11.5))}]{sub}[/size]"
             self.drawer_status_icon.set_color(p["green"])
         else:
-            self.connect_btn.set_text("Connect")
+            self.connect_btn.set_text(self._t("connect"))
             self.connect_btn.update_colors(p["green"], (1, 1, 1, 0.22))
-            self.drawer_status_label.text = (
-                f"[b]Server Stopped[/b]\n[size={int(sp(12))}]Tap to start on port {self.server_port}[/size]"
-            )
+            sub = self._t("tap_to_start_port", port=self.server_port)
+            self.drawer_status_label.text = f"[b]{self._t('server_stopped')}[/b]\n[size={int(sp(11.5))}]{sub}[/size]"
             self.drawer_status_icon.set_color(p["subtext"])
 
     def apply_theme(self):
@@ -632,7 +695,6 @@ class AirShareApp(App):
         Window.clearcolor = p["bg"]
         self.device_label.color = self.wifi_label.color = p["text"]
         self.wifi_pill.update_colors(p["pill_bg"], p["card_border"])
-        self.wifi_icon.set_color(p["text"])
         self.radar_card.update_radar_colors(p["radar_bg"], p["card_border"], p["radar_ring"], p["radar_glow"])
         self.monitor_icon.set_color(p["text"])
         self.keep_alive_row.update_colors(p["pill_bg"], p["card_border"])
@@ -677,25 +739,29 @@ class AirShareApp(App):
             btn.lbl.color = p["text"] if act else p["subtext"]
 
     def copy_address(self, *_args):
+        if not is_wifi_connected():
+            self.open_no_wifi_modal(self.addr_pill)
+            return
         url = self.get_connection_url()
         try:
             from kivy.core.clipboard import Clipboard
             Clipboard.copy(url)
         except Exception as exc:
             logger.debug("Не удалось скопировать ссылку в буфер обмена: %s", exc)
-        self.addr_label.text = "Copied to clipboard!"
-        self.addr_label.font_size = sp(13)
+        self.addr_label.text = self._t("copied_clipboard")
+        self.addr_label.font_size = sp(12.5)
         Clock.schedule_once(lambda _dt: self.update_connection_url_display(), 1.3)
 
-    def _on_client_connected(self, device_title, os_badge, ip):
-        Clock.schedule_once(
-            lambda _dt: setattr(
-                self.drawer_status_label,
-                "text",
-                f"[b]{device_title}[/b]\n[size={int(sp(12))}]{os_badge} • {ip}[/size]",
-            ),
-            0,
-        )
+    def _on_client_connected(self, device_title, os_badge, ip, is_first=False):
+        def _upd(_dt):
+            self.drawer_status_label.text = f"[b]{device_title}[/b]\n[size={int(sp(11.5))}]{os_badge} • {ip}[/size]"
+            if is_first:
+                self.show_toast(self._t("toast_connected", dev=device_title, ip=ip), kind="info")
+
+        Clock.schedule_once(_upd, 0)
+
+    def _on_bad_pin_attempt(self, ip):
+        Clock.schedule_once(lambda _dt: self.show_toast(self._t("toast_bad_pin", ip=ip), kind="error"), 0)
 
     def _on_file_transfer(self, filename, size_str, direction):
         def _upd(_dt):
@@ -704,8 +770,9 @@ class AirShareApp(App):
                 self.tr2_pct.text = self.tr1_pct.text
                 self.tr2_sub.text = self.tr1_sub.text
                 self.tr2_bar.set_percent(1.0)
+                self.tr_row2.opacity = 1.0
             self.tr1_name.text, self.tr1_pct.text = filename, "100%"
-            act = "Uploaded" if direction == "upload" else "Downloaded"
+            act = self._t("uploaded") if direction == "upload" else self._t("downloaded")
             self.tr1_sub.text = f"{act} • {size_str}"
             self.tr1_bar.set_percent(1.0)
             self.transfer_history.insert(0, f"{filename} ({act} • {size_str})")
@@ -716,19 +783,31 @@ class AirShareApp(App):
         if self.is_stopping:
             return
         if self.server is None:
+            # Проверяем подключение к Wi-Fi перед запуском сервера (п. 13)
+            if not is_wifi_connected():
+                self.open_no_wifi_modal(self.connect_btn)
+                self.update_connection_url_display()
+                self.apply_theme()
+                return
+
             settings = load_settings()
             self.saved_password = settings.get("password", "")
             self.server_port = settings.get("port", SERVER_PORT)
             DynamicAirShareHandler.current_password = self.saved_password
             DynamicAirShareHandler.default_theme = self._get_effective_theme()
+            DynamicAirShareHandler.current_language = self.language
+            DynamicAirShareHandler._notified_ips.clear()
             self.update_connection_url_display()
+
+            bind_ip = get_local_ip()
             try:
-                self.server = ReusableThreadingServer(("", self.server_port), DynamicAirShareHandler)
+                # Привязываем сокет именно к локальному Wi-Fi IP, а не к 0.0.0.0 (п. 13)
+                self.server = ReusableThreadingServer((bind_ip, self.server_port), DynamicAirShareHandler)
                 threading.Thread(target=self.server.serve_forever, daemon=True).start()
                 self.has_server_error = False
                 self.set_keep_alive(True)
             except OSError as exc:
-                logger.error("Не удалось запустить HTTP-сервер на порту %s: %s", self.server_port, exc)
+                logger.error("Не удалось запустить HTTP-сервер на %s:%s: %s", bind_ip, self.server_port, exc)
                 self.server = None
                 self.has_server_error = True
             self.apply_theme()
@@ -774,7 +853,7 @@ class AirShareApp(App):
             radius=dp(26),
             orientation="vertical",
             padding=[dp(20), dp(20), dp(20), dp(18)],
-            spacing=dp(12),
+            spacing=dp(10),
             size_hint=(0.90, None),
             height=dp(height_dp),
             pos_hint={"center_x": 0.5, "center_y": 0.5},
@@ -802,12 +881,130 @@ class AirShareApp(App):
         modal.animate_open()
         return modal, card, p
 
+    def open_no_wifi_modal(self, source_widget=None, *_args):
+        modal, card, p = self._create_mac_modal(self._t("no_wifi_title"), "", 235, source_widget)
+        inner = RoundedCard(
+            bg_color=p["drawer_card"],
+            border_color=p["drawer_border"],
+            radius=dp(16),
+            padding=dp(14),
+            size_hint=(1, 1),
+        )
+        inner.add_widget(make_label(self._t("no_wifi_body"), size=13, color=p["text"]))
+        card.add_widget(inner)
+        btn_ok = RoundedActionButton(
+            self._t("ok_understand"),
+            bg_color=p["blue"],
+            border_color=(1, 1, 1, 0.2),
+            size_hint=(1, None),
+            height=dp(44),
+        )
+        btn_ok.bind(on_press=lambda *_: modal.dismiss())
+        card.add_widget(btn_ok)
+
+    def open_language_modal(self, source_widget=None, *_args):
+        # Модальное окно выбора из 6 языков с векторными флагами и полуобъёмными радио-кружочками
+        modal, card, p = self._create_mac_modal(
+            self._t("lang_title"), self._t("lang_subtitle"), 430, source_widget
+        )
+        list_box = BoxLayout(orientation="vertical", spacing=dp(6), size_hint=(1, 1))
+        radio_map = {}
+
+        for code, native_name in SUPPORTED_LANGUAGES:
+            is_sel = code == self.language
+            row_card = ClickableCard(
+                bg_color=p["pill_active"] if is_sel else p["drawer_card"],
+                border_color=p["green"] if is_sel else p["drawer_border"],
+                radius=dp(14),
+                orientation="horizontal",
+                size_hint=(1, None),
+                height=dp(44),
+                padding=[dp(12), dp(6), dp(14), dp(6)],
+                spacing=dp(12),
+            )
+            flag_w = FlagBadge(lang_code=code, size_hint=(None, None), size=(dp(30), dp(22)), pos_hint={"center_y": 0.5})
+            name_lbl = make_label(f"[b]{native_name}[/b]", size=14.5, markup=True, color=p["text"])
+            radio_w = RadioCircle(selected=is_sel, size_hint=(None, None), size=(dp(26), dp(26)), pos_hint={"center_y": 0.5})
+            radio_map[code] = (row_card, radio_w)
+
+            def _select_lang(_inst, c=code):
+                for other_c, (r_card, r_circle) in radio_map.items():
+                    sel = other_c == c
+                    r_circle.set_selected(sel, animate=True)
+                    r_card.update_colors(
+                        p["pill_active"] if sel else p["drawer_card"],
+                        p["green"] if sel else p["drawer_border"],
+                    )
+                self.set_language(c)
+                Clock.schedule_once(lambda _dt: modal.dismiss(), 0.24)
+
+            row_card.bind(on_press=_select_lang)
+            for w in (flag_w, name_lbl, radio_w):
+                row_card.add_widget(w)
+            list_box.add_widget(row_card)
+
+        card.add_widget(list_box)
+        btn_close = RoundedActionButton(
+            self._t("close"),
+            bg_color=p["pill_bg"],
+            border_color=p["drawer_border"],
+            text_color=p["text"],
+            size_hint=(1, None),
+            height=dp(42),
+        )
+        btn_close.bind(on_press=lambda *_: modal.dismiss())
+        card.add_widget(btn_close)
+
+    def _apply_folder_selection(self, key_name, path_val):
+        self.active_folder_key = key_name
+        if not os.path.isdir(path_val):
+            try:
+                os.makedirs(path_val, exist_ok=True)
+            except OSError:
+                path_val = STORAGE_PATH
+        DynamicAirShareHandler.active_storage_path = path_val
+        self.apply_theme()
+
+    def open_all_storage_confirm_modal(self, path_val, source_widget=None):
+        # Явное предупреждение перед открытием доступа ко всему накопителю смартфона (п. 28.b)
+        modal, card, p = self._create_mac_modal(
+            self._t("all_storage_warn_title"), "", 255, source_widget
+        )
+        inner = RoundedCard(
+            bg_color=p["drawer_card"],
+            border_color=p["amber"],
+            radius=dp(16),
+            padding=dp(14),
+            size_hint=(1, 1),
+        )
+        inner.add_widget(make_label(self._t("all_storage_warn_body"), size=13, color=p["text"]))
+        card.add_widget(inner)
+
+        btn_row = BoxLayout(orientation="horizontal", spacing=dp(10), size_hint=(1, None), height=dp(44))
+        btn_cancel = RoundedActionButton(
+            self._t("cancel"), bg_color=p["pill_bg"], border_color=p["drawer_border"], text_color=p["text"]
+        )
+        btn_confirm = RoundedActionButton(
+            self._t("confirm_allow"), bg_color=p["amber"], border_color=(1, 1, 1, 0.2), text_color=(1, 1, 1, 1)
+        )
+
+        def _confirm(*_):
+            request_android_full_storage()
+            self._apply_folder_selection("All Storage", path_val)
+            modal.dismiss()
+
+        btn_cancel.bind(on_press=lambda *_: modal.dismiss())
+        btn_confirm.bind(on_press=_confirm)
+        btn_row.add_widget(btn_cancel)
+        btn_row.add_widget(btn_confirm)
+        card.add_widget(btn_row)
+
     def open_shared_folders_modal(self, source_widget=None, *_args):
         modal, card, p = self._create_mac_modal(
-            "Shared Folders", "Выберите папку для раздачи на ПК:", 395, source_widget
+            self._t("folders_title"), self._t("folders_subtitle"), 395, source_widget
         )
         list_box = BoxLayout(orientation="vertical", spacing=dp(8), size_hint=(1, 1))
-        for key_name, (path_val, icon_kind, desc_txt) in self._get_folder_map().items():
+        for key_name, (path_val, icon_kind, title_txt, desc_txt) in self._get_folder_map().items():
             is_cur = key_name == self.active_folder_key
             item_card = ClickableCard(
                 bg_color=p["pill_active"] if is_cur else p["drawer_card"],
@@ -827,7 +1024,7 @@ class AirShareApp(App):
                 pos_hint={"center_y": 0.5},
             )
             txt_lbl = make_label(
-                f"[b]{key_name}[/b]\n[size={int(sp(11))}]{desc_txt}[/size]",
+                f"[b]{title_txt}[/b]\n[size={int(sp(11))}]{desc_txt}[/size]",
                 size=13.5,
                 markup=True,
                 color=p["text"],
@@ -840,16 +1037,13 @@ class AirShareApp(App):
                 pos_hint={"center_y": 0.5},
             )
 
-            def _pick(_inst, k=key_name, pv=path_val):
-                self.active_folder_key = k
-                if not os.path.isdir(pv):
-                    try:
-                        os.makedirs(pv, exist_ok=True)
-                    except OSError:
-                        pv = STORAGE_PATH
-                DynamicAirShareHandler.active_storage_path = pv
-                self.apply_theme()
-                modal.dismiss()
+            def _pick(inst, k=key_name, pv=path_val):
+                if k == "All Storage" and self.active_folder_key != "All Storage":
+                    modal.dismiss()
+                    Clock.schedule_once(lambda _dt: self.open_all_storage_confirm_modal(pv, inst), 0.20)
+                else:
+                    self._apply_folder_selection(k, pv)
+                    modal.dismiss()
 
             item_card.bind(on_press=_pick)
             for w in (ico, txt_lbl, right_ico):
@@ -857,7 +1051,7 @@ class AirShareApp(App):
             list_box.add_widget(item_card)
         card.add_widget(list_box)
         btn_ok = RoundedActionButton(
-            "Закрыть",
+            self._t("close"),
             bg_color=p["pill_bg"],
             border_color=p["drawer_border"],
             text_color=p["text"],
@@ -869,7 +1063,7 @@ class AirShareApp(App):
 
     def open_transfers_modal(self, source_widget=None, *_args):
         modal, card, p = self._create_mac_modal(
-            "Recent Transfers", "История переданных файлов за сессию:", 285, source_widget
+            self._t("recent_transfers"), "", 275, source_widget
         )
         inner = RoundedCard(
             bg_color=p["drawer_card"],
@@ -881,11 +1075,11 @@ class AirShareApp(App):
         if self.transfer_history:
             txt = "\n".join(f"• {x}" for x in self.transfer_history[:6])
         else:
-            txt = "За текущую сессию файлы ещё не передавались."
+            txt = self._t("no_transfers_yet")
         inner.add_widget(make_label(txt, size=13, valign="top", color=p["text"]))
         card.add_widget(inner)
         btn_ok = RoundedActionButton(
-            "Закрыть",
+            self._t("close"),
             bg_color=p["pill_bg"],
             border_color=p["drawer_border"],
             text_color=p["text"],
@@ -896,9 +1090,8 @@ class AirShareApp(App):
         card.add_widget(btn_ok)
 
     def open_security_modal(self, source_widget=None, *_args):
-        # PIN-код никогда не может быть пустым: кнопка «Новый PIN» генерирует случайный 6-значный код
         modal, card, p = self._create_mac_modal(
-            "Security & PIN", "PIN обязателен и автоматически встраивается в ссылку:", 255, source_widget
+            self._t("pin_title"), self._t("pin_subtitle"), 255, source_widget
         )
         inp_wrap = RoundedCard(
             bg_color=p["drawer_card"],
@@ -910,7 +1103,7 @@ class AirShareApp(App):
         )
         inp = TextInput(
             text=load_settings().get("password", ""),
-            hint_text="Введите PIN (минимум 4–6 символов)",
+            hint_text=self._t("pin_hint"),
             multiline=False,
             font_size=sp(14.5),
             background_color=(0, 0, 0, 0),
@@ -922,10 +1115,10 @@ class AirShareApp(App):
         card.add_widget(inp_wrap)
         btn_row = BoxLayout(orientation="horizontal", spacing=dp(10), size_hint=(1, None), height=dp(44))
         btn_gen = RoundedActionButton(
-            "Новый PIN", bg_color=p["pill_bg"], border_color=p["drawer_border"], text_color=p["text"]
+            self._t("pin_new"), bg_color=p["pill_bg"], border_color=p["drawer_border"], text_color=p["text"]
         )
         btn_save = RoundedActionButton(
-            "Сохранить PIN", bg_color=p["blue"], border_color=(1, 1, 1, 0.2), text_color=(1, 1, 1, 1)
+            self._t("pin_save"), bg_color=p["blue"], border_color=(1, 1, 1, 0.2), text_color=(1, 1, 1, 1)
         )
 
         def _save(val):
@@ -944,7 +1137,7 @@ class AirShareApp(App):
 
     def open_port_modal(self, source_widget=None, *_args):
         modal, card, p = self._create_mac_modal(
-            "Port Settings", "Укажите порт сервера (1024–65535):", 245, source_widget
+            self._t("port_title"), self._t("port_subtitle"), 245, source_widget
         )
         inp_wrap = RoundedCard(
             bg_color=p["drawer_card"],
@@ -968,7 +1161,7 @@ class AirShareApp(App):
         inp_wrap.add_widget(inp)
         card.add_widget(inp_wrap)
         btn_save = RoundedActionButton(
-            "Сохранить порт", bg_color=p["blue"], border_color=(1, 1, 1, 0.2), size_hint=(1, None), height=dp(44)
+            self._t("port_save"), bg_color=p["blue"], border_color=(1, 1, 1, 0.2), size_hint=(1, None), height=dp(44)
         )
 
         def _save_port(_b):
@@ -986,40 +1179,88 @@ class AirShareApp(App):
         card.add_widget(btn_save)
 
     def open_devices_modal(self, source_widget=None, *_args):
+        # Список подключённых устройств с кнопкой «Отключить» / «Разрешить» напротив каждого IP (п. 3)
         modal, card, p = self._create_mac_modal(
-            "Connected Devices", "История подключённых IP-адресов:", 295, source_widget
-        )
-        inner = RoundedCard(
-            bg_color=p["drawer_card"],
-            border_color=p["drawer_border"],
-            radius=dp(16),
-            padding=dp(14),
-            size_hint=(1, 1),
+            self._t("devices_title"), self._t("devices_subtitle"), 345, source_widget
         )
         ips = load_settings().get("recent_ips", [])
-        lbl = make_label(
-            "\n".join(f"• {x}" for x in ips[:6])
-            if ips
-            else "Пока нет сохранённых подключений.\nОткройте ссылку в браузере на ПК.",
-            size=13,
-            valign="top",
-            color=p["text"],
-        )
-        inner.add_widget(lbl)
-        card.add_widget(inner)
+        list_box = BoxLayout(orientation="vertical", spacing=dp(8), size_hint=(1, 1))
+
+        def _populate():
+            list_box.clear_widgets()
+            cur_ips = load_settings().get("recent_ips", [])
+            if not cur_ips:
+                empty_card = RoundedCard(
+                    bg_color=p["drawer_card"],
+                    border_color=p["drawer_border"],
+                    radius=dp(16),
+                    padding=dp(14),
+                    size_hint=(1, 1),
+                )
+                empty_card.add_widget(make_label(self._t("no_devices_yet"), size=13, valign="top", color=p["text"]))
+                list_box.add_widget(empty_card)
+                return
+
+            for entry in cur_ips[:4]:
+                raw_ip = entry.split("•")[-1].strip() if "•" in entry else entry.strip()
+                is_blocked = DynamicAirShareHandler.is_ip_disconnected(raw_ip)
+
+                dev_row = RoundedCard(
+                    bg_color=p["drawer_card"],
+                    border_color=p["drawer_border"],
+                    radius=dp(14),
+                    orientation="horizontal",
+                    size_hint=(1, None),
+                    height=dp(48),
+                    padding=[dp(12), dp(6), dp(8), dp(6)],
+                    spacing=dp(8),
+                )
+                dev_lbl = make_label(entry, size=12, color=p["subtext"] if is_blocked else p["text"], shorten=True)
+                act_btn = RoundedActionButton(
+                    text=self._t("btn_allow_dev") if is_blocked else self._t("btn_disconnect_dev"),
+                    bg_color=p["green"] if is_blocked else p["red"],
+                    border_color=(1, 1, 1, 0.18),
+                    font_size=sp(11.5),
+                    radius=dp(11),
+                    size_hint=(None, None),
+                    size=(dp(94), dp(32)),
+                    pos_hint={"center_y": 0.5},
+                )
+
+                def _toggle_ip(_b, ip_val=raw_ip, currently_blocked=is_blocked):
+                    DynamicAirShareHandler.set_ip_disconnected(ip_val, not currently_blocked)
+                    toast_key = "toast_dev_allowed" if currently_blocked else "toast_dev_blocked"
+                    self.show_toast(self._t(toast_key, ip=ip_val), kind="info" if currently_blocked else "warn")
+                    _populate()
+
+                act_btn.bind(on_press=_toggle_ip)
+                dev_row.add_widget(dev_lbl)
+                dev_row.add_widget(act_btn)
+                list_box.add_widget(dev_row)
+
+        _populate()
+        card.add_widget(list_box)
+
         btn_row = BoxLayout(orientation="horizontal", spacing=dp(10), size_hint=(1, None), height=dp(44))
         btn_clr = RoundedActionButton(
-            "Очистить", bg_color=p["pill_bg"], border_color=p["drawer_border"], text_color=p["text"]
+            self._t("clear_history"), bg_color=p["pill_bg"], border_color=p["drawer_border"], text_color=p["text"]
         )
-        btn_ok = RoundedActionButton("Закрыть", bg_color=p["blue"], border_color=(1, 1, 1, 0.2))
-        btn_clr.bind(on_press=lambda *_: (save_settings(recent_ips=[]), setattr(lbl, "text", "История очищена")))
+        btn_ok = RoundedActionButton(self._t("close"), bg_color=p["blue"], border_color=(1, 1, 1, 0.2))
+
+        def _clear(*_):
+            save_settings(recent_ips=[])
+            _populate()
+
+        btn_clr.bind(on_press=_clear)
         btn_ok.bind(on_press=lambda *_: modal.dismiss())
         btn_row.add_widget(btn_clr)
         btn_row.add_widget(btn_ok)
         card.add_widget(btn_row)
 
     def open_help_modal(self, source_widget=None, *_args):
-        modal, card, p = self._create_mac_modal("Help & Feedback", f"{APP_NAME} v{APP_VERSION}", 275, source_widget)
+        modal, card, p = self._create_mac_modal(
+            self._t("help_title"), f"{APP_NAME} v{APP_VERSION}", 285, source_widget
+        )
         inner = RoundedCard(
             bg_color=p["drawer_card"],
             border_color=p["drawer_border"],
@@ -1027,18 +1268,14 @@ class AirShareApp(App):
             padding=dp(14),
             size_hint=(1, 1),
         )
-        inner.add_widget(
-            make_label(
-                "1. Нажмите зелёную кнопку «Connect» для запуска.\n"
-                "2. Скопируйте ссылку и откройте её в браузере на ПК.\n"
-                "3. Во вкладке «Files» выберите папку для раздачи.",
-                size=13,
-                color=p["text"],
-            )
-        )
+        inner.add_widget(make_label(self._t("help_body"), size=13, color=p["text"]))
         card.add_widget(inner)
         btn_ok = RoundedActionButton(
-            "Понятно", bg_color=p["blue"], border_color=(1, 1, 1, 0.2), size_hint=(1, None), height=dp(44)
+            self._t("ok_understand"),
+            bg_color=p["blue"],
+            border_color=(1, 1, 1, 0.2),
+            size_hint=(1, None),
+            height=dp(44),
         )
         btn_ok.bind(on_press=lambda *_: modal.dismiss())
         card.add_widget(btn_ok)

@@ -1,4 +1,4 @@
-# Вспомогательные функции AirShare PC: сеть, безопасное хранение настроек и информация об устройстве
+# Вспомогательные функции AirShare PC: проверка Wi-Fi, форматирование размеров и потокобезопасные настройки
 
 import json
 import logging
@@ -6,6 +6,7 @@ import os
 import secrets
 import shutil
 import socket
+import struct
 import threading
 from config import (
     COMPROMISED_PASSWORDS,
@@ -14,13 +15,14 @@ from config import (
     SETTINGS_FILE,
     STORAGE_PATH,
 )
+from i18n import SUPPORTED_CODES, detect_system_language, tr
 
 logger = logging.getLogger("airshare.utils")
 
-# Реентерабельная блокировка защищает файл настроек от гонки при параллельных HTTP-запросах
 _settings_lock = threading.RLock()
-# Кэш уже записанных в этой сессии клиентов, чтобы не перезаписывать диск на каждый HTTP-запрос
 _seen_recent_ips = set()
+
+_WIFI_IFACE_PREFIXES = ("wlan", "swlan", "ap", "softap", "wifi", "p2p", "eth", "rndis", "en", "wl")
 
 
 def generate_pin():
@@ -35,42 +37,134 @@ def _sanitize_pin(candidate):
     return val, False
 
 
+def is_private_lan_ip(ip_str):
+    # Проверяем, что адрес принадлежит локальной сети RFC 1918 (192.168.x.x, 10.x.x.x, 172.16-31.x.x),
+    # исключая мобильные сети CG-NAT (100.64.0.0/10) и loopback (127.x.x.x)
+    if not ip_str or not isinstance(ip_str, str):
+        return False
+    parts = ip_str.strip().split(".")
+    if len(parts) != 4:
+        return False
+    try:
+        a, b, c, d = (int(p) for p in parts)
+    except ValueError:
+        return False
+    if not all(0 <= x <= 255 for x in (a, b, c, d)):
+        return False
+    if a == 10:
+        return True
+    if a == 172 and 16 <= b <= 31:
+        return True
+    if a == 192 and b == 168:
+        return True
+    return False
+
+
+def _get_android_wifi_ip():
+    # На Android берём IP только с интерфейсов Wi-Fi / точки доступа (wlan*, ap*, swlan*),
+    # игнорируя мобильный интернет (rmnet*, ccmni*)
+    try:
+        from jnius import autoclass
+        NetworkInterface = autoclass("java.net.NetworkInterface")
+        interfaces = NetworkInterface.getNetworkInterfaces()
+        if interfaces is not None:
+            while interfaces.hasMoreElements():
+                nif = interfaces.nextElement()
+                if nif is None or not nif.isUp() or nif.isLoopback():
+                    continue
+                name = str(nif.getName() or "").lower()
+                if not name.startswith(_WIFI_IFACE_PREFIXES):
+                    continue
+                addrs = nif.getInetAddresses()
+                while addrs.hasMoreElements():
+                    addr = addrs.nextElement()
+                    if addr is None or addr.isLoopbackAddress():
+                        continue
+                    host = str(addr.getHostAddress() or "").split("%")[0].strip()
+                    if is_private_lan_ip(host):
+                        return host
+    except Exception as exc:
+        logger.debug("Не удалось проверить NetworkInterface на Android: %s", exc)
+
+    try:
+        from jnius import autoclass
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        Context = autoclass("android.content.Context")
+        activity = getattr(PythonActivity, "mActivity", None)
+        if activity is not None:
+            wm = activity.getApplicationContext().getSystemService(Context.WIFI_SERVICE)
+            if wm is not None and wm.isWifiEnabled():
+                info = wm.getConnectionInfo()
+                if info is not None:
+                    ip_int = info.getIpAddress()
+                    if ip_int:
+                        ip_str = socket.inet_ntoa(struct.pack("<I", ip_int & 0xFFFFFFFF))
+                        if is_private_lan_ip(ip_str):
+                            return ip_str
+    except Exception as exc:
+        logger.debug("Не удалось получить IP через WifiManager: %s", exc)
+
+    return None
+
+
 def get_local_ip():
+    try:
+        from kivy.utils import platform
+    except Exception:
+        platform = "unknown"
+
+    if platform == "android":
+        wifi_ip = _get_android_wifi_ip()
+        return wifi_ip if wifi_ip else "127.0.0.1"
+
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.settimeout(1.5)
             s.connect(("8.8.8.8", 80))
-            return s.getsockname()[0]
-    except OSError:
-        try:
-            hostname = socket.gethostname()
-            ip = socket.gethostbyname(hostname)
-            if ip and not ip.startswith("127."):
+            ip = s.getsockname()[0]
+            if is_private_lan_ip(ip):
                 return ip
-        except OSError:
-            pass
-        return "127.0.0.1"
+    except OSError:
+        pass
+
+    try:
+        hostname = socket.gethostname()
+        ip = socket.gethostbyname(hostname)
+        if is_private_lan_ip(ip):
+            return ip
+    except OSError:
+        pass
+    return "127.0.0.1"
 
 
-def get_network_label():
-    # Показываем реальный статус локальной сети вместо выдуманных характеристик Wi-Fi 6 / 850 Mbps
+def is_wifi_connected():
     ip = get_local_ip()
-    if ip and ip not in ("127.0.0.1", "0.0.0.0"):
-        return f"Wi-Fi • {ip}"
-    return "Wi-Fi • Offline"
+    return is_private_lan_ip(ip)
+
+
+def get_network_label(lang=None):
+    # В верхнем правом чипе показываем аккуратный статус без обрезанного IP с точками посередине
+    if lang is None:
+        lang = load_settings().get("language", "en")
+    if is_wifi_connected():
+        return tr("wifi_online", lang)
+    return tr("no_wifi", lang)
 
 
 def format_size(size):
+    # Байты выводим целым числом без дробной части ("604 B" вместо "604.0 B")
     size = float(size)
-    for unit in ["B", "KB", "MB", "GB", "TB"]:
-        if size < 1024:
+    if size < 1024:
+        return f"{int(round(size))} B"
+    size /= 1024.0
+    for unit in ["KB", "MB", "GB", "TB"]:
+        if size < 1024.0:
             return f"{size:.1f} {unit}"
-        size /= 1024
+        size /= 1024.0
     return f"{size:.1f} PB"
 
 
 def get_device_info():
-    # Определяем реальное имя телефона на Android или имя хоста на ПК (без фейкового Pixel 9 Pro)
     try:
         from kivy.utils import platform
     except Exception:
@@ -122,8 +216,9 @@ def get_device_info():
     return "Unknown"
 
 
-def get_storage_stats():
-    # Возвращаем реальную статистику памяти или прочерки при ошибке вместо фейковых 64.5 / 128 GB
+def get_storage_stats(lang=None):
+    if lang is None:
+        lang = load_settings().get("language", "en")
     try:
         target = STORAGE_PATH if os.path.exists(STORAGE_PATH) else os.path.expanduser("~")
         stat = os.statvfs(target)
@@ -139,7 +234,7 @@ def get_storage_stats():
             "free_gb": round(free_gb, 1),
             "used_gb": round(used_gb, 1),
             "percent": min(1.0, max(0.0, percent)),
-            "text": f"Storage: {used_gb:.1f} GB / {total_gb:.0f} GB",
+            "text": tr("storage_fmt", lang, used=f"{used_gb:.1f}", total=f"{total_gb:.0f}"),
         }
     except Exception as exc:
         logger.warning("Не удалось определить объём хранилища: %s", exc)
@@ -148,7 +243,7 @@ def get_storage_stats():
             "free_gb": 0.0,
             "used_gb": 0.0,
             "percent": 0.0,
-            "text": "Storage: — / —",
+            "text": tr("storage_unknown", lang),
         }
 
 
@@ -178,6 +273,7 @@ def load_settings():
             "recent_ips": [],
             "theme_mode": "dark",
             "port": SERVER_PORT,
+            "language": detect_system_language(),
         }
         needs_persist = False
 
@@ -200,6 +296,10 @@ def load_settings():
                     if mode in ("system", "dark", "light"):
                         defaults["theme_mode"] = mode
 
+                    lang = str(data.get("language", "")).strip().lower()
+                    if lang in SUPPORTED_CODES:
+                        defaults["language"] = lang
+
                     try:
                         port_val = int(data.get("port", SERVER_PORT))
                         if 1024 <= port_val <= 65535:
@@ -207,7 +307,6 @@ def load_settings():
                     except (ValueError, TypeError):
                         pass
             except (json.JSONDecodeError, OSError) as exc:
-                # При повреждении JSON сохраняем резервную копию .bak и логируем проблему
                 logger.warning("Файл настроек повреждён (%s), создаём резервную копию .bak", exc)
                 try:
                     if os.path.isfile(SETTINGS_FILE):
@@ -233,7 +332,7 @@ def load_settings():
         return defaults
 
 
-def save_settings(password=None, recent_ips=None, theme_mode=None, port=None):
+def save_settings(password=None, recent_ips=None, theme_mode=None, port=None, language=None):
     with _settings_lock:
         current = load_settings()
         if password is not None:
@@ -245,6 +344,8 @@ def save_settings(password=None, recent_ips=None, theme_mode=None, port=None):
             _seen_recent_ips.update(current["recent_ips"])
         if theme_mode in ("system", "dark", "light"):
             current["theme_mode"] = theme_mode
+        if language is not None and str(language).lower() in SUPPORTED_CODES:
+            current["language"] = str(language).lower()
         if port is not None:
             try:
                 port_val = int(port)
@@ -267,7 +368,6 @@ def add_recent_ip(ip_entry):
         return load_settings()["recent_ips"]
 
     with _settings_lock:
-        # Не дергаем файловую систему на каждый HTTP-запрос от уже известного устройства
         if ip_entry in _seen_recent_ips:
             return load_settings()["recent_ips"]
         settings = load_settings()
@@ -306,6 +406,7 @@ def get_device_theme():
 
 
 def request_android_full_storage():
+    # Запрашиваем доступ ко всем файлам (MANAGE_EXTERNAL_STORAGE) только когда пользователь явно выбрал весь накопитель
     try:
         from kivy.utils import platform
     except Exception:
@@ -313,13 +414,6 @@ def request_android_full_storage():
     if platform != "android":
         return
     try:
-        from android.permissions import request_permissions, Permission
-        perms = [
-            Permission.READ_EXTERNAL_STORAGE,
-            Permission.WRITE_EXTERNAL_STORAGE,
-            Permission.INTERNET,
-        ]
-        request_permissions(perms)
         from jnius import autoclass
         BuildVersion = autoclass("android.os.Build$VERSION")
         if BuildVersion.SDK_INT >= 30:
@@ -334,5 +428,8 @@ def request_android_full_storage():
                 uri = Uri.parse(f"package:{activity.getPackageName()}")
                 intent.setData(uri)
                 activity.startActivity(intent)
+        else:
+            from android.permissions import Permission, request_permissions
+            request_permissions([Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE])
     except Exception as exc:
         logger.warning("Не удалось запросить доступ к хранилищу Android: %s", exc)
