@@ -537,15 +537,15 @@ class AppSplashScreen(FloatLayout):
             pos_hint={"center_x": 0.5, "center_y": 0.52},
         )
 
-        icon_anchor = AnchorLayout(size_hint=(1, None), height=dp(120))
+        icon_anchor = AnchorLayout(size_hint=(1, None), height=dp(136))
         icon_path = None
-        for candidate in ("icon.png", "1794233814531.jpg", "icon.jpg"):
+        for candidate in ("splash_logo.png", "icon.png", "1794233814531.jpg"):
             if os.path.exists(candidate):
                 icon_path = candidate
                 break
 
         if icon_path:
-            self.icon_img = Image(source=icon_path, size_hint=(None, None), size=(dp(108), dp(108)), keep_ratio=True)
+            self.icon_img = Image(source=icon_path, size_hint=(None, None), size=(dp(156), dp(128)), keep_ratio=True)
             icon_anchor.add_widget(self.icon_img)
         else:
             self.icon_img = VectorIcon(icon_type="pc", color=(0.20, 0.78, 0.46, 1), size_hint=(None, None), size=(dp(90), dp(90)))
