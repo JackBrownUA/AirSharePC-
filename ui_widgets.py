@@ -1,6 +1,7 @@
-# Пользовательские Kivy-виджеты для AirShare PC (иконки, карточки, волнистый сигнал вокруг ПК и модальные окна)
+# Пользовательские Kivy-виджеты для AirShare PC (иконки, карточки, волнистый сигнал вокруг ПК, экран загрузки и модальные окна)
 
 import math
+import os
 from kivy.animation import Animation
 from kivy.clock import Clock
 from kivy.core.window import Window
@@ -11,6 +12,7 @@ from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.image import Image
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
@@ -513,6 +515,110 @@ class NavTabItem(ButtonBehavior, BoxLayout):
         self.label.color = text_color
 
 
+class AppSplashScreen(FloatLayout):
+    # Плавный загрузочный экран с логотипом, неоновым свечением, полосой прогресса и fade-out анимацией
+    progress = NumericProperty(0.0)
+
+    def __init__(self, on_dismiss=None, **kwargs):
+        super().__init__(size_hint=(1, 1), pos_hint={"x": 0, "y": 0}, **kwargs)
+        self.on_dismiss = on_dismiss
+        self.is_dismissed = False
+
+        with self.canvas.before:
+            self.bg_col = Color(0.08, 0.09, 0.10, 1.0)
+            self.bg_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[0])
+        self.bind(pos=self._upd_bg, size=self._upd_bg)
+
+        center_box = BoxLayout(
+            orientation="vertical",
+            spacing=dp(14),
+            size_hint=(None, None),
+            size=(dp(240), dp(290)),
+            pos_hint={"center_x": 0.5, "center_y": 0.52},
+        )
+
+        icon_anchor = AnchorLayout(size_hint=(1, None), height=dp(120))
+        icon_path = None
+        for candidate in ("icon.png", "1794233814531.jpg", "icon.jpg"):
+            if os.path.exists(candidate):
+                icon_path = candidate
+                break
+
+        if icon_path:
+            self.icon_img = Image(source=icon_path, size_hint=(None, None), size=(dp(108), dp(108)), keep_ratio=True)
+            icon_anchor.add_widget(self.icon_img)
+        else:
+            self.icon_img = VectorIcon(icon_type="pc", color=(0.20, 0.78, 0.46, 1), size_hint=(None, None), size=(dp(90), dp(90)))
+            icon_anchor.add_widget(self.icon_img)
+        center_box.add_widget(icon_anchor)
+
+        self.title_lbl = make_label(
+            "[b]AirShare PC[/b]",
+            size=24,
+            halign="center",
+            markup=True,
+            color=(0.96, 0.97, 0.98, 1),
+            size_hint=(1, None),
+            height=dp(32),
+        )
+        self.sub_lbl = make_label(
+            "Беспроводной обмен файлами",
+            size=13,
+            halign="center",
+            color=(0.58, 0.62, 0.68, 1),
+            size_hint=(1, None),
+            height=dp(20),
+        )
+        center_box.add_widget(self.title_lbl)
+        center_box.add_widget(self.sub_lbl)
+
+        bar_anchor = AnchorLayout(size_hint=(1, None), height=dp(28))
+        self.bar = SlimProgressBar(
+            percent=0.0,
+            track_color=(0.18, 0.20, 0.23, 1),
+            fill_color=(0.20, 0.78, 0.46, 1),
+            size_hint=(0.80, None),
+            height=dp(4.5),
+        )
+        bar_anchor.add_widget(self.bar)
+        center_box.add_widget(bar_anchor)
+
+        self.version_lbl = make_label(
+            "Версия 1.1.0 • Запуск...",
+            size=11,
+            halign="center",
+            color=(0.40, 0.44, 0.50, 1),
+            size_hint=(1, None),
+            height=dp(18),
+        )
+        center_box.add_widget(self.version_lbl)
+
+        self.add_widget(center_box)
+        Clock.schedule_once(self._start_splash_anim, 0.05)
+
+    def _upd_bg(self, *_args):
+        self.bg_rect.pos, self.bg_rect.size = self.pos, self.size
+
+    def _start_splash_anim(self, *_args):
+        anim = Animation(progress=1.0, duration=0.85, t="in_out_sine")
+        anim.bind(on_progress=lambda _a, _w, p: self.bar.set_percent(p))
+        anim.bind(on_complete=self._finish_splash)
+        anim.start(self)
+
+    def _finish_splash(self, *_args):
+        if self.is_dismissed:
+            return
+        self.is_dismissed = True
+        fade = Animation(opacity=0.0, duration=0.32, t="out_quad")
+        def _cleanup(*_):
+            if self.parent:
+                self.parent.remove_widget(self)
+            if callable(self.on_dismiss):
+                self.on_dismiss()
+        fade.bind(on_complete=_cleanup)
+        fade.start(self)
+
+
 class MacModalContainer(FloatLayout):
     scrim_alpha = NumericProperty(0.0)
 
@@ -529,7 +635,7 @@ class MacModalContainer(FloatLayout):
         self.scrim_rect.pos, self.scrim_rect.size = self.pos, self.size
 
     def _upd_alpha(self, *_args):
-        self.scrim_col.rgba = (self.scrim_rgba[0], self.scrim_rgba[1], self.scrim_rgba[2], self.scrim_alpha)
+        self.col.rgba = (self.scrim_rgba[0], self.scrim_rgba[1], self.scrim_rgba[2], self.scrim_alpha)
 
     def animate_open(self):
         cx, cy = Window.width * 0.5, Window.height * 0.5

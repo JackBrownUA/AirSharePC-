@@ -34,6 +34,7 @@ from ui_widgets import (
     StatusDot,
     VectorIcon,
     make_label,
+    AppSplashScreen,
 )
 from utils import (
     generate_pin,
@@ -515,6 +516,9 @@ class AirShareApp(App):
         DynamicAirShareHandler.on_file_transfer = self._on_file_transfer
         self.update_connection_url_display()
         self.apply_theme()
+        # Показываем плавный экран приветствия при запуске с логотипом, полосой прогресса и fade-out
+        self.splash_screen = AppSplashScreen()
+        self.root_widget.add_widget(self.splash_screen)
         return self.root_widget
 
     def on_stop(self):
