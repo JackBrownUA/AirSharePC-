@@ -618,6 +618,15 @@ class AppSplashScreen(FloatLayout):
         fade.bind(on_complete=_cleanup)
         fade.start(self)
 
+    def on_touch_down(self, touch):
+        return not self.is_dismissed
+
+    def on_touch_move(self, touch):
+        return not self.is_dismissed
+
+    def on_touch_up(self, touch):
+        return not self.is_dismissed
+
 
 class MacModalContainer(FloatLayout):
     scrim_alpha = NumericProperty(0.0)
@@ -635,7 +644,7 @@ class MacModalContainer(FloatLayout):
         self.scrim_rect.pos, self.scrim_rect.size = self.pos, self.size
 
     def _upd_alpha(self, *_args):
-        self.col.rgba = (self.scrim_rgba[0], self.scrim_rgba[1], self.scrim_rgba[2], self.scrim_alpha)
+        self.scrim_col.rgba = (self.scrim_rgba[0], self.scrim_rgba[1], self.scrim_rgba[2], self.scrim_alpha)
 
     def animate_open(self):
         cx, cy = Window.width * 0.5, Window.height * 0.5

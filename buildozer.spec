@@ -2,6 +2,9 @@
 title = AirShare PC
 package.name = airshare
 package.domain = com.airshare
+icon.filename = %(source.dir)s/icon.png
+presplash.filename = %(source.dir)s/presplash_blank.png
+android.presplash_color = #14171A
 
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,html,css,js
