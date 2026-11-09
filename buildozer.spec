@@ -3,7 +3,7 @@ title = AirShare PC
 package.name = airshare
 package.domain = com.airshare
 icon.filename = %(source.dir)s/1794233814531.jpg
-
+presplash.filename = %(source.dir)s/1794233814531.jpg
 
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,html,css,js
