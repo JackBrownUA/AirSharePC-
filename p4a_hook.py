@@ -2,6 +2,7 @@
 # 1. Принудительно обновляет target=android-35 в закэшированном project.properties (обход бага Buildozer с кэшем).
 # 2. Выставляет targetSdkVersion=35 и compileSdkVersion=35 в build.gradle и AndroidManifest.xml (убирает окно Play Защиты).
 # 3. Патчит HIDDeviceManager.java (SDL2) флагом RECEIVER_EXPORTED (2) для Android 14/15+ (предотвращает SecurityException при старте).
+# 4. Отключает самообновление pip (pip install -U pip) в pythonforandroid/build.py (обход бага p4a #3364 с capture_logging).
 
 import os
 import re
@@ -10,7 +11,6 @@ import subprocess
 from pathlib import Path
 
 TARGET_API = "35"
-MIN_API = "26"
 
 
 def _patch_project_properties(path_obj: Path) -> bool:
@@ -19,9 +19,8 @@ def _patch_project_properties(path_obj: Path) -> bool:
     except OSError:
         return False
     new_text = re.sub(r"target=android-\d+", f"target=android-{TARGET_API}", old_text)
-    new_text = re.sub(r"APP_PLATFORM=\d+", f"APP_PLATFORM={MIN_API}", new_text)
     if f"target=android-{TARGET_API}" not in new_text:
-        new_text = f"target=android-{TARGET_API}\nAPP_PLATFORM={MIN_API}\n" + new_text
+        new_text = f"target=android-{TARGET_API}\n" + new_text
     if new_text != old_text:
         path_obj.write_text(new_text, encoding="utf-8")
         return True
@@ -35,7 +34,6 @@ def _patch_gradle_file(path_obj: Path) -> bool:
         return False
     new_text = re.sub(r"compileSdkVersion\s+\d+", f"compileSdkVersion {TARGET_API}", old_text)
     new_text = re.sub(r"targetSdkVersion\s+\d+", f"targetSdkVersion {TARGET_API}", new_text)
-    new_text = re.sub(r"minSdkVersion\s+\d+", f"minSdkVersion {MIN_API}", new_text)
     if new_text != old_text:
         path_obj.write_text(new_text, encoding="utf-8")
         return True
@@ -51,11 +49,6 @@ def _patch_manifest_file(path_obj: Path) -> bool:
         r'android:targetSdkVersion="[^"]*"',
         f'android:targetSdkVersion="{TARGET_API}"',
         old_text,
-    )
-    new_text = re.sub(
-        r'android:minSdkVersion="[^"]*"',
-        f'android:minSdkVersion="{MIN_API}"',
-        new_text,
     )
     new_text = new_text.replace('android:requestLegacyExternalStorage="true"', "")
     if new_text != old_text:
@@ -88,6 +81,21 @@ def _patch_hid_device_manager(path_obj: Path) -> bool:
     if "mContext.registerReceiver(mBluetoothBroadcast, filter, 2)" not in new_text and bt_old in new_text:
         new_text = new_text.replace(bt_old, bt_new)
 
+    if new_text != old_text:
+        path_obj.write_text(new_text, encoding="utf-8")
+        return True
+    return False
+
+
+def _patch_p4a_venv_pip_upgrade(path_obj: Path) -> bool:
+    # Обход бага kivy/python-for-android#3364: pip install -U pip ломает venv на Python 3.14 (capture_logging)
+    try:
+        old_text = path_obj.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    if "pip install -U pip" not in old_text:
+        return False
+    new_text = old_text.replace("pip install -U pip", "true")
     if new_text != old_text:
         path_obj.write_text(new_text, encoding="utf-8")
         return True
@@ -138,7 +146,7 @@ def _ensure_custom_keystore():
 
 
 def patch_build_tree(root_dir=None) -> dict:
-    counts = {"props": 0, "gradle": 0, "manifest": 0, "hid": 0}
+    counts = {"props": 0, "gradle": 0, "manifest": 0, "hid": 0, "p4a_pip": 0}
     search_roots = []
     if root_dir is not None:
         search_roots.append(Path(root_dir))
@@ -169,6 +177,9 @@ def patch_build_tree(root_dir=None) -> dict:
                 elif fname == "HIDDeviceManager.java":
                     if _patch_hid_device_manager(fpath):
                         counts["hid"] += 1
+                elif fname == "build.py" and "pythonforandroid" in str(fpath):
+                    if _patch_p4a_venv_pip_upgrade(fpath):
+                        counts["p4a_pip"] += 1
     return counts
 
 
