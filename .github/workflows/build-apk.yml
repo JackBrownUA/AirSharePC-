@@ -39,8 +39,9 @@ jobs:
           path: |
             ~/.buildozer
             .buildozer
-          key: buildozer-master-v9-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: buildozer-master-v10-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
+            buildozer-master-v10-${{ runner.os }}-
             buildozer-master-v9-${{ runner.os }}-
 
       - name: Install system dependencies
@@ -86,11 +87,14 @@ jobs:
           ln -sf "$SDK_DIR/cmdline-tools/latest/bin/avdmanager" "$SDK_DIR/tools/bin/avdmanager"
           chmod +x "$SDK_DIR/cmdline-tools/latest/bin/"* "$SDK_DIR/tools/bin/"* || true
           yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" --licenses || true
-          yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" "platform-tools" "platforms;android-33" "platforms;android-34" "build-tools;33.0.2" "build-tools;34.0.0" || true
+          yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" "platform-tools" "platforms;android-33" "platforms;android-34" "platforms;android-35" "build-tools;33.0.2" "build-tools;34.0.0" "build-tools;35.0.0" || true
 
       - name: Build Debug APK
         run: |
           find "$HOME/.buildozer" .buildozer "$HOME/.cache" -name "charset_normalizer-3*" -delete 2>/dev/null || true
+          # Принудительно обновляем targetSdkVersion до 35 во всех закэшированных шаблонах Gradle/Manifest
+          find .buildozer -name "build.gradle" -exec sed -i 's/targetSdkVersion 3[0-4]/targetSdkVersion 35/g; s/compileSdkVersion 3[0-4]/compileSdkVersion 35/g' {} + 2>/dev/null || true
+          find .buildozer -name "AndroidManifest*.xml" -exec sed -i 's/targetSdkVersion="3[0-4]"/targetSdkVersion="35"/g' {} + 2>/dev/null || true
           yes | buildozer -v android debug
         env:
           DEBIAN_FRONTEND: noninteractive
