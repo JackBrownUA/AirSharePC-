@@ -86,11 +86,12 @@ TRANSLATIONS = {
         "toast_bad_pin": "Wrong PIN from {ip}",
         "toast_dev_blocked": "Disconnected: {ip}",
         "toast_dev_allowed": "Allowed: {ip}",
-        "help_title": "Help & Feedback",
+        "help_title": "Help & Guide",
         "help_body": (
-            "1. Tap the green «Connect» button to start.\n"
-            "2. Copy the link or type it manually into your PC browser.\n"
-            "3. In the «Files» tab, choose which folder to share."
+            "1. Connect your phone and PC to the same Wi-Fi network (or enable Wi-Fi Hotspot on your phone).\n\n"
+            "2. Tap the green «Connect» button to start the local file server.\n\n"
+            "3. Copy the link below the button or type it manually into your PC browser address bar to download and upload files.\n\n"
+            "4. In the «Files» tab, choose which folder to share with your PC, and in «Devices» you can disconnect any computer at any time."
         ),
         "splash_sub": "Wireless file transfer",
         "splash_ver": "Version {ver} • Starting...",
@@ -140,7 +141,7 @@ TRANSLATIONS = {
         "menu_language": "Idioma",
         "menu_security": "Seguridad y PIN",
         "menu_port": "Puerto del servidor",
-        "menu_help": "Ayuda",
+        "menu_help": "Ayuda y guía",
         "theme_dark": "Oscuro",
         "theme_light": "Claro",
         "theme_auto": "Auto",
@@ -183,11 +184,12 @@ TRANSLATIONS = {
         "toast_bad_pin": "PIN incorrecto desde {ip}",
         "toast_dev_blocked": "Desconectado: {ip}",
         "toast_dev_allowed": "Permitido: {ip}",
-        "help_title": "Ayuda",
+        "help_title": "Ayuda y guía",
         "help_body": (
-            "1. Pulsa el botón verde «Conectar» para iniciar.\n"
-            "2. Copia el enlace o escríbelo manualmente en el navegador del PC.\n"
-            "3. En la pestaña «Archivos» elige qué carpeta compartir."
+            "1. Conecta tu teléfono y tu PC a la misma red Wi-Fi (o activa el Punto de acceso en el teléfono).\n\n"
+            "2. Pulsa el botón verde «Conectar» para iniciar el servidor local.\n\n"
+            "3. Copia el enlace o escríbelo manualmente en la barra de direcciones del navegador de tu PC para descargar y subir archivos.\n\n"
+            "4. En la pestaña «Archivos» elige qué carpeta compartir con el PC, y en «Equipos» puedes desconectar cualquier ordenador al instante."
         ),
         "splash_sub": "Transferencia inalámbrica de archivos",
         "splash_ver": "Versión {ver} • Iniciando...",
@@ -237,7 +239,7 @@ TRANSLATIONS = {
         "menu_language": "Sprache",
         "menu_security": "Sicherheit & PIN",
         "menu_port": "Port-Einstellungen",
-        "menu_help": "Hilfe & Info",
+        "menu_help": "Hilfe & Anleitung",
         "theme_dark": "Dunkel",
         "theme_light": "Hell",
         "theme_auto": "Auto",
@@ -280,11 +282,12 @@ TRANSLATIONS = {
         "toast_bad_pin": "Falsche PIN von {ip}",
         "toast_dev_blocked": "Getrennt: {ip}",
         "toast_dev_allowed": "Erlaubt: {ip}",
-        "help_title": "Hilfe & Info",
+        "help_title": "Hilfe & Anleitung",
         "help_body": (
-            "1. Tippen Sie zum Starten auf die grüne Schaltfläche «Verbinden».\n"
-            "2. Kopieren Sie den Link oder geben Sie ihn manuell im PC-Browser ein.\n"
-            "3. Wählen Sie im Tab «Dateien» den gewünschten Ordner aus."
+            "1. Verbinden Sie Ihr Telefon und Ihren PC mit demselben WLAN (oder aktivieren Sie den WLAN-Hotspot am Telefon).\n\n"
+            "2. Tippen Sie auf die grüne Schaltfläche «Verbinden», um den lokalen Server zu starten.\n\n"
+            "3. Kopieren Sie den Link oder geben Sie ihn manuell in die Adresszeile Ihres PC-Browsers ein, um Dateien herunter- und hochzuladen.\n\n"
+            "4. Wählen Sie im Tab «Dateien» den freigegebenen Ordner aus; unter «Geräte» können Sie jeden PC jederzeit trennen."
         ),
         "splash_sub": "Kabellose Dateiübertragung",
         "splash_ver": "Version {ver} • Startet...",
@@ -334,7 +337,7 @@ TRANSLATIONS = {
         "menu_language": "Kalba",
         "menu_security": "Saugumas ir PIN",
         "menu_port": "Prievado nustatymai",
-        "menu_help": "Pagalba",
+        "menu_help": "Pagalba ir instrukcija",
         "theme_dark": "Tamsi",
         "theme_light": "Šviesi",
         "theme_auto": "Auto",
@@ -377,11 +380,12 @@ TRANSLATIONS = {
         "toast_bad_pin": "Neteisingas PIN iš {ip}",
         "toast_dev_blocked": "Atjungta: {ip}",
         "toast_dev_allowed": "Leista: {ip}",
-        "help_title": "Pagalba",
+        "help_title": "Pagalba ir instrukcija",
         "help_body": (
-            "1. Paspauskite žalią mygtuką «Prisijungti», kad paleistumėte serverį.\n"
-            "2. Nukopijuokite nuorodą arba įveskite ją rankiniu būdu kompiuterio naršyklėje.\n"
-            "3. Skirtuke «Failai» pasirinkite bendrinamą aplanką."
+            "1. Prijunkite telefoną ir kompiuterį prie to paties Wi-Fi tinklo (arba telefone įjunkite Wi-Fi prieigos tašką).\n\n"
+            "2. Paspauskite žalią mygtuką «Prisijungti», kad paleistumėte vietinį failų serverį.\n\n"
+            "3. Nukopijuokite nuorodą arba įveskite ją rankiniu būdu į kompiuterio naršyklės adreso juostą failų atsisiuntimui ir įkėlimui.\n\n"
+            "4. Skirtuke «Failai» pasirinkite bendrinamą aplanką, o skirtuke «Įrenginiai» galite bet kada atjungti kompiuterį."
         ),
         "splash_sub": "Belaidis failų perdavimas",
         "splash_ver": "Versija {ver} • Paleidžiama...",
@@ -476,9 +480,10 @@ TRANSLATIONS = {
         "toast_dev_allowed": "Разрешено: {ip}",
         "help_title": "Помощь и справка",
         "help_body": (
-            "1. Нажмите зелёную кнопку «Подключить» для запуска сервера.\n"
-            "2. Скопируйте ссылку или введите её вручную в адресную строку браузера на ПК.\n"
-            "3. Во вкладке «Файлы» выберите нужную папку для раздачи."
+            "1. Подключите смартфон и компьютер к одной сети Wi-Fi (или включите точку доступа Wi-Fi на телефоне).\n\n"
+            "2. Нажмите зелёную кнопку «Подключить» на главном экране для запуска сервера.\n\n"
+            "3. Скопируйте ссылку под кнопкой или введите её вручную в адресную строку любого браузера на ПК, чтобы скачивать и загружать файлы.\n\n"
+            "4. Во вкладке «Файлы» выберите нужную папку для раздачи, а во вкладке «Устройства» можно в любой момент отключить компьютер."
         ),
         "splash_sub": "Беспроводной обмен файлами",
         "splash_ver": "Версия {ver} • Запуск...",
@@ -573,9 +578,10 @@ TRANSLATIONS = {
         "toast_dev_allowed": "Дозволено: {ip}",
         "help_title": "Допомога та довідка",
         "help_body": (
-            "1. Натисніть зелену кнопку «Підключити» для запуску сервера.\n"
-            "2. Скопіюйте посилання або введіть його вручну в адресний рядок браузера на ПК.\n"
-            "3. У вкладці «Файли» оберіть потрібну папку для роздачі."
+            "1. Підключіть смартфон і комп'ютер до однієї мережі Wi-Fi (або увімкніть точку доступу Wi-Fi на телефоні).\n\n"
+            "2. Натисніть зелену кнопку «Підключити» на головному екрані для запуску сервера.\n\n"
+            "3. Скопіюйте посилання під кнопкою або введіть його вручну в адресний рядок браузера на ПК, щоб завантажувати та передавати файли.\n\n"
+            "4. У вкладці «Файли» оберіть потрібну папку для роздачі, а у вкладці «Пристрої» можна будь-коли відключити комп'ютер."
         ),
         "splash_sub": "Бездротовий обмін файлами",
         "splash_ver": "Версія {ver} • Запуск...",
@@ -601,7 +607,6 @@ TRANSLATIONS = {
 
 
 def detect_system_language():
-    # Определяем системный язык Android или ОС ПК; если язык не входит в 6 поддерживаемых — возвращаем "en"
     try:
         from kivy.utils import platform
     except Exception:

@@ -903,11 +903,13 @@ class AirShareApp(App):
         card.add_widget(btn_ok)
 
     def open_language_modal(self, source_widget=None, *_args):
-        # Модальное окно выбора из 6 языков с векторными флагами и полуобъёмными радио-кружочками
+        # Модальное окно выбора из 6 языков с увеличенной высотой (490dp) и фиксированным контейнером списка
         modal, card, p = self._create_mac_modal(
-            self._t("lang_title"), self._t("lang_subtitle"), 430, source_widget
+            self._t("lang_title"), self._t("lang_subtitle"), 490, source_widget
         )
-        list_box = BoxLayout(orientation="vertical", spacing=dp(6), size_hint=(1, 1))
+        list_holder = AnchorLayout(anchor_x="center", anchor_y="center", size_hint=(1, 1))
+        list_box = BoxLayout(orientation="vertical", spacing=dp(6), size_hint=(1, None), height=dp(282))
+        list_holder.add_widget(list_box)
         radio_map = {}
 
         for code, native_name in SUPPORTED_LANGUAGES:
@@ -918,8 +920,8 @@ class AirShareApp(App):
                 radius=dp(14),
                 orientation="horizontal",
                 size_hint=(1, None),
-                height=dp(44),
-                padding=[dp(12), dp(6), dp(14), dp(6)],
+                height=dp(42),
+                padding=[dp(12), dp(5), dp(14), dp(5)],
                 spacing=dp(12),
             )
             flag_w = FlagBadge(lang_code=code, size_hint=(None, None), size=(dp(30), dp(22)), pos_hint={"center_y": 0.5})
@@ -943,7 +945,7 @@ class AirShareApp(App):
                 row_card.add_widget(w)
             list_box.add_widget(row_card)
 
-        card.add_widget(list_box)
+        card.add_widget(list_holder)
         btn_close = RoundedActionButton(
             self._t("close"),
             bg_color=p["pill_bg"],
@@ -1001,7 +1003,7 @@ class AirShareApp(App):
 
     def open_shared_folders_modal(self, source_widget=None, *_args):
         modal, card, p = self._create_mac_modal(
-            self._t("folders_title"), self._t("folders_subtitle"), 395, source_widget
+            self._t("folders_title"), self._t("folders_subtitle"), 435, source_widget
         )
         list_box = BoxLayout(orientation="vertical", spacing=dp(8), size_hint=(1, 1))
         for key_name, (path_val, icon_kind, title_txt, desc_txt) in self._get_folder_map().items():
@@ -1258,16 +1260,16 @@ class AirShareApp(App):
 
     def open_help_modal(self, source_widget=None, *_args):
         modal, card, p = self._create_mac_modal(
-            self._t("help_title"), f"{APP_NAME} v{APP_VERSION}", 285, source_widget
+            self._t("help_title"), f"{APP_NAME} v{APP_VERSION}", 435, source_widget
         )
         inner = RoundedCard(
             bg_color=p["drawer_card"],
             border_color=p["drawer_border"],
             radius=dp(16),
-            padding=dp(14),
+            padding=[dp(16), dp(14), dp(16), dp(14)],
             size_hint=(1, 1),
         )
-        inner.add_widget(make_label(self._t("help_body"), size=13, color=p["text"]))
+        inner.add_widget(make_label(self._t("help_body"), size=12.5, valign="top", color=p["text"]))
         card.add_widget(inner)
         btn_ok = RoundedActionButton(
             self._t("ok_understand"),
