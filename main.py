@@ -179,6 +179,34 @@ class AirShareApp(App):
         except Exception as exc:
             logger.warning("Не удалось переключить WakeLock/WifiLock: %s", exc)
 
+    def _apply_android_system_insets(self, *_args):
+        # На Android 15+ (targetSdkVersion 35) учитываем системные отступы статус-бара и нижней панели навигации
+        try:
+            from kivy.utils import platform
+            if platform != "android":
+                return
+            from jnius import autoclass
+            BuildVersion = autoclass("android.os.Build$VERSION")
+            if BuildVersion.SDK_INT < 35:
+                return
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            activity = getattr(PythonActivity, "mActivity", None)
+            if activity is None or activity.getApplicationInfo().targetSdkVersion < 35:
+                return
+            window = activity.getWindow()
+            decor = window.getDecorView() if window is not None else None
+            insets = decor.getRootWindowInsets() if decor is not None else None
+            if insets is None:
+                return
+            WindowInsetsType = autoclass("android.view.WindowInsets$Type")
+            bars = insets.getInsets(WindowInsetsType.systemBars())
+            top_px = max(0, int(bars.top))
+            bot_px = max(0, int(bars.bottom))
+            if top_px > 0 or bot_px > 0:
+                self.main_content.padding = [dp(18), dp(12) + top_px, dp(18), dp(12) + bot_px]
+        except Exception as exc:
+            logger.debug("Не удалось применить системные отступы Android 15+: %s", exc)
+
     def build(self):
         self.title = f"{APP_NAME} v{APP_VERSION}"
         self.transfer_history = []
@@ -361,7 +389,7 @@ class AirShareApp(App):
             size=13.5,
             size_hint=(0.76, 1),
             shorten=True,
-            shorten_from="middle",
+            shorten_from="center",
             max_lines=1,
         )
         self.tr1_pct = make_label("—", size=13, halign="right", size_hint=(0.24, 1))
@@ -388,7 +416,7 @@ class AirShareApp(App):
             size=13.5,
             size_hint=(0.76, 1),
             shorten=True,
-            shorten_from="middle",
+            shorten_from="center",
             max_lines=1,
         )
         self.tr2_pct = make_label("", size=13, halign="right", size_hint=(0.24, 1))
@@ -564,6 +592,7 @@ class AirShareApp(App):
 
         self.splash_screen = AppSplashScreen(lang=self.language, version=APP_VERSION)
         self.root_widget.add_widget(self.splash_screen)
+        Clock.schedule_once(self._apply_android_system_insets, 0.35)
 
         return self.root_widget
 

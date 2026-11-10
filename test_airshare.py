@@ -1,4 +1,4 @@
-# Автоматические тесты безопасности, HTTP Range (206), локализации (i18n), фильтрации Wi-Fi IP и ZIP-архивации
+# Автоматические тесты безопасности, HTTP Range (206), локализации (i18n), фильтрации Wi-Fi IP, ZIP-архивации и хука сборки p4a_hook
 
 import base64
 import io
@@ -7,10 +7,12 @@ import tempfile
 import unittest
 import urllib.parse
 import zipfile
+from pathlib import Path
 from unittest import mock
 
 import config
 import i18n
+import p4a_hook
 import server
 import utils
 import web_ui
@@ -130,7 +132,7 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
 
         for idx, body in enumerate([b"first", b"second", b"third"]):
             req = (
-                f"POST /?upload=report.txt HTTP/1.1\r\nHost: localhost\r\n"
+                "POST /?upload=report.txt HTTP/1.1\r\nHost: localhost\r\n"
                 f"Content-Length: {len(body)}\r\n"
                 + _basic_auth_header("airshare", "918273")
                 + "\r\n"
@@ -239,8 +241,6 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         css_light = web_ui.get_css("light")
         self.assertIn("color-scheme: light", css_light)
 
-
-
     def test_09_cookie_pin_auth_and_no_false_pin_alert(self):
         # 1. Простой GET / без пароля возвращает страницу ввода PIN (401), но НЕ увеличивает счётчик ошибок и не шлёт ложный алерт
         alerts = []
@@ -263,6 +263,51 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         resp_dir = _run_request(self.storage_dir, req_with_cookie, client_ip="192.168.50.56")
         self.assertIn(b"200 OK", resp_dir.splitlines()[0])
         self.assertIn(b"Crafted by JackBrownUA", resp_dir)
+
+    def test_10_p4a_hook_patches_project_properties_and_kivy_shorten_from_valid(self):
+        # 1. Проверяем, что в main.py и ui_widgets.py нигде не передаётся невалидный для Kivy shorten_from="middle"
+        main_code = Path("main.py").read_text(encoding="utf-8")
+        self.assertNotIn('shorten_from="middle"', main_code)
+        self.assertIn('shorten_from="center"', main_code)
+
+        # 2. Проверяем, что p4a_hook корректно патчит закэшированный dist (project.properties, build.gradle, AndroidManifest.xml и HIDDeviceManager.java)
+        fake_dist = Path(self.tmp_dir.name) / "fake_dist"
+        (fake_dist / "src" / "main" / "java" / "org" / "libsdl" / "app").mkdir(parents=True, exist_ok=True)
+        props_file = fake_dist / "project.properties"
+        props_file.write_text("target=android-33\nAPP_PLATFORM=24\n", encoding="utf-8")
+
+        gradle_file = fake_dist / "build.gradle"
+        gradle_file.write_text("android {\n    compileSdkVersion 33\n    defaultConfig {\n        minSdkVersion 24\n        targetSdkVersion 33\n    }\n}\n", encoding="utf-8")
+
+        manifest_file = fake_dist / "src" / "main" / "AndroidManifest.xml"
+        manifest_file.write_text(
+            '<manifest><uses-sdk android:minSdkVersion="24" android:targetSdkVersion="33" />'
+            '<application android:requestLegacyExternalStorage="true"></application></manifest>',
+            encoding="utf-8",
+        )
+
+        hid_file = fake_dist / "src" / "main" / "java" / "org" / "libsdl" / "app" / "HIDDeviceManager.java"
+        hid_file.write_text(
+            "class HIDDeviceManager {\n"
+            "  void init() {\n"
+            "    mContext.registerReceiver(mUsbBroadcast, filter);\n"
+            "    mContext.registerReceiver(mBluetoothBroadcast, filter);\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+        counts = p4a_hook.patch_build_tree(fake_dist)
+        self.assertEqual(counts["props"], 1)
+        self.assertEqual(counts["gradle"], 1)
+        self.assertEqual(counts["manifest"], 1)
+        self.assertEqual(counts["hid"], 1)
+
+        self.assertIn("target=android-35", props_file.read_text(encoding="utf-8"))
+        self.assertIn("targetSdkVersion 35", gradle_file.read_text(encoding="utf-8"))
+        self.assertIn('android:targetSdkVersion="35"', manifest_file.read_text(encoding="utf-8"))
+        self.assertNotIn("requestLegacyExternalStorage", manifest_file.read_text(encoding="utf-8"))
+        self.assertIn("mContext.registerReceiver(mUsbBroadcast, filter, 2)", hid_file.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

@@ -19,12 +19,13 @@ fullscreen = 0
 
 android.permissions = INTERNET,ACCESS_NETWORK_STATE,ACCESS_WIFI_STATE,WAKE_LOCK,MANAGE_EXTERNAL_STORAGE,REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
 android.api = 35
-android.minapi = 24
+android.minapi = 26
 android.ndk = 25b
-android.ndk_api = 24
+android.ndk_api = 26
 android.archs = arm64-v8a
 android.accept_sdk_license = True
 p4a.branch = master
+p4a.hook = %(source.dir)s/p4a_hook.py
 
 [buildozer]
 log_level = 2

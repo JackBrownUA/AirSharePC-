@@ -31,6 +31,8 @@ from i18n import tr
 
 
 def make_label(text="", size=14, halign="left", valign="middle", markup=False, **kw):
+    if kw.get("shorten_from") == "middle":
+        kw["shorten_from"] = "center"
     w = Label(text=text, font_size=sp(size), halign=halign, valign=valign, markup=markup, **kw)
     w.bind(size=lambda i, v: setattr(i, "text_size", v))
     return w
@@ -454,8 +456,9 @@ class RoundedCard(BoxLayout):
     def __init__(self, bg_color, border_color=(0, 0, 0, 0), radius=dp(18), **kwargs):
         super().__init__(**kwargs)
         self.bg_color, self.border_color, self.radius_val = bg_color, border_color, radius
-        shadow_a = 0.28 if bg_color[3] > 0.4 else 0.0
-        bevel_a = 0.14 if bg_color[3] > 0.4 else 0.0
+        has_fill = len(bg_color) < 4 or bg_color[3] > 0.4
+        shadow_a = 0.28 if has_fill else 0.0
+        bevel_a = 0.14 if has_fill else 0.0
         with self.canvas.before:
             PushMatrix()
             self._mat_trans1 = Translate(0, 0)
@@ -501,8 +504,9 @@ class RoundedCard(BoxLayout):
     def update_colors(self, bg_color, border_color=(0, 0, 0, 0)):
         self.bg_color, self.border_color = bg_color, border_color
         self.col.rgba, self.b_col.rgba = bg_color, border_color
-        self.sh_col.rgba = (0, 0, 0, 0.28 if bg_color[3] > 0.4 else 0.0)
-        self.bev_col.rgba = (1, 1, 1, 0.14 if bg_color[3] > 0.4 else 0.0)
+        has_fill = len(bg_color) < 4 or bg_color[3] > 0.4
+        self.sh_col.rgba = (0, 0, 0, 0.28 if has_fill else 0.0)
+        self.bev_col.rgba = (1, 1, 1, 0.14 if has_fill else 0.0)
 
 
 class ClickableCard(ButtonBehavior, RoundedCard):
@@ -802,7 +806,7 @@ class ToastBanner(RoundedCard):
         self.update_colors(bg_color, (dot_color[0], dot_color[1], dot_color[2], 0.75))
         Animation.cancel_all(self)
         self.y = Window.height + dp(10)
-        target_y = Window.height - dp(58)
+        target_y = Window.height - dp(68)
         Animation(y=target_y, opacity=1.0, duration=0.25, t="out_back").start(self)
         self._hide_ev = Clock.schedule_once(self._hide, 2.8)
 
