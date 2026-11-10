@@ -454,16 +454,22 @@ class RoundedCard(BoxLayout):
     def __init__(self, bg_color, border_color=(0, 0, 0, 0), radius=dp(18), **kwargs):
         super().__init__(**kwargs)
         self.bg_color, self.border_color, self.radius_val = bg_color, border_color, radius
+        shadow_a = 0.28 if bg_color[3] > 0.4 else 0.0
+        bevel_a = 0.14 if bg_color[3] > 0.4 else 0.0
         with self.canvas.before:
             PushMatrix()
             self._mat_trans1 = Translate(0, 0)
             self._mat_scale = Scale(1.0, 1.0, 1.0)
             self._mat_trans2 = Translate(0, 0)
+            self.sh_col = Color(0, 0, 0, shadow_a)
+            self.sh_rect = RoundedRectangle(pos=(self.x, self.y - dp(2.5)), size=self.size, radius=[self.radius_val])
             self.col = Color(*self.bg_color)
             self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[self.radius_val])
+            self.bev_col = Color(1, 1, 1, bevel_a)
+            self.bev_line = Line(points=[], width=dp(1.1))
             self.b_col = Color(*self.border_color)
             self.line = Line(
-                rounded_rectangle=[self.x, self.y, self.width, self.height, max(1, self.radius_val)], width=dp(1.0)
+                rounded_rectangle=[self.x, self.y, self.width, self.height, max(1, self.radius_val)], width=dp(1.1)
             )
         with self.canvas.after:
             PopMatrix()
@@ -483,19 +489,20 @@ class RoundedCard(BoxLayout):
 
     def _update(self, *_args):
         self.rect.pos, self.rect.size = self.pos, self.size
+        self.sh_rect.pos, self.sh_rect.size = (self.x, self.y - dp(2.5)), self.size
         if self.width > 2 and self.height > 2:
-            self.line.rounded_rectangle = [
-                self.x,
-                self.y,
-                self.width,
-                self.height,
-                min(self.radius_val, self.height * 0.5),
-            ]
+            r = min(self.radius_val, self.height * 0.5)
+            self.line.rounded_rectangle = [self.x, self.y, self.width, self.height, r]
+            inset = max(dp(8), r * 0.75)
+            if self.width > inset * 2:
+                self.bev_line.points = [self.x + inset, self.top - dp(1.2), self.right - inset, self.top - dp(1.2)]
         self._update_matrix()
 
     def update_colors(self, bg_color, border_color=(0, 0, 0, 0)):
         self.bg_color, self.border_color = bg_color, border_color
         self.col.rgba, self.b_col.rgba = bg_color, border_color
+        self.sh_col.rgba = (0, 0, 0, 0.28 if bg_color[3] > 0.4 else 0.0)
+        self.bev_col.rgba = (1, 1, 1, 0.14 if bg_color[3] > 0.4 else 0.0)
 
 
 class ClickableCard(ButtonBehavior, RoundedCard):

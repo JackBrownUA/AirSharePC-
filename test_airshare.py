@@ -240,5 +240,30 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn("color-scheme: light", css_light)
 
 
+
+    def test_09_cookie_pin_auth_and_no_false_pin_alert(self):
+        # 1. Простой GET / без пароля возвращает страницу ввода PIN (401), но НЕ увеличивает счётчик ошибок и не шлёт ложный алерт
+        alerts = []
+        server.AirShareHandler.on_bad_pin_attempt = lambda ip: alerts.append(ip)
+        for _ in range(7):
+            resp_login = _run_request(self.storage_dir, b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n", client_ip="192.168.50.56")
+            self.assertIn(b"401", resp_login.splitlines()[0])
+            self.assertIn(b"skyCanvas", resp_login)
+        self.assertEqual(len(alerts), 0)
+
+        # 2. Вход по ссылке ?pin=918273 возвращает 302 редирект и устанавливает сессионную Cookie airshare_auth
+        resp_pin = _run_request(self.storage_dir, b"GET /?pin=918273 HTTP/1.1\r\nHost: localhost\r\n\r\n", client_ip="192.168.50.56")
+        hdr_lines = resp_pin.partition(b"\r\n\r\n")[0].decode("utf-8").splitlines()
+        self.assertIn("302", hdr_lines[0])
+        cookie_line = [line for line in hdr_lines if line.lower().startswith("set-cookie: airshare_auth=")][0]
+        cookie_kv = cookie_line.split(":", 1)[1].strip().split(";")[0]
+
+        # 3. Последующие переходы по папкам и POST-загрузки с Cookie проходят с кодом 200 без Basic Auth
+        req_with_cookie = f"GET / HTTP/1.1\r\nHost: localhost\r\nCookie: {cookie_kv}\r\n\r\n".encode("utf-8")
+        resp_dir = _run_request(self.storage_dir, req_with_cookie, client_ip="192.168.50.56")
+        self.assertIn(b"200 OK", resp_dir.splitlines()[0])
+        self.assertIn(b"Crafted by JackBrownUA", resp_dir)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -433,3 +433,30 @@ def request_android_full_storage():
             request_permissions([Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE])
     except Exception as exc:
         logger.warning("Не удалось запросить доступ к хранилищу Android: %s", exc)
+
+
+def request_ignore_battery_optimizations():
+    # Просим Android (One UI / MIUI) не усыплять фоновый поток сервера при сворачивании приложения
+    try:
+        from kivy.utils import platform
+    except Exception:
+        return
+    if platform != "android":
+        return
+    try:
+        from jnius import autoclass
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        Context = autoclass("android.content.Context")
+        Intent = autoclass("android.content.Intent")
+        Settings = autoclass("android.provider.Settings")
+        Uri = autoclass("android.net.Uri")
+        activity = getattr(PythonActivity, "mActivity", None)
+        if activity is not None:
+            pkg = activity.getPackageName()
+            pm = activity.getSystemService(Context.POWER_SERVICE)
+            if pm is not None and not pm.isIgnoringBatteryOptimizations(pkg):
+                intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                intent.setData(Uri.parse(f"package:{pkg}"))
+                activity.startActivity(intent)
+    except Exception as exc:
+        logger.debug("Не удалось запросить исключение из оптимизации батареи: %s", exc)

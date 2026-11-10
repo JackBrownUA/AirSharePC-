@@ -50,6 +50,7 @@ from utils import (
     is_wifi_connected,
     load_settings,
     request_android_full_storage,
+    request_ignore_battery_optimizations,
     save_settings,
 )
 
@@ -79,6 +80,7 @@ class AirShareApp(App):
         self.keep_alive_locked = True
         self._wake_lock = None
         self._wifi_lock = None
+        self._battery_opt_requested = False
         self.transfer_history = []
         self.active_modal = None
         self.theme_mode = "dark"
@@ -109,6 +111,7 @@ class AirShareApp(App):
         return path_val
 
     def get_connection_url(self):
+        # Полная ссылка с ?pin= для автоматического входа без Basic Auth при копировании
         if not is_wifi_connected():
             return self._t("no_wifi_url")
         ip = get_local_ip()
@@ -117,12 +120,20 @@ class AirShareApp(App):
             pwd = load_settings().get("password", "")
             self.saved_password = pwd
         quoted_pwd = urllib.parse.quote(pwd, safe="")
-        return f"http://airshare:{quoted_pwd}@{ip}:{self.server_port}"
+        return f"http://{ip}:{self.server_port}/?pin={quoted_pwd}"
+
+    def get_display_url_text(self):
+        # На экране показываем короткий адрес и PIN, чтобы его было легко ввести вручную в браузере
+        if not is_wifi_connected():
+            return self._t("no_wifi_url")
+        ip = get_local_ip()
+        pwd = (self.saved_password or "").strip() or load_settings().get("password", "")
+        return f"http://{ip}:{self.server_port}  •  PIN: {pwd}"
 
     def update_connection_url_display(self):
-        url = self.get_connection_url()
-        self.addr_label.text = url
-        self.addr_label.font_size = sp(10.5) if len(url) > 38 else (sp(11.5) if len(url) > 30 else sp(13.0))
+        disp = self.get_display_url_text()
+        self.addr_label.text = disp
+        self.addr_label.font_size = sp(11.5) if len(disp) > 34 else sp(12.5)
 
     def set_keep_alive(self, enabled):
         self.keep_alive_locked = bool(enabled)
@@ -155,9 +166,9 @@ class AirShareApp(App):
                         if self._wifi_lock is None:
                             wm = activity.getApplicationContext().getSystemService(Context.WIFI_SERVICE)
                             if wm is not None:
-                                self._wifi_lock = wm.createWifiLock(
-                                    WifiManager.WIFI_MODE_FULL_HIGH_PERF, "AirSharePC::WifiLock"
-                                )
+                                wifi_mode = getattr(WifiManager, "WIFI_MODE_FULL_LOW_LATENCY", WifiManager.WIFI_MODE_FULL_HIGH_PERF)
+                                self._wifi_lock = wm.createWifiLock(wifi_mode, "AirSharePC::WifiLock")
+                                self._wifi_lock.setReferenceCounted(False)
                         if self._wifi_lock is not None and not self._wifi_lock.isHeld():
                             self._wifi_lock.acquire()
                     else:
@@ -344,8 +355,15 @@ class AirShareApp(App):
             icon_type="zip_badge", size_hint=(None, None), size=(dp(42), dp(42)), pos_hint={"center_y": 0.5}
         )
         info1 = BoxLayout(orientation="vertical", spacing=dp(3), pos_hint={"center_y": 0.5})
-        top1 = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(20))
-        self.tr1_name = make_label(self._t("no_active_transfers"), size=14, size_hint=(0.76, 1))
+        top1 = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(24))
+        self.tr1_name = make_label(
+            self._t("no_active_transfers"),
+            size=13.5,
+            size_hint=(0.76, 1),
+            shorten=True,
+            shorten_from="middle",
+            max_lines=1,
+        )
         self.tr1_pct = make_label("—", size=13, halign="right", size_hint=(0.24, 1))
         top1.add_widget(self.tr1_name)
         top1.add_widget(self.tr1_pct)
@@ -364,8 +382,15 @@ class AirShareApp(App):
             icon_type="img_badge", size_hint=(None, None), size=(dp(42), dp(42)), pos_hint={"center_y": 0.5}
         )
         info2 = BoxLayout(orientation="vertical", spacing=dp(3), pos_hint={"center_y": 0.5})
-        top2 = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(20))
-        self.tr2_name = make_label("", size=14, size_hint=(0.76, 1))
+        top2 = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(24))
+        self.tr2_name = make_label(
+            "",
+            size=13.5,
+            size_hint=(0.76, 1),
+            shorten=True,
+            shorten_from="middle",
+            max_lines=1,
+        )
         self.tr2_pct = make_label("", size=13, halign="right", size_hint=(0.24, 1))
         top2.add_widget(self.tr2_name)
         top2.add_widget(self.tr2_pct)
@@ -579,6 +604,17 @@ class AirShareApp(App):
         self.t_btn_light.set_text(self._t("theme_light"))
         self.t_btn_auto.set_text(self._t("theme_auto"))
         self.update_connection_url_display()
+
+    def on_pause(self):
+        # Возвращаем True, чтобы Android/Kivy не замораживал фоновый HTTP-сервер при сворачивании приложения
+        if self.server is not None and self.keep_alive_locked:
+            self.set_keep_alive(True)
+        return True
+
+    def on_resume(self):
+        if self.server is not None and self.keep_alive_locked:
+            self.set_keep_alive(True)
+        self.refresh_network_status()
 
     def on_stop(self):
         self.radar_card.set_wave_active(False)
@@ -806,6 +842,9 @@ class AirShareApp(App):
                 threading.Thread(target=self.server.serve_forever, daemon=True).start()
                 self.has_server_error = False
                 self.set_keep_alive(True)
+                if self.keep_alive_locked and not self._battery_opt_requested:
+                    self._battery_opt_requested = True
+                    request_ignore_battery_optimizations()
             except OSError as exc:
                 logger.error("Не удалось запустить HTTP-сервер на %s:%s: %s", bind_ip, self.server_port, exc)
                 self.server = None
@@ -968,13 +1007,13 @@ class AirShareApp(App):
         self.apply_theme()
 
     def open_all_storage_confirm_modal(self, path_val, source_widget=None):
-        # Явное предупреждение перед открытием доступа ко всему накопителю смартфона (п. 28.b)
+        # Объёмное окно предупреждения в тон приложения: красная кнопка «Отмена» и зелёная «Разрешить» без жёлтой рамки
         modal, card, p = self._create_mac_modal(
-            self._t("all_storage_warn_title"), "", 255, source_widget
+            self._t("all_storage_warn_title"), "", 260, source_widget
         )
         inner = RoundedCard(
             bg_color=p["drawer_card"],
-            border_color=p["amber"],
+            border_color=p["drawer_border"],
             radius=dp(16),
             padding=dp(14),
             size_hint=(1, 1),
@@ -982,12 +1021,20 @@ class AirShareApp(App):
         inner.add_widget(make_label(self._t("all_storage_warn_body"), size=13, color=p["text"]))
         card.add_widget(inner)
 
-        btn_row = BoxLayout(orientation="horizontal", spacing=dp(10), size_hint=(1, None), height=dp(44))
+        btn_row = BoxLayout(orientation="horizontal", spacing=dp(12), size_hint=(1, None), height=dp(46))
         btn_cancel = RoundedActionButton(
-            self._t("cancel"), bg_color=p["pill_bg"], border_color=p["drawer_border"], text_color=p["text"]
+            self._t("cancel"),
+            bg_color=p["red"],
+            border_color=(1, 0.65, 0.65, 0.38),
+            text_color=(1, 1, 1, 1),
+            radius=dp(16),
         )
         btn_confirm = RoundedActionButton(
-            self._t("confirm_allow"), bg_color=p["amber"], border_color=(1, 1, 1, 0.2), text_color=(1, 1, 1, 1)
+            self._t("confirm_allow"),
+            bg_color=p["green"],
+            border_color=(0.65, 1, 0.80, 0.38),
+            text_color=(1, 1, 1, 1),
+            radius=dp(16),
         )
 
         def _confirm(*_):
@@ -1260,7 +1307,7 @@ class AirShareApp(App):
 
     def open_help_modal(self, source_widget=None, *_args):
         modal, card, p = self._create_mac_modal(
-            self._t("help_title"), f"{APP_NAME} v{APP_VERSION}", 435, source_widget
+            self._t("help_title"), f"{APP_NAME} v{APP_VERSION}", 460, source_widget
         )
         inner = RoundedCard(
             bg_color=p["drawer_card"],
@@ -1271,6 +1318,15 @@ class AirShareApp(App):
         )
         inner.add_widget(make_label(self._t("help_body"), size=12.5, valign="top", color=p["text"]))
         card.add_widget(inner)
+        credit_lbl = make_label(
+            "Crafted by JackBrownUA • Powered by Gemini",
+            size=11,
+            halign="center",
+            color=p["subtext"],
+            size_hint=(1, None),
+            height=dp(18),
+        )
+        card.add_widget(credit_lbl)
         btn_ok = RoundedActionButton(
             self._t("ok_understand"),
             bg_color=p["blue"],

@@ -1,6 +1,7 @@
-# HTTP-сервер AirShare PC: авторизация, HTTP Range (206), потоковый ZIP, пагинация и отключение клиентов
+# HTTP-сервер AirShare PC: сессионная Cookie/PIN-авторизация, HTTP Range (206), потоковый ZIP и пагинация
 
 import base64
+import hashlib
 import hmac
 import html
 import logging
@@ -27,11 +28,18 @@ from config import (
 )
 from i18n import tr
 from utils import add_recent_ip, format_size, load_settings
-from web_ui import get_css, get_star_script, get_theme_script, get_upload_script
+from web_ui import (
+    get_css,
+    get_download_svg,
+    get_pin_login_page,
+    get_star_script,
+    get_theme_script,
+    get_top_controls_html,
+    get_upload_script,
+)
 
 logger = logging.getLogger("airshare.server")
 
-# Расширения файлов, которые браузер может попытаться выполнить в контексте origin сервера
 _SANDBOX_EXTENSIONS = frozenset({".html", ".htm", ".svg", ".xhtml", ".js", ".mjs", ".xml"})
 
 
@@ -61,7 +69,6 @@ class ReusableThreadingServer(ThreadingHTTPServer):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Ограничиваем число одновременных HTTP-соединений для защиты от исчерпания потоков
         self._conn_semaphore = threading.BoundedSemaphore(MAX_CONCURRENT_CONNECTIONS)
 
     def process_request(self, request, client_address):
@@ -106,7 +113,6 @@ def _get_unique_filepath(target_dir, filename):
 
 
 class AirShareHandler(SimpleHTTPRequestHandler):
-    # Таймаут чтения/записи сокета против зависших подключений (п. 11)
     timeout = SOCKET_TIMEOUT_SECONDS
 
     current_password = ""
@@ -120,13 +126,13 @@ class AirShareHandler(SimpleHTTPRequestHandler):
     _failed_attempts = {}
     _disconnected_ips = set()
     _notified_ips = set()
+    _session_secret = secrets.token_hex(16)
 
     def __init__(self, *args, **kwargs):
         self.real_storage = os.path.realpath(STORAGE_PATH)
         super().__init__(*args, directory=self.real_storage, **kwargs)
 
     def end_headers(self):
-        # Защитные HTTP-заголовки для каждого ответа сервера (п. 10)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         super().end_headers()
@@ -203,6 +209,54 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             AirShareHandler.current_password = pwd
         return pwd
 
+    def _make_session_token(self, expected_pwd):
+        msg = f"airshare_session:{expected_pwd}".encode("utf-8")
+        return hmac.new(self._session_secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
+
+    def _evaluate_auth(self):
+        # Возвращает: ("ok_pin_query", None), ("ok", None), ("fail_attempt", None) или ("no_creds", None)
+        expected_pwd = self._ensure_password_loaded()
+        expected_token = self._make_session_token(expected_pwd)
+
+        # 1. Проверяем query-параметр ?pin=XXXXXX (вход по ссылке или через форму PIN на сайте)
+        parsed = urllib.parse.urlparse(self.path)
+        params = urllib.parse.parse_qs(parsed.query)
+        if "pin" in params and params["pin"]:
+            cand_pin = str(params["pin"][0]).strip()
+            if hmac.compare_digest(cand_pin.encode("utf-8"), expected_pwd.encode("utf-8")):
+                return "ok_pin_query"
+            return "fail_attempt"
+
+        # 2. Проверяем сессионную Cookie airshare_auth (устанавливается после первого входа, поэтому браузер не сбрасывает её при навигации)
+        cookie_hdr = self.headers.get("Cookie", "")
+        if cookie_hdr:
+            try:
+                c = cookies.SimpleCookie()
+                c.load(cookie_hdr)
+                if "airshare_auth" in c:
+                    tok = c["airshare_auth"].value.strip()
+                    if hmac.compare_digest(tok.encode("utf-8"), expected_token.encode("utf-8")):
+                        return "ok"
+            except Exception:
+                pass
+
+        # 3. Поддержка заголовка Authorization: Basic (для обратной совместимости и автотестов)
+        header = self.headers.get("Authorization", "")
+        if header.startswith("Basic "):
+            try:
+                raw = base64.b64decode(header[6:]).decode("utf-8")
+                _user, sep, pwd = raw.partition(":")
+                if sep and hmac.compare_digest(pwd.encode("utf-8"), expected_pwd.encode("utf-8")):
+                    return "ok"
+            except Exception as exc:
+                logger.warning("Ошибка разбора заголовка Authorization: %s", exc)
+            return "fail_attempt"
+
+        return "no_creds"
+
+    def is_authenticated(self):
+        return self._evaluate_auth() in ("ok", "ok_pin_query")
+
     def check_auth_or_respond(self):
         client_ip = self._get_client_ip()
         if self.is_ip_disconnected(client_ip):
@@ -218,31 +272,53 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         if blocked:
             self.send_rate_limit_response(retry_after)
             return False
-        if self.is_authenticated():
+
+        status = self._evaluate_auth()
+        if status == "ok_pin_query":
+            self._clear_auth_failures(client_ip)
+            expected_pwd = self._ensure_password_loaded()
+            tok = self._make_session_token(expected_pwd)
+            parsed = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed.query)
+            params.pop("pin", None)
+            clean_query = urllib.parse.urlencode(params, doseq=True)
+            clean_url = parsed.path or "/"
+            if clean_query:
+                clean_url = f"{clean_url}?{clean_query}"
+
+            # Если помимо ?pin= сразу запрашивается скачивание или загрузка — ставим Cookie и продолжаем запрос
+            if any(k in params for k in ("download", "zip", "download_selected", "files", "upload")):
+                self._pending_auth_cookie = tok
+                return True
+
+            # Для обычного входа в браузере устанавливаем Cookie и делаем чистый редирект без ?pin= в адресной строке
+            self._parse_client_device()
+            self.send_response(302, "Found")
+            self.send_header(
+                "Set-Cookie", f"airshare_auth={tok}; Path=/; Max-Age=86400; HttpOnly; SameSite=Lax"
+            )
+            self.send_header("Location", clean_url)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return False
+
+        if status == "ok":
             self._clear_auth_failures(client_ip)
             return True
-        self._record_auth_failure(client_ip)
-        blocked_now, retry_after = self._is_ip_blocked(client_ip)
-        if blocked_now:
-            self.send_rate_limit_response(retry_after)
-        else:
-            self.request_auth()
-        return False
 
-    def is_authenticated(self):
-        expected_pwd = self._ensure_password_loaded()
-        header = self.headers.get("Authorization", "")
-        if not header.startswith("Basic "):
+        if status == "fail_attempt":
+            # Наказываем счётчиком попыток и уведомлением ТОЛЬКО когда реально прислан неверный PIN/пароль
+            self._record_auth_failure(client_ip)
+            blocked_now, retry_after = self._is_ip_blocked(client_ip)
+            if blocked_now:
+                self.send_rate_limit_response(retry_after)
+            else:
+                self.request_auth(is_failed=True)
             return False
-        try:
-            raw = base64.b64decode(header[6:]).decode("utf-8")
-            _user, sep, pwd = raw.partition(":")
-            if not sep:
-                return False
-            return hmac.compare_digest(pwd.encode("utf-8"), expected_pwd.encode("utf-8"))
-        except Exception as exc:
-            logger.warning("Ошибка разбора заголовка Authorization: %s", exc)
-            return False
+
+        # Если браузер просто открыл IP:порт без куки и без пароля — показываем страницу ввода PIN без ложной тревоги на телефоне!
+        self.request_auth(is_failed=False)
+        return False
 
     def send_rate_limit_response(self, retry_after=RATE_LIMIT_BLOCK_SECONDS):
         msg = tr("web_rate_limit", self.current_language, sec=retry_after)
@@ -254,12 +330,16 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def request_auth(self):
-        msg = tr("web_auth_req", self.current_language)
-        body = f"<h3>{html.escape(msg)}</h3>".encode("utf-8")
+    def request_auth(self, is_failed=False):
+        parsed = urllib.parse.urlparse(self.path)
+        params = urllib.parse.parse_qs(parsed.query)
+        theme = self._get_request_theme(params)
+        err_msg = tr("toast_bad_pin", self.current_language, ip=self._get_client_ip()) if is_failed else ""
+        page_html = get_pin_login_page(theme=theme, lang=self.current_language, error_msg=err_msg)
+        body = page_html.encode("utf-8")
         self.send_response(401)
-        self.send_header("WWW-Authenticate", 'Basic realm="AirShare PC"')
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -363,8 +443,6 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 self.download_selected_files(selected)
                 return
 
-        # Если запрашивается конкретный файл по прямому пути, отдаём его через stream_single_file
-        # с поддержкой HTTP Range (206) и защитой от выполнения чужого HTML/JS (п. 10, 23)
         target_path = self.translate_path(parsed.path)
         if os.path.isfile(target_path):
             parent_url = os.path.dirname(urllib.parse.unquote(parsed.path))
@@ -468,7 +546,6 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                     logger.warning("Не удалось удалить временный файл %s: %s", tmp_path, cleanup_exc)
 
     def _parse_byte_range(self, range_header, file_size):
-        # Разбираем заголовок Range: bytes=start-end для докачки и перемотки видео (п. 23)
         if not range_header or not range_header.startswith("bytes="):
             return None
         spec = range_header[6:].strip().split(",")[0].strip()
@@ -605,7 +682,6 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             logger.debug("Клиент прервал скачивание ZIP-архива %s", folder_basename)
 
     def download_selected_files(self, files):
-        # Сначала собираем проверенный список файлов и только потом отправляем 200 OK (п. 8)
         valid_entries = []
         seen_arcnames = set()
 
@@ -684,7 +760,6 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         lang = self.current_language
         displaypath = html.escape(urllib.parse.unquote(parsed.path))
 
-        # Пагинация для быстрого открытия больших папок (DCIM) без пересчёта содержимого подпапок (п. 22)
         total_items = len(list_dir)
         total_pages = max(1, math.ceil(total_items / MAX_DIR_ITEMS_PER_PAGE))
         try:
@@ -701,10 +776,9 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         r.append('<title>AirShare PC</title>')
         r.append(f'<style>{get_css(theme)}</style>')
         r.append(f'</head><body class="{theme}">')
-        r.append('<div id="starfield"></div>')
+        r.append('<canvas id="skyCanvas"></canvas>')
+        r.append(get_top_controls_html(theme))
 
-        icon = "🌙" if theme == "light" else "☀️"
-        r.append(f'<button type="button" id="themeBtn" class="theme-toggle" onclick="toggleTheme()">{icon}</button>')
         r.append('<div class="container">')
         r.append(f'<div class="header"><h1>AirShare PC</h1><p>{displaypath}</p>')
         r.append('<div class="actions-bar">')
@@ -716,7 +790,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         if real_path != self.real_storage:
             r.append(f'<a class="upload-btn" href="../">{html.escape(tr("web_back_btn", lang))}</a>')
         r.append('</div>')
-        r.append('<p id="status" style="margin-top:12px;color:#667eea;min-height:20px;"></p></div>')
+        r.append('<p id="status" style="margin-top:12px;color:#60a5fa;min-height:20px;"></p></div>')
 
         r.append('<form id="fileForm" method="GET" onsubmit="return submitSelectedDownload(event)">')
         r.append('<input type="hidden" name="download_selected" value="1">')
@@ -731,6 +805,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         r.append('<ul class="file-list">')
 
         folder_label = html.escape(tr("web_folder", lang))
+        dl_svg = get_download_svg()
         for name in page_items:
             fullname = os.path.join(real_path, name)
             rel_path = os.path.relpath(fullname, self.real_storage).replace("\\", "/")
@@ -745,7 +820,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                     f'<div class="file-info">'
                     f'<a class="file-link" href="{urllib.parse.quote(name + "/")}">📁 {safe_name}</a>'
                     f'<div class="file-meta">{folder_label}</div></div>'
-                    f'<a class="download-btn" href="?zip={quoted_name}" title="ZIP">⬇</a>'
+                    f'<a class="download-btn" href="?zip={quoted_name}" title="ZIP">{dl_svg}</a>'
                     f'</li>'
                 )
             else:
@@ -760,7 +835,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                     f'<div class="file-info">'
                     f'<a class="file-link" href="{quoted_name}" target="_blank">📄 {safe_name}</a>'
                     f'<div class="file-meta">{size_str}</div></div>'
-                    f'<a class="download-btn" href="?download={quoted_name}" download="{safe_name}">⬇</a>'
+                    f'<a class="download-btn" href="?download={quoted_name}" download="{safe_name}">{dl_svg}</a>'
                     f'</li>'
                 )
 
@@ -771,16 +846,17 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 r.append(f'<a class="upload-btn" href="?page={page - 1}">{html.escape(tr("web_page_prev", lang))}</a>')
             r.append(f'<span>{html.escape(tr("web_page_info", lang, page=page, total=total_pages))}</span>')
             if page < total_pages:
-                r.append(f'<a class="upload-btn" href="?page={page + 1}">{html.escape(tr("web_page_next", lang))}</a>')
+                r.append(f'<a class="upload-btn" href="?page={page + 1}">{html.escape(tr("web_page_info", lang, page=page + 1, total=total_pages))}</a>')
             r.append('</div>')
 
         if total_items > 0:
-            r.append('<div style="text-align:center;margin-top:20px;">')
+            r.append('<div style="text-align:center;margin-top:22px;">')
             r.append(
                 f'<button type="submit" class="upload-btn">{html.escape(tr("web_download_zip", lang))}</button>'
             )
             r.append('</div>')
         r.append('</form></div>')
+        r.append('<div class="credit-badge">Crafted by JackBrownUA • Powered by Gemini</div>')
         r.append(f'<script>{get_star_script()}{get_upload_script(lang)}{get_theme_script()}</script>')
         r.append('</body></html>')
 
