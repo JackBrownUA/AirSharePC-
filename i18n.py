@@ -112,6 +112,7 @@ TRANSLATIONS = {
         "web_auth_req": "Authorization required (AirShare PC)",
         "web_rate_limit": "Too many failed PIN attempts. Try again in {sec} sec.",
         "web_dev_blocked": "Access paused by phone owner.",
+        "web_preview": "🖼️ Preview",
     },
     "es": {
         "wifi_online": "Wi-Fi Activo",

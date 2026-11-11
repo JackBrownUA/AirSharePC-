@@ -263,6 +263,20 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         resp_dir = _run_request(self.storage_dir, req_with_cookie, client_ip="192.168.50.56")
         self.assertIn(b"200 OK", resp_dir.splitlines()[0])
         self.assertIn(b"Crafted by JackBrownUA", resp_dir)
+        # 4. Проверяем наличие тумблера Предпросмотр (previewToggle), ленивых миниатюр data-src и заголовков стриминга видео
+        with open(os.path.join(self.storage_dir, "20250819_113031.jpg"), "wb") as f:
+            f.write(b"\xff\xd8\xff\xe0fakejpeg")
+        with open(os.path.join(self.storage_dir, "20250819_144102.mp4"), "wb") as f:
+            f.write(b"0123456789ABCDEF" * 64)
+        resp_with_media = _run_request(self.storage_dir, req_with_cookie, client_ip="192.168.50.56")
+        self.assertIn(b'id="previewToggle"', resp_with_media)
+        self.assertIn(b'data-src="20250819_113031.jpg"', resp_with_media)
+        self.assertIn(b'data-src="20250819_144102.mp4#t=0.5"', resp_with_media)
+
+        head_req = f"HEAD /20250819_144102.mp4 HTTP/1.1\r\nHost: localhost\r\nCookie: {cookie_kv}\r\n\r\n".encode("utf-8")
+        head_resp = _run_request(self.storage_dir, head_req, client_ip="192.168.50.56")
+        self.assertIn(b"Accept-Ranges: bytes", head_resp)
+        self.assertIn(b"Cache-Control: private, max-age=3600", head_resp)
 
     def test_10_p4a_hook_patches_project_properties_and_kivy_shorten_from_valid(self):
         # 1. Проверяем, что в main.py и ui_widgets.py нигде не передаётся невалидный для Kivy shorten_from="middle"

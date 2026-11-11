@@ -1,4 +1,4 @@
-# HTTP-сервер AirShare PC: сессионная Cookie/PIN-авторизация, HTTP Range (206), потоковый ZIP и пагинация
+# HTTP-сервер AirShare PC: сессионная Cookie/PIN-авторизация, zero-copy стриминг видео (HTTP Range 206 + sendfile), потоковый ZIP и предпросмотр
 
 import base64
 import hashlib
@@ -9,10 +9,13 @@ import math
 import mimetypes
 import os
 import secrets
+import select
+import socket
 import threading
 import time
 import urllib.parse
 import zipfile
+from email.utils import formatdate
 from http import cookies
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
@@ -41,6 +44,12 @@ from web_ui import (
 logger = logging.getLogger("airshare.server")
 
 _SANDBOX_EXTENSIONS = frozenset({".html", ".htm", ".svg", ".xhtml", ".js", ".mjs", ".xml"})
+_IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif", ".heic"})
+_VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v", ".3gp"})
+
+# Размер блока чтения/передачи (1 МБ вместо 64 КБ) для мгновенной буферизации тяжёлых 4K/8K видео по Wi-Fi
+STREAM_CHUNK_SIZE = 1024 * 1024
+SOCKET_SEND_BUFFER = 4 * 1024 * 1024
 
 
 class _ZipStream:
@@ -83,6 +92,12 @@ class ReusableThreadingServer(ThreadingHTTPServer):
 
     def _process_request_guarded(self, request, client_address):
         try:
+            try:
+                request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                request.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, SOCKET_SEND_BUFFER)
+                request.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, SOCKET_SEND_BUFFER)
+            except Exception:
+                pass
             self.process_request_thread(request, client_address)
         finally:
             self._conn_semaphore.release()
@@ -214,7 +229,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         return hmac.new(self._session_secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
 
     def _evaluate_auth(self):
-        # Возвращает: ("ok_pin_query", None), ("ok", None), ("fail_attempt", None) или ("no_creds", None)
+        # Возвращает: "ok_pin_query", "ok", "fail_attempt" или "no_creds"
         expected_pwd = self._ensure_password_loaded()
         expected_token = self._make_session_token(expected_pwd)
 
@@ -227,7 +242,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 return "ok_pin_query"
             return "fail_attempt"
 
-        # 2. Проверяем сессионную Cookie airshare_auth (устанавливается после первого входа, поэтому браузер не сбрасывает её при навигации)
+        # 2. Проверяем сессионную Cookie airshare_auth
         cookie_hdr = self.headers.get("Cookie", "")
         if cookie_hdr:
             try:
@@ -286,12 +301,10 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             if clean_query:
                 clean_url = f"{clean_url}?{clean_query}"
 
-            # Если помимо ?pin= сразу запрашивается скачивание или загрузка — ставим Cookie и продолжаем запрос
             if any(k in params for k in ("download", "zip", "download_selected", "files", "upload")):
                 self._pending_auth_cookie = tok
                 return True
 
-            # Для обычного входа в браузере устанавливаем Cookie и делаем чистый редирект без ?pin= в адресной строке
             self._parse_client_device()
             self.send_response(302, "Found")
             self.send_header(
@@ -307,7 +320,6 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             return True
 
         if status == "fail_attempt":
-            # Наказываем счётчиком попыток и уведомлением ТОЛЬКО когда реально прислан неверный PIN/пароль
             self._record_auth_failure(client_ip)
             blocked_now, retry_after = self._is_ip_blocked(client_ip)
             if blocked_now:
@@ -316,7 +328,6 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 self.request_auth(is_failed=True)
             return False
 
-        # Если браузер просто открыл IP:порт без куки и без пароля — показываем страницу ввода PIN без ложной тревоги на телефоне!
         self.request_auth(is_failed=False)
         return False
 
@@ -344,11 +355,15 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _parse_client_device(self):
+    def _parse_client_device(self, fast_skip_if_known=False):
         try:
             client_ip = self._get_client_ip()
             if client_ip in ("127.0.0.1", "::1"):
                 return
+            if fast_skip_if_known:
+                with self._auth_lock:
+                    if client_ip in self._notified_ips:
+                        return
             ua = self.headers.get("User-Agent", "")
             if "Windows NT 10.0" in ua or "Windows NT 11.0" in ua:
                 device_title, os_badge = "Desktop PC", "Windows 11"
@@ -418,44 +433,58 @@ class AirShareHandler(SimpleHTTPRequestHandler):
     def do_HEAD(self):
         if not self.check_auth_or_respond():
             return
-        self._parse_client_device()
+        self._parse_client_device(fast_skip_if_known=True)
+        parsed = urllib.parse.urlparse(self.path)
+        params = urllib.parse.parse_qs(parsed.query)
+        if "download" in params and params["download"]:
+            self.stream_single_file(parsed.path, params["download"][0], as_attachment=True, head_only=True)
+            return
+        target_path = self.translate_path(parsed.path)
+        if os.path.isfile(target_path):
+            parent_url = os.path.dirname(urllib.parse.unquote(parsed.path))
+            self.stream_single_file(parent_url, os.path.basename(target_path), as_attachment=False, head_only=True)
+            return
         super().do_HEAD()
 
     def do_GET(self):
         if not self.check_auth_or_respond():
             return
 
-        self._parse_client_device()
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
 
         if "download" in params and params["download"]:
+            self._parse_client_device(fast_skip_if_known=True)
             self.stream_single_file(parsed.path, params["download"][0], as_attachment=True)
             return
 
         if "zip" in params and params["zip"]:
+            self._parse_client_device(fast_skip_if_known=True)
             self.stream_folder_zip(parsed.path, params["zip"][0])
             return
 
         if "download_selected" in params or "files" in params:
             selected = params.get("files", [])
             if selected:
+                self._parse_client_device(fast_skip_if_known=True)
                 self.download_selected_files(selected)
                 return
 
         target_path = self.translate_path(parsed.path)
         if os.path.isfile(target_path):
+            self._parse_client_device(fast_skip_if_known=True)
             parent_url = os.path.dirname(urllib.parse.unquote(parsed.path))
             self.stream_single_file(parent_url, os.path.basename(target_path), as_attachment=False)
             return
 
+        self._parse_client_device(fast_skip_if_known=False)
         super().do_GET()
 
     def do_POST(self):
         if not self.check_auth_or_respond():
             return
 
-        self._parse_client_device()
+        self._parse_client_device(fast_skip_if_known=True)
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
 
@@ -509,7 +538,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             with open(tmp_path, "wb") as f:
                 remaining = length
                 while remaining > 0:
-                    chunk = self.rfile.read(min(65536, remaining))
+                    chunk = self.rfile.read(min(STREAM_CHUNK_SIZE, remaining))
                     if not chunk:
                         break
                     f.write(chunk)
@@ -568,7 +597,49 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             return "invalid"
         return start, min(end, file_size - 1)
 
-    def stream_single_file(self, current_url_path, target_name, as_attachment=True):
+    def _send_file_body_fast(self, file_obj, start_offset, total_bytes):
+        # Пытаемся передать данные напрямую через ядерный zero-copy os.sendfile() блоками по 1 МБ,
+        # чтобы не копировать 500+ МБ видео через память Python и не тормозить поток Kivy GIL
+        try:
+            self.wfile.flush()
+        except Exception:
+            pass
+
+        conn = getattr(self, "connection", None)
+        if hasattr(os, "sendfile") and conn is not None and hasattr(conn, "fileno"):
+            try:
+                out_fd = conn.fileno()
+                in_fd = file_obj.fileno()
+                offset = start_offset
+                remaining = total_bytes
+                while remaining > 0:
+                    step = min(STREAM_CHUNK_SIZE, remaining)
+                    try:
+                        sent = os.sendfile(out_fd, in_fd, offset, step)
+                    except BlockingIOError:
+                        select.select([], [out_fd], [], 5.0)
+                        continue
+                    except InterruptedError:
+                        continue
+                    if sent == 0:
+                        break
+                    offset += sent
+                    remaining -= sent
+                return
+            except (OSError, ValueError, AttributeError):
+                pass
+
+        # Fallback для тестовых сокетов или платформ без sendfile (блоками по 1 МБ)
+        file_obj.seek(start_offset)
+        remaining = total_bytes
+        while remaining > 0:
+            buf = file_obj.read(min(STREAM_CHUNK_SIZE, remaining))
+            if not buf:
+                break
+            self.wfile.write(buf)
+            remaining -= len(buf)
+
+    def stream_single_file(self, current_url_path, target_name, as_attachment=True, head_only=False):
         rel_dir = urllib.parse.unquote(current_url_path).lstrip("/")
         base_dir = os.path.realpath(os.path.join(self.real_storage, rel_dir))
         clean_target = os.path.basename(target_name)
@@ -579,7 +650,11 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             return
 
         try:
-            file_size = os.path.getsize(target_file)
+            st = os.stat(target_file)
+            file_size = st.st_size
+            mtime_http = formatdate(st.st_mtime, usegmt=True)
+            etag_val = f'"{int(st.st_mtime):x}-{file_size:x}"'
+
             ctype, _ = mimetypes.guess_type(target_file)
             if not ctype:
                 ctype = "application/octet-stream"
@@ -611,6 +686,12 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 self.send_header("Accept-Ranges", "bytes")
                 self.send_header("Content-Length", str(file_size))
 
+            self.send_header("Last-Modified", mtime_http)
+            self.send_header("ETag", etag_val)
+            if not force_attachment:
+                # Разрешаем браузеру кэшировать просмотренные фрагменты видео и миниатюры фото в ОЗУ
+                self.send_header("Cache-Control", "private, max-age=3600")
+
             if ext.lower() in _SANDBOX_EXTENSIONS:
                 self.send_header("Content-Security-Policy", "sandbox")
             if force_attachment:
@@ -619,24 +700,22 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 )
             self.end_headers()
 
-            with open(target_file, "rb") as f:
-                if start > 0:
-                    f.seek(start)
-                remaining = chunk_len
-                while remaining > 0:
-                    buf = f.read(min(65536, remaining))
-                    if not buf:
-                        break
-                    self.wfile.write(buf)
-                    remaining -= len(buf)
+            if head_only:
+                return
 
-            if start == 0:
+            with open(target_file, "rb") as f:
+                self._send_file_body_fast(f, start, chunk_len)
+
+            if force_attachment and start == 0:
                 self._notify_transfer(os.path.basename(target_file), file_size, "download")
-        except (BrokenPipeError, ConnectionResetError):
-            logger.debug("Клиент прервал скачивание файла %s", clean_target)
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            logger.debug("Клиент закрыл соединение при потоковой передаче %s", clean_target)
         except OSError as exc:
             logger.exception("Ошибка при отправке файла %s: %s", clean_target, exc)
-            self.send_error(500, "Internal server error")
+            try:
+                self.send_error(500, "Internal server error")
+            except Exception:
+                pass
 
     def stream_folder_zip(self, current_url_path, target_name):
         rel_dir = urllib.parse.unquote(current_url_path).lstrip("/")
@@ -777,7 +856,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         r.append(f'<style>{get_css(theme)}</style>')
         r.append(f'</head><body class="{theme}">')
         r.append('<canvas id="skyCanvas"></canvas>')
-        r.append(get_top_controls_html(theme))
+        r.append(get_top_controls_html(theme, lang=lang, show_preview_toggle=True))
 
         r.append('<div class="container">')
         r.append(f'<div class="header"><h1>AirShare PC</h1><p>{displaypath}</p>')
@@ -817,9 +896,9 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 r.append(
                     f'<li class="file-item">'
                     f'<input type="checkbox" class="checkbox" name="files" value="{safe_val}">'
-                    f'<div class="file-info">'
+                    f'<div class="file-info"><div class="file-text-col">'
                     f'<a class="file-link" href="{urllib.parse.quote(name + "/")}">📁 {safe_name}</a>'
-                    f'<div class="file-meta">{folder_label}</div></div>'
+                    f'<div class="file-meta">{folder_label}</div></div></div>'
                     f'<a class="download-btn" href="?zip={quoted_name}" title="ZIP">{dl_svg}</a>'
                     f'</li>'
                 )
@@ -829,15 +908,47 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 except OSError:
                     size_str = "—"
 
-                r.append(
-                    f'<li class="file-item">'
-                    f'<input type="checkbox" class="checkbox" name="files" value="{safe_val}">'
-                    f'<div class="file-info">'
-                    f'<a class="file-link" href="{quoted_name}" target="_blank">📄 {safe_name}</a>'
-                    f'<div class="file-meta">{size_str}</div></div>'
-                    f'<a class="download-btn" href="?download={quoted_name}" download="{safe_name}">{dl_svg}</a>'
-                    f'</li>'
-                )
+                _, ext = os.path.splitext(name)
+                ext_low = ext.lower()
+                if ext_low in _IMAGE_EXTENSIONS:
+                    r.append(
+                        f'<li class="file-item has-thumb">'
+                        f'<input type="checkbox" class="checkbox" name="files" value="{safe_val}">'
+                        f'<div class="file-info">'
+                        f'<a class="thumb-box" href="{quoted_name}" target="_blank" tabindex="-1">'
+                        f'<img class="file-thumb" data-src="{quoted_name}" loading="lazy" decoding="async" alt="">'
+                        f'</a>'
+                        f'<div class="file-text-col">'
+                        f'<a class="file-link" href="{quoted_name}" target="_blank"><span class="doc-icon">📄 </span>{safe_name}</a>'
+                        f'<div class="file-meta">{size_str}</div></div></div>'
+                        f'<a class="download-btn" href="?download={quoted_name}" download="{safe_name}">{dl_svg}</a>'
+                        f'</li>'
+                    )
+                elif ext_low in _VIDEO_EXTENSIONS:
+                    r.append(
+                        f'<li class="file-item has-thumb">'
+                        f'<input type="checkbox" class="checkbox" name="files" value="{safe_val}">'
+                        f'<div class="file-info">'
+                        f'<a class="thumb-box" href="{quoted_name}" target="_blank" tabindex="-1">'
+                        f'<video class="file-thumb" data-src="{quoted_name}#t=0.5" preload="metadata" muted playsinline></video>'
+                        f'<span class="vid-badge">▶</span>'
+                        f'</a>'
+                        f'<div class="file-text-col">'
+                        f'<a class="file-link" href="{quoted_name}" target="_blank"><span class="doc-icon">📄 </span>{safe_name}</a>'
+                        f'<div class="file-meta">{size_str}</div></div></div>'
+                        f'<a class="download-btn" href="?download={quoted_name}" download="{safe_name}">{dl_svg}</a>'
+                        f'</li>'
+                    )
+                else:
+                    r.append(
+                        f'<li class="file-item">'
+                        f'<input type="checkbox" class="checkbox" name="files" value="{safe_val}">'
+                        f'<div class="file-info"><div class="file-text-col">'
+                        f'<a class="file-link" href="{quoted_name}" target="_blank">📄 {safe_name}</a>'
+                        f'<div class="file-meta">{size_str}</div></div></div>'
+                        f'<a class="download-btn" href="?download={quoted_name}" download="{safe_name}">{dl_svg}</a>'
+                        f'</li>'
+                    )
 
         r.append('</ul>')
         if total_pages > 1:

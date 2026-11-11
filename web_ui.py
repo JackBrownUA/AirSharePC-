@@ -1,4 +1,4 @@
-# Веб-интерфейс AirShare PC: реалистичное звёздное небо с метеорами и 3D-параллаксом, тумблеры, 3D-кнопки и экран ввода PIN
+# Веб-интерфейс AirShare PC: реалистичное звёздное небо с метеорами и 3D-параллаксом, тумблеры, предпросмотр фото/видео и экран ввода PIN
 
 import html
 import json
@@ -37,11 +37,11 @@ def get_css(theme="dark"):
         opacity: 0;
     }}
     @media (prefers-reduced-motion: reduce) {{
-        body, .ctrl-pill, .switch-slider, .upload-btn, .download-btn {{
+        body, .ctrl-pill, .switch-slider, .upload-btn, .download-btn, .thumb-box {{
             transition: none !important;
         }}
     }}
-    /* Верхняя левая панель с плавными тумблерами (Тема День/Ночь + 3D-Параллакс) */
+    /* Верхняя левая панель (Тема День/Ночь + 3D-Параллакс) и правая панель (Предпросмотр) */
     .top-controls {{
         position: fixed;
         top: 18px;
@@ -51,6 +51,15 @@ def get_css(theme="dark"):
         align-items: center;
         gap: 12px;
         flex-wrap: wrap;
+    }}
+    .top-right-controls {{
+        position: fixed;
+        top: 18px;
+        right: 20px;
+        z-index: 20;
+        display: flex;
+        align-items: center;
+        gap: 12px;
     }}
     .ctrl-pill {{
         display: inline-flex;
@@ -258,7 +267,58 @@ def get_css(theme="dark"):
     .file-item:last-child {{
         border-bottom: none;
     }}
+    /* Миниатюра предпросмотра файла (скрыта, пока тумблер «Предпросмотр» выключен) */
+    .thumb-box {{
+        display: none;
+        width: 46px;
+        height: 46px;
+        border-radius: 11px;
+        overflow: hidden;
+        flex-shrink: 0;
+        position: relative;
+        background: rgba(15, 23, 42, 0.65);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.38);
+        align-items: center;
+        justify-content: center;
+    }}
+    body.light .thumb-box {{
+        background: #e2e8f0;
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        box-shadow: 0 3px 10px rgba(15, 23, 42, 0.12);
+    }}
+    body.show-previews .thumb-box {{
+        display: inline-flex;
+    }}
+    body.show-previews .has-thumb .doc-icon {{
+        display: none;
+    }}
+    .file-thumb {{
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+    }}
+    .vid-badge {{
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.32);
+        color: #ffffff;
+        font-size: 14px;
+        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+        pointer-events: none;
+    }}
     .file-info {{
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }}
+    .file-text-col {{
         flex: 1;
         min-width: 0;
     }}
@@ -660,7 +720,56 @@ def get_theme_script():
         applyTheme(nextTheme);
     }
 
-    (function initTheme() {
+    let _thumbObserver = null;
+    function _activateVisibleThumbs() {
+        const mediaEls = document.querySelectorAll(".file-thumb[data-src]");
+        if ("IntersectionObserver" in window) {
+            if (!_thumbObserver) {
+                _thumbObserver = new IntersectionObserver(function(entries) {
+                    entries.forEach(function(entry) {
+                        if (entry.isIntersecting && document.body.classList.contains("show-previews")) {
+                            const el = entry.target;
+                            if (el.dataset.src && !el.getAttribute("src")) {
+                                el.setAttribute("src", el.dataset.src);
+                            }
+                            _thumbObserver.unobserve(el);
+                        }
+                    });
+                }, { rootMargin: "160px 0px" });
+            }
+            mediaEls.forEach(function(el) {
+                if (!el.getAttribute("src")) {
+                    _thumbObserver.observe(el);
+                }
+            });
+        } else {
+            mediaEls.forEach(function(el) {
+                if (el.dataset.src && !el.getAttribute("src")) {
+                    el.setAttribute("src", el.dataset.src);
+                }
+            });
+        }
+    }
+
+    function applyPreviewMode(enabled) {
+        document.body.classList.toggle("show-previews", !!enabled);
+        const prevToggle = document.getElementById("previewToggle");
+        if (prevToggle) {
+            prevToggle.checked = !!enabled;
+        }
+        try {
+            localStorage.setItem("airshare_preview", enabled ? "1" : "0");
+        } catch (e) {}
+        if (enabled) {
+            _activateVisibleThumbs();
+        }
+    }
+
+    function onPreviewSwitchChange(checkbox) {
+        applyPreviewMode(checkbox.checked);
+    }
+
+    (function initThemeAndPreview() {
         const url = new URL(window.location.href);
         const urlTheme = url.searchParams.get("theme");
         let saved = null;
@@ -674,13 +783,19 @@ def get_theme_script():
         } else {
             applyTheme(document.body.classList.contains("light") ? "light" : "dark");
         }
+
+        let savedPrev = false;
+        try {
+            savedPrev = (localStorage.getItem("airshare_preview") === "1");
+        } catch (e) {}
+        applyPreviewMode(savedPrev);
     })();
     """
 
 
-def get_top_controls_html(theme="dark"):
+def get_top_controls_html(theme="dark", lang="en", show_preview_toggle=False):
     is_dark_checked = "checked" if theme != "light" else ""
-    return (
+    left_html = (
         '<div class="top-controls">'
         '<label class="ctrl-pill" title="Тема День / Ночь">'
         '<span>☀️ / 🌙</span>'
@@ -698,6 +813,21 @@ def get_top_controls_html(theme="dark"):
         '</label>'
         '</div>'
     )
+    if not show_preview_toggle:
+        return left_html
+    preview_label = html.escape(tr("web_preview", lang))
+    right_html = (
+        '<div class="top-right-controls">'
+        f'<label class="ctrl-pill" title="{preview_label}">'
+        f'<span>{preview_label}</span>'
+        '<span class="switch">'
+        '<input type="checkbox" id="previewToggle" onchange="onPreviewSwitchChange(this)">'
+        '<span class="switch-slider"></span>'
+        '</span>'
+        '</label>'
+        '</div>'
+    )
+    return left_html + right_html
 
 
 def get_pin_login_page(theme="dark", lang="en", error_msg=""):
@@ -712,7 +842,7 @@ def get_pin_login_page(theme="dark", lang="en", error_msg=""):
         f'<style>{get_css(theme)}</style>'
         f'</head><body class="{theme}">'
         '<canvas id="skyCanvas"></canvas>'
-        f'{get_top_controls_html(theme)}'
+        f'{get_top_controls_html(theme, lang=lang, show_preview_toggle=False)}'
         '<div class="container">'
         '<div class="pin-card">'
         '<h1 style="font-size:30px;margin-bottom:8px;">AirShare PC</h1>'
