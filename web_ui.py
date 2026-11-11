@@ -1,8 +1,71 @@
-# Веб-интерфейс AirShare PC: реалистичное звёздное небо с метеорами и 3D-параллаксом, тумблеры, предпросмотр фото/видео и экран ввода PIN
+# Веб-интерфейс AirShare PC: реалистичное звёздное небо с метеорами и 3D-параллаксом, тумблеры, предпросмотр, выбор языка (глобус) и глазок просмотра PIN
 
 import html
 import json
-from i18n import tr
+from i18n import SUPPORTED_LANGUAGES, tr
+
+
+def get_flag_svg(code="en"):
+    # Векторные значки флагов для 6 языков (корректно отображаются во всех браузерах на Windows, macOS и Android)
+    if code == "uk":
+        return (
+            '<svg class="lang-flag" viewBox="0 0 28 20">'
+            '<rect width="28" height="10" y="0" fill="#005BBB"/>'
+            '<rect width="28" height="10" y="10" fill="#FFD500"/>'
+            '</svg>'
+        )
+    if code == "ru":
+        return (
+            '<svg class="lang-flag" viewBox="0 0 28 20">'
+            '<rect width="28" height="6.67" y="0" fill="#F8FAFC"/>'
+            '<rect width="28" height="6.67" y="6.67" fill="#0039A6"/>'
+            '<rect width="28" height="6.67" y="13.33" fill="#D52B1E"/>'
+            '</svg>'
+        )
+    if code == "lt":
+        return (
+            '<svg class="lang-flag" viewBox="0 0 28 20">'
+            '<rect width="28" height="6.67" y="0" fill="#FDB913"/>'
+            '<rect width="28" height="6.67" y="6.67" fill="#006A44"/>'
+            '<rect width="28" height="6.67" y="13.33" fill="#C1272D"/>'
+            '</svg>'
+        )
+    if code == "de":
+        return (
+            '<svg class="lang-flag" viewBox="0 0 28 20">'
+            '<rect width="28" height="6.67" y="0" fill="#1A1D21"/>'
+            '<rect width="28" height="6.67" y="6.67" fill="#DD0000"/>'
+            '<rect width="28" height="6.67" y="13.33" fill="#FFCE00"/>'
+            '</svg>'
+        )
+    if code == "es":
+        return (
+            '<svg class="lang-flag" viewBox="0 0 28 20">'
+            '<rect width="28" height="5" y="0" fill="#AA151B"/>'
+            '<rect width="28" height="10" y="5" fill="#F1BF00"/>'
+            '<rect width="28" height="5" y="15" fill="#AA151B"/>'
+            '</svg>'
+        )
+    return (
+        '<svg class="lang-flag" viewBox="0 0 28 20">'
+        '<rect width="28" height="20" fill="#0A2975"/>'
+        '<path d="M0,0 L28,20 M28,0 L0,20" stroke="#F8FAFC" stroke-width="3.2"/>'
+        '<rect width="28" height="5.6" y="7.2" fill="#F8FAFC"/>'
+        '<rect width="5.6" height="20" x="11.2" fill="#F8FAFC"/>'
+        '<rect width="28" height="3.2" y="8.4" fill="#D1192A"/>'
+        '<rect width="3.2" height="20" x="12.4" fill="#D1192A"/>'
+        '</svg>'
+    )
+
+
+def get_globe_svg():
+    return (
+        '<svg class="globe-svg" viewBox="0 0 24 24">'
+        '<circle cx="12" cy="12" r="9"/>'
+        '<path d="M3.6 9h16.8M3.6 15h16.8"/>'
+        '<path d="M11.5 3a17 17 0 0 0 0 18M12.5 3a17 17 0 0 1 0 18"/>'
+        '</svg>'
+    )
 
 
 def get_css(theme="dark"):
@@ -37,16 +100,16 @@ def get_css(theme="dark"):
         opacity: 0;
     }}
     @media (prefers-reduced-motion: reduce) {{
-        body, .ctrl-pill, .switch-slider, .upload-btn, .download-btn, .thumb-box {{
+        body, .ctrl-pill, .switch-slider, .upload-btn, .download-btn, .thumb-box, .lang-dropdown {{
             transition: none !important;
         }}
     }}
-    /* Верхняя левая панель (Тема День/Ночь + 3D-Параллакс) и правая панель (Предпросмотр) */
+    /* Верхняя левая панель (Тема День/Ночь + 3D-Параллакс) и правая панель (Предпросмотр + Планета выбора языка) */
     .top-controls {{
         position: fixed;
         top: 18px;
         left: 20px;
-        z-index: 20;
+        z-index: 30;
         display: flex;
         align-items: center;
         gap: 12px;
@@ -56,10 +119,10 @@ def get_css(theme="dark"):
         position: fixed;
         top: 18px;
         right: 20px;
-        z-index: 20;
+        z-index: 30;
         display: flex;
         align-items: center;
-        gap: 12px;
+        gap: 10px;
     }}
     .ctrl-pill {{
         display: inline-flex;
@@ -83,6 +146,159 @@ def get_css(theme="dark"):
         border: 1px solid rgba(15, 23, 42, 0.12);
         color: #1e293b;
         box-shadow: 0 6px 20px rgba(30, 41, 59, 0.10), inset 0 1px 1px rgba(255, 255, 255, 0.9);
+    }}
+    /* Кнопка планеты (выбор языка) и всплывающее окошко языков */
+    .lang-menu-wrap {{
+        position: relative;
+        display: inline-flex;
+    }}
+    .lang-btn {{
+        cursor: pointer;
+        padding: 8px 13px;
+        gap: 7px;
+        font-family: inherit;
+        outline: none;
+    }}
+    .lang-btn:hover {{
+        border-color: rgba(96, 165, 250, 0.55);
+        box-shadow: 0 8px 26px rgba(59, 130, 246, 0.28), inset 0 1px 1px rgba(255, 255, 255, 0.28);
+    }}
+    .globe-svg {{
+        width: 19px;
+        height: 19px;
+        stroke: #60a5fa;
+        stroke-width: 1.9;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        flex-shrink: 0;
+        transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), stroke 0.3s ease;
+    }}
+    body.light .globe-svg {{
+        stroke: #2563eb;
+    }}
+    .lang-btn:hover .globe-svg,
+    .lang-menu-wrap.open .globe-svg {{
+        transform: rotate(18deg) scale(1.08);
+    }}
+    .lang-code-badge {{
+        font-size: 12.5px;
+        font-weight: 600;
+        letter-spacing: 0.4px;
+    }}
+    .lang-dropdown {{
+        position: absolute;
+        top: calc(100% + 10px);
+        right: 0;
+        width: 235px;
+        padding: 12px;
+        border-radius: 22px;
+        background: rgba(18, 24, 40, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        box-shadow: 0 18px 46px rgba(0, 0, 0, 0.62), inset 0 1px 1px rgba(255, 255, 255, 0.20);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(-8px) scale(0.96);
+        transform-origin: top right;
+        transition: opacity 0.22s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), visibility 0.22s ease;
+        z-index: 50;
+    }}
+    body.light .lang-dropdown {{
+        background: rgba(255, 255, 255, 0.95);
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        box-shadow: 0 16px 40px rgba(15, 23, 42, 0.16), inset 0 1px 1px rgba(255, 255, 255, 0.9);
+    }}
+    .lang-menu-wrap.open .lang-dropdown {{
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0) scale(1);
+    }}
+    .lang-dropdown-title {{
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        color: rgba(203, 213, 225, 0.68);
+        padding: 2px 8px 8px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        margin-bottom: 6px;
+    }}
+    body.light .lang-dropdown-title {{
+        color: #64748b;
+        border-bottom-color: rgba(15, 23, 42, 0.08);
+    }}
+    .lang-item {{
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 9px 11px;
+        margin-bottom: 4px;
+        border-radius: 13px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: #f1f5f9;
+        font-family: inherit;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        text-align: left;
+        transition: background 0.18s ease, border-color 0.18s ease, transform 0.15s ease;
+    }}
+    .lang-item:last-child {{
+        margin-bottom: 0;
+    }}
+    .lang-item:hover {{
+        background: rgba(255, 255, 255, 0.07);
+    }}
+    .lang-item.active {{
+        background: rgba(32, 201, 151, 0.14);
+        border-color: rgba(32, 201, 151, 0.48);
+    }}
+    body.light .lang-item {{
+        color: #0f172a;
+    }}
+    body.light .lang-item:hover {{
+        background: rgba(15, 23, 42, 0.05);
+    }}
+    body.light .lang-item.active {{
+        background: rgba(18, 184, 134, 0.12);
+        border-color: rgba(18, 184, 134, 0.45);
+    }}
+    .lang-item-left {{
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }}
+    .lang-flag {{
+        width: 24px;
+        height: 17px;
+        border-radius: 3.5px;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+        flex-shrink: 0;
+    }}
+    .lang-radio {{
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        border: 1.6px solid rgba(148, 163, 184, 0.55);
+        background: rgba(30, 41, 59, 0.65);
+        box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45);
+        position: relative;
+        flex-shrink: 0;
+        transition: all 0.2s ease;
+    }}
+    body.light .lang-radio {{
+        background: #e2e8f0;
+        border-color: #94a3b8;
+    }}
+    .lang-item.active .lang-radio {{
+        border-color: #20c997;
+        background: radial-gradient(circle at 35% 35%, #63e6be, #12b886);
+        box-shadow: 0 0 10px rgba(32, 201, 151, 0.55);
     }}
     .switch {{
         position: relative;
@@ -411,9 +627,9 @@ def get_css(theme="dark"):
         border: 1px solid rgba(15, 23, 42, 0.10);
         color: #475569;
     }}
-    /* Карточка ввода PIN-кода при ручном открытии IP:порт */
+    /* Карточка ввода PIN-кода и кнопка-глазок для просмотра пароля при удерживании */
     .pin-card {{
-        max-width: 380px;
+        max-width: 390px;
         margin: 90px auto 0;
         padding: 34px 28px;
         border-radius: 24px;
@@ -428,10 +644,15 @@ def get_css(theme="dark"):
         border: 1px solid rgba(15, 23, 42, 0.1);
         box-shadow: 0 16px 40px rgba(15, 23, 42, 0.12);
     }}
+    .pin-input-wrap {{
+        position: relative;
+        width: 100%;
+        margin: 18px 0 14px;
+    }}
     .pin-input {{
         width: 100%;
-        padding: 14px 16px;
-        margin: 18px 0 14px;
+        padding: 14px 48px;
+        margin: 0;
         border-radius: 14px;
         border: 1px solid rgba(255, 255, 255, 0.22);
         background: rgba(10, 14, 26, 0.7);
@@ -440,11 +661,72 @@ def get_css(theme="dark"):
         letter-spacing: 6px;
         text-align: center;
         outline: none;
+        transition: border-color 0.25s ease, box-shadow 0.25s ease;
+    }}
+    .pin-input:focus {{
+        border-color: rgba(96, 165, 250, 0.75);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.22);
     }}
     body.light .pin-input {{
         background: #f1f5f9;
         border-color: #cbd5e1;
         color: #0f172a;
+    }}
+    .pin-eye-btn {{
+        position: absolute;
+        right: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: rgba(30, 41, 59, 0.65);
+        color: rgba(226, 232, 240, 0.82);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        padding: 0;
+        outline: none;
+        user-select: none;
+        -webkit-user-select: none;
+        transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+    }}
+    .pin-eye-btn:hover {{
+        background: rgba(59, 130, 246, 0.28);
+        border-color: rgba(96, 165, 250, 0.5);
+        color: #ffffff;
+    }}
+    .pin-eye-btn.active {{
+        background: linear-gradient(135deg, #3b82f6, #2563eb);
+        border-color: rgba(147, 197, 253, 0.75);
+        color: #ffffff;
+        transform: translateY(-50%) scale(0.94);
+        box-shadow: 0 0 12px rgba(59, 130, 246, 0.55);
+    }}
+    body.light .pin-eye-btn {{
+        background: rgba(226, 232, 240, 0.88);
+        border-color: rgba(15, 23, 42, 0.12);
+        color: #475569;
+    }}
+    body.light .pin-eye-btn:hover {{
+        background: rgba(37, 99, 235, 0.15);
+        color: #1d4ed8;
+    }}
+    body.light .pin-eye-btn.active {{
+        background: linear-gradient(135deg, #2563eb, #1d4ed8);
+        color: #ffffff;
+    }}
+    .pin-eye-btn svg {{
+        width: 18px;
+        height: 18px;
+        stroke: currentColor;
+        stroke-width: 2;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        pointer-events: none;
     }}
     """
 
@@ -769,6 +1051,72 @@ def get_theme_script():
         applyPreviewMode(checkbox.checked);
     }
 
+    function toggleLangMenu(event) {
+        if (event) event.stopPropagation();
+        const wrap = document.getElementById("langMenuWrap");
+        if (wrap) {
+            wrap.classList.toggle("open");
+        }
+    }
+
+    function setWebLanguage(code) {
+        try {
+            localStorage.setItem("airshare_lang", code);
+        } catch (e) {}
+        document.cookie = "airshare_lang=" + encodeURIComponent(code) + "; path=/; max-age=31536000; SameSite=Lax";
+        const url = new URL(window.location.href);
+        url.searchParams.set("lang", code);
+        window.location.href = url.toString();
+    }
+
+    (function initLangMenuAndPinEye() {
+        document.addEventListener("click", function(e) {
+            const wrap = document.getElementById("langMenuWrap");
+            if (wrap && !wrap.contains(e.target)) {
+                wrap.classList.remove("open");
+            }
+        });
+        document.addEventListener("keydown", function(e) {
+            if (e.key === "Escape") {
+                const wrap = document.getElementById("langMenuWrap");
+                if (wrap) wrap.classList.remove("open");
+            }
+        });
+
+        // Кнопка-глазок в поле ввода пароля: показывает пароль при нажатии и удерживании левой кнопки мыши (или касании)
+        const pinInput = document.getElementById("pinInput");
+        const eyeBtn = document.getElementById("pinEyeBtn");
+        const eyeClosed = document.getElementById("eyeClosedIcon");
+        const eyeOpen = document.getElementById("eyeOpenIcon");
+        if (pinInput && eyeBtn) {
+            function showPin(e) {
+                if (e && e.type === "mousedown" && e.button !== 0) return;
+                if (e && e.cancelable) e.preventDefault();
+                pinInput.type = "text";
+                eyeBtn.classList.add("active");
+                if (eyeClosed) eyeClosed.style.display = "none";
+                if (eyeOpen) eyeOpen.style.display = "block";
+            }
+            function hidePin() {
+                if (pinInput.type !== "password") {
+                    pinInput.type = "password";
+                }
+                eyeBtn.classList.remove("active");
+                if (eyeClosed) eyeClosed.style.display = "block";
+                if (eyeOpen) eyeOpen.style.display = "none";
+            }
+            eyeBtn.addEventListener("mousedown", showPin);
+            eyeBtn.addEventListener("mouseup", hidePin);
+            eyeBtn.addEventListener("mouseleave", hidePin);
+            eyeBtn.addEventListener("touchstart", showPin, { passive: false });
+            eyeBtn.addEventListener("touchend", hidePin);
+            eyeBtn.addEventListener("touchcancel", hidePin);
+            eyeBtn.addEventListener("blur", hidePin);
+            window.addEventListener("mouseup", hidePin);
+            window.addEventListener("blur", hidePin);
+        }
+    })();
+
     (function initThemeAndPreview() {
         const url = new URL(window.location.href);
         const urlTheme = url.searchParams.get("theme");
@@ -793,6 +1141,33 @@ def get_theme_script():
     """
 
 
+def _get_lang_selector_html(lang="en"):
+    cur_lang = (lang or "en").lower()
+    lang_title = html.escape(tr("web_lang_title", cur_lang))
+    items_html = []
+    for code, native_name in SUPPORTED_LANGUAGES:
+        active_cls = " active" if code == cur_lang else ""
+        flag_svg = get_flag_svg(code)
+        safe_name = html.escape(native_name)
+        items_html.append(
+            f'<button type="button" class="lang-item{active_cls}" onclick="setWebLanguage(\'{code}\')">'
+            f'<span class="lang-item-left">{flag_svg}<span>{safe_name}</span></span>'
+            f'<span class="lang-radio"></span>'
+            f'</button>'
+        )
+    return (
+        '<div class="lang-menu-wrap" id="langMenuWrap">'
+        f'<button type="button" class="ctrl-pill lang-btn" id="langGlobeBtn" onclick="toggleLangMenu(event)" title="{lang_title}">'
+        f'{get_globe_svg()}'
+        f'<span class="lang-code-badge">{html.escape(cur_lang.upper())}</span>'
+        '</button>'
+        '<div class="lang-dropdown" id="langDropdown">'
+        f'<div class="lang-dropdown-title">{lang_title}</div>'
+        + "".join(items_html)
+        + '</div></div>'
+    )
+
+
 def get_top_controls_html(theme="dark", lang="en", show_preview_toggle=False):
     is_dark_checked = "checked" if theme != "light" else ""
     left_html = (
@@ -813,18 +1188,22 @@ def get_top_controls_html(theme="dark", lang="en", show_preview_toggle=False):
         '</label>'
         '</div>'
     )
-    if not show_preview_toggle:
-        return left_html
-    preview_label = html.escape(tr("web_preview", lang))
+    preview_pill = ""
+    if show_preview_toggle:
+        preview_label = html.escape(tr("web_preview", lang))
+        preview_pill = (
+            f'<label class="ctrl-pill" title="{preview_label}">'
+            f'<span>{preview_label}</span>'
+            '<span class="switch">'
+            '<input type="checkbox" id="previewToggle" onchange="onPreviewSwitchChange(this)">'
+            '<span class="switch-slider"></span>'
+            '</span>'
+            '</label>'
+        )
     right_html = (
         '<div class="top-right-controls">'
-        f'<label class="ctrl-pill" title="{preview_label}">'
-        f'<span>{preview_label}</span>'
-        '<span class="switch">'
-        '<input type="checkbox" id="previewToggle" onchange="onPreviewSwitchChange(this)">'
-        '<span class="switch-slider"></span>'
-        '</span>'
-        '</label>'
+        f'{preview_pill}'
+        f'{_get_lang_selector_html(lang)}'
         '</div>'
     )
     return left_html + right_html
@@ -833,8 +1212,22 @@ def get_top_controls_html(theme="dark", lang="en", show_preview_toggle=False):
 def get_pin_login_page(theme="dark", lang="en", error_msg=""):
     title_txt = html.escape(tr("web_auth_req", lang))
     hint_txt = html.escape(tr("pin_hint", lang))
+    show_pin_txt = html.escape(tr("web_show_pin", lang))
     btn_txt = html.escape(tr("connect", lang))
     err_html = f'<p style="color:#ff453a;margin-top:10px;font-size:14px;">{html.escape(error_msg)}</p>' if error_msg else ""
+    eye_closed_svg = (
+        '<svg id="eyeClosedIcon" viewBox="0 0 24 24">'
+        '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94'
+        'M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>'
+        '<line x1="1" y1="1" x2="23" y2="23"/>'
+        '</svg>'
+    )
+    eye_open_svg = (
+        '<svg id="eyeOpenIcon" viewBox="0 0 24 24" style="display:none;">'
+        '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>'
+        '<circle cx="12" cy="12" r="3"/>'
+        '</svg>'
+    )
     return (
         '<!DOCTYPE html><html><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
@@ -848,7 +1241,12 @@ def get_pin_login_page(theme="dark", lang="en", error_msg=""):
         '<h1 style="font-size:30px;margin-bottom:8px;">AirShare PC</h1>'
         f'<p style="opacity:0.75;font-size:14px;">{title_txt}</p>'
         '<form method="GET" action="/">'
-        f'<input type="password" name="pin" class="pin-input" placeholder="••••••" title="{hint_txt}" autofocus required>'
+        '<div class="pin-input-wrap">'
+        f'<input type="password" id="pinInput" name="pin" class="pin-input" placeholder="••••••" title="{hint_txt}" autocomplete="off" autofocus required>'
+        f'<button type="button" class="pin-eye-btn" id="pinEyeBtn" title="{show_pin_txt}" aria-label="{show_pin_txt}">'
+        f'{eye_closed_svg}{eye_open_svg}'
+        '</button>'
+        '</div>'
         f'<button type="submit" class="upload-btn" style="width:100%;">{btn_txt}</button>'
         '</form>'
         f'{err_html}'

@@ -69,6 +69,7 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         server.AirShareHandler._disconnected_ips.clear()
         server.AirShareHandler._notified_ips.clear()
         server.AirShareHandler.current_password = "918273"
+        server.AirShareHandler.current_language = "en"
 
     def tearDown(self):
         self.patcher_settings.stop()
@@ -238,17 +239,24 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertEqual(utils.format_size(604), "604 B")
         for code in ("en", "es", "de", "lt", "ru", "uk"):
             self.assertTrue(len(i18n.tr("connect", code)) > 0)
+            self.assertTrue(len(i18n.tr("web_preview", code)) > 0)
+            self.assertTrue(len(i18n.tr("web_show_pin", code)) > 0)
+            self.assertTrue(len(i18n.tr("web_lang_title", code)) > 0)
         css_light = web_ui.get_css("light")
         self.assertIn("color-scheme: light", css_light)
 
-    def test_09_cookie_pin_auth_and_no_false_pin_alert(self):
-        # 1. Простой GET / без пароля возвращает страницу ввода PIN (401), но НЕ увеличивает счётчик ошибок и не шлёт ложный алерт
+    def test_09_cookie_pin_auth_eye_button_and_globe_language_selector(self):
+        # 1. Простой GET / без пароля возвращает страницу ввода PIN (401) с кнопкой-глазком (pinEyeBtn) и кнопкой планеты (langGlobeBtn)
         alerts = []
         server.AirShareHandler.on_bad_pin_attempt = lambda ip: alerts.append(ip)
         for _ in range(7):
             resp_login = _run_request(self.storage_dir, b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n", client_ip="192.168.50.56")
             self.assertIn(b"401", resp_login.splitlines()[0])
             self.assertIn(b"skyCanvas", resp_login)
+            self.assertIn(b'id="pinEyeBtn"', resp_login)
+            self.assertIn(b'id="eyeClosedIcon"', resp_login)
+            self.assertIn(b'id="eyeOpenIcon"', resp_login)
+            self.assertIn(b'id="langGlobeBtn"', resp_login)
         self.assertEqual(len(alerts), 0)
 
         # 2. Вход по ссылке ?pin=918273 возвращает 302 редирект и устанавливает сессионную Cookie airshare_auth
@@ -258,11 +266,15 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         cookie_line = [line for line in hdr_lines if line.lower().startswith("set-cookie: airshare_auth=")][0]
         cookie_kv = cookie_line.split(":", 1)[1].strip().split(";")[0]
 
-        # 3. Последующие переходы по папкам и POST-загрузки с Cookie проходят с кодом 200 без Basic Auth
-        req_with_cookie = f"GET / HTTP/1.1\r\nHost: localhost\r\nCookie: {cookie_kv}\r\n\r\n".encode("utf-8")
+        # 3. Последующие переходы по папкам и смена языка (?lang=ru и Cookie airshare_lang) работают с кодом 200
+        req_with_cookie = f"GET /?lang=ru HTTP/1.1\r\nHost: localhost\r\nCookie: {cookie_kv}\r\n\r\n".encode("utf-8")
         resp_dir = _run_request(self.storage_dir, req_with_cookie, client_ip="192.168.50.56")
         self.assertIn(b"200 OK", resp_dir.splitlines()[0])
+        self.assertIn(b"Set-Cookie: airshare_lang=ru", resp_dir)
+        self.assertIn(i18n.tr("web_upload_btn", "ru").encode("utf-8"), resp_dir)
+        self.assertIn(b'id="langGlobeBtn"', resp_dir)
         self.assertIn(b"Crafted by JackBrownUA", resp_dir)
+
         # 4. Проверяем наличие тумблера Предпросмотр (previewToggle), ленивых миниатюр data-src и заголовков стриминга видео
         with open(os.path.join(self.storage_dir, "20250819_113031.jpg"), "wb") as f:
             f.write(b"\xff\xd8\xff\xe0fakejpeg")
@@ -278,7 +290,7 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn(b"Accept-Ranges: bytes", head_resp)
         self.assertIn(b"Cache-Control: private, max-age=3600", head_resp)
 
-    def test_10_p4a_hook_patches_project_properties_and_kivy_shorten_from_valid(self):
+    def test_10_p4a_hook_patches_project_properties_and_removes_battery_perm(self):
         # 1. Проверяем, что в main.py и ui_widgets.py нигде не передаётся невалидный для Kivy shorten_from="middle"
         main_code = Path("main.py").read_text(encoding="utf-8")
         self.assertNotIn('shorten_from="middle"', main_code)
@@ -296,6 +308,7 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         manifest_file = fake_dist / "src" / "main" / "AndroidManifest.xml"
         manifest_file.write_text(
             '<manifest><uses-sdk android:minSdkVersion="24" android:targetSdkVersion="33" />'
+            '<uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />'
             '<application android:requestLegacyExternalStorage="true"></application></manifest>',
             encoding="utf-8",
         )
@@ -321,6 +334,7 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn("targetSdkVersion 35", gradle_file.read_text(encoding="utf-8"))
         self.assertIn('android:targetSdkVersion="35"', manifest_file.read_text(encoding="utf-8"))
         self.assertNotIn("requestLegacyExternalStorage", manifest_file.read_text(encoding="utf-8"))
+        self.assertNotIn("REQUEST_IGNORE_BATTERY_OPTIMIZATIONS", manifest_file.read_text(encoding="utf-8"))
         self.assertIn("mContext.registerReceiver(mUsbBroadcast, filter, 2)", hid_file.read_text(encoding="utf-8"))
 
 

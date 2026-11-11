@@ -113,6 +113,8 @@ TRANSLATIONS = {
         "web_rate_limit": "Too many failed PIN attempts. Try again in {sec} sec.",
         "web_dev_blocked": "Access paused by phone owner.",
         "web_preview": "🖼️ Preview",
+        "web_show_pin": "Hold left mouse button to view PIN",
+        "web_lang_title": "Language",
     },
     "es": {
         "wifi_online": "Wi-Fi Activo",
@@ -211,6 +213,9 @@ TRANSLATIONS = {
         "web_auth_req": "Autorización requerida (AirShare PC)",
         "web_rate_limit": "Demasiados intentos fallidos. Inténtalo en {sec} s.",
         "web_dev_blocked": "Acceso pausado por el propietario del teléfono.",
+        "web_preview": "🖼️ Vista previa",
+        "web_show_pin": "Mantén pulsado para ver el PIN",
+        "web_lang_title": "Idioma",
     },
     "de": {
         "wifi_online": "WLAN Aktiv",
@@ -309,6 +314,9 @@ TRANSLATIONS = {
         "web_auth_req": "Autorisierung erforderlich (AirShare PC)",
         "web_rate_limit": "Zu viele Fehlversuche. Bitte in {sec} Sek. erneut versuchen.",
         "web_dev_blocked": "Zugriff vom Telefonbesitzer pausiert.",
+        "web_preview": "🖼️ Vorschau",
+        "web_show_pin": "Gedrückt halten, um PIN anzuzeigen",
+        "web_lang_title": "Sprache",
     },
     "lt": {
         "wifi_online": "Wi-Fi Aktyvus",
@@ -407,6 +415,9 @@ TRANSLATIONS = {
         "web_auth_req": "Reikalinga autorizacija (AirShare PC)",
         "web_rate_limit": "Per daug nesėkmingų bandymų. Bandykite po {sec} sek.",
         "web_dev_blocked": "Prieigą sustabdė telefono savininkas.",
+        "web_preview": "🖼️ Peržiūra",
+        "web_show_pin": "Laikykite paspaudę, kad matytumėte PIN",
+        "web_lang_title": "Kalba",
     },
     "ru": {
         "wifi_online": "Wi-Fi Онлайн",
@@ -505,6 +516,9 @@ TRANSLATIONS = {
         "web_auth_req": "Требуется авторизация (AirShare PC)",
         "web_rate_limit": "Слишком много неверных попыток ввода PIN. Повторите через {sec} сек.",
         "web_dev_blocked": "Доступ приостановлен владельцем телефона.",
+        "web_preview": "🖼️ Предпросмотр",
+        "web_show_pin": "Удерживайте левую кнопку мыши, чтобы показать пароль",
+        "web_lang_title": "Язык / Language",
     },
     "uk": {
         "wifi_online": "Wi-Fi Онлайн",
@@ -581,7 +595,7 @@ TRANSLATIONS = {
         "help_body": (
             "1. Підключіть смартфон і комп'ютер до однієї мережі Wi-Fi (або увімкніть точку доступу Wi-Fi на телефоні).\n\n"
             "2. Натисніть зелену кнопку «Підключити» на головному екрані для запуску сервера.\n\n"
-            "3. Скопіюйте посилання під кнопкою або введіть його вручну в адресний рядок браузера на ПК, щоб завантажувати та передавати файли.\n\n"
+            "3. Скопіюйте посилання під кнопкой або введіть його вручну в адресний рядок браузера на ПК, щоб завантажувати та передавати файли.\n\n"
             "4. У вкладці «Файли» оберіть потрібну папку для роздачі, а у вкладці «Пристрої» можна будь-коли відключити комп'ютер."
         ),
         "splash_sub": "Бездротовий обмін файлами",
@@ -603,6 +617,9 @@ TRANSLATIONS = {
         "web_auth_req": "Потрібна авторизація (AirShare PC)",
         "web_rate_limit": "Забагато невдалих спроб введення PIN. Повторіть через {sec} сек.",
         "web_dev_blocked": "Доступ призупинено власником телефона.",
+        "web_preview": "🖼️ Перегляд",
+        "web_show_pin": "Утримуйте ліву кнопку миші, щоб показати пароль",
+        "web_lang_title": "Мова / Language",
     },
 }
 

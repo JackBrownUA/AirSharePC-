@@ -1,4 +1,4 @@
-# HTTP-сервер AirShare PC: сессионная Cookie/PIN-авторизация, zero-copy стриминг видео (HTTP Range 206 + sendfile), потоковый ZIP и предпросмотр
+# HTTP-сервер AirShare PC: сессионная Cookie/PIN-авторизация, zero-copy стриминг видео (HTTP Range 206 + sendfile), потоковый ZIP, предпросмотр и выбор языка
 
 import base64
 import hashlib
@@ -29,7 +29,7 @@ from config import (
     SOCKET_TIMEOUT_SECONDS,
     STORAGE_PATH,
 )
-from i18n import tr
+from i18n import SUPPORTED_CODES, tr
 from utils import add_recent_ip, format_size, load_settings
 from web_ui import (
     get_css,
@@ -274,8 +274,12 @@ class AirShareHandler(SimpleHTTPRequestHandler):
 
     def check_auth_or_respond(self):
         client_ip = self._get_client_ip()
+        parsed = urllib.parse.urlparse(self.path)
+        params = urllib.parse.parse_qs(parsed.query)
+        req_lang = self._get_request_lang(params)
+
         if self.is_ip_disconnected(client_ip):
-            body = f"<h3>{html.escape(tr('web_dev_blocked', self.current_language))}</h3>".encode("utf-8")
+            body = f"<h3>{html.escape(tr('web_dev_blocked', req_lang))}</h3>".encode("utf-8")
             self.send_response(403, "Forbidden")
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -285,7 +289,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
 
         blocked, retry_after = self._is_ip_blocked(client_ip)
         if blocked:
-            self.send_rate_limit_response(retry_after)
+            self.send_rate_limit_response(retry_after, lang=req_lang)
             return False
 
         status = self._evaluate_auth()
@@ -293,8 +297,6 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             self._clear_auth_failures(client_ip)
             expected_pwd = self._ensure_password_loaded()
             tok = self._make_session_token(expected_pwd)
-            parsed = urllib.parse.urlparse(self.path)
-            params = urllib.parse.parse_qs(parsed.query)
             params.pop("pin", None)
             clean_query = urllib.parse.urlencode(params, doseq=True)
             clean_url = parsed.path or "/"
@@ -323,7 +325,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             self._record_auth_failure(client_ip)
             blocked_now, retry_after = self._is_ip_blocked(client_ip)
             if blocked_now:
-                self.send_rate_limit_response(retry_after)
+                self.send_rate_limit_response(retry_after, lang=req_lang)
             else:
                 self.request_auth(is_failed=True)
             return False
@@ -331,8 +333,9 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         self.request_auth(is_failed=False)
         return False
 
-    def send_rate_limit_response(self, retry_after=RATE_LIMIT_BLOCK_SECONDS):
-        msg = tr("web_rate_limit", self.current_language, sec=retry_after)
+    def send_rate_limit_response(self, retry_after=RATE_LIMIT_BLOCK_SECONDS, lang=None):
+        use_lang = lang or self._get_request_lang()
+        msg = tr("web_rate_limit", use_lang, sec=retry_after)
         body = f"<h3>{html.escape(msg)}</h3>".encode("utf-8")
         self.send_response(429, "Too Many Requests")
         self.send_header("Retry-After", str(retry_after))
@@ -345,13 +348,16 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
         theme = self._get_request_theme(params)
-        err_msg = tr("toast_bad_pin", self.current_language, ip=self._get_client_ip()) if is_failed else ""
-        page_html = get_pin_login_page(theme=theme, lang=self.current_language, error_msg=err_msg)
+        lang = self._get_request_lang(params)
+        err_msg = tr("toast_bad_pin", lang, ip=self._get_client_ip()) if is_failed else ""
+        page_html = get_pin_login_page(theme=theme, lang=lang, error_msg=err_msg)
         body = page_html.encode("utf-8")
         self.send_response(401)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
+        if "lang" in params and params["lang"]:
+            self.send_header("Set-Cookie", f"airshare_lang={lang}; Path=/; Max-Age=31536000; SameSite=Lax")
         self.end_headers()
         self.wfile.write(body)
 
@@ -429,6 +435,24 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             except Exception as exc:
                 logger.debug("Не удалось разобрать Cookie темы: %s", exc)
         return self.default_theme if self.default_theme in ("light", "dark") else "dark"
+
+    def _get_request_lang(self, params=None):
+        if params and "lang" in params and params["lang"]:
+            cand = str(params["lang"][0]).strip().lower()
+            if cand in SUPPORTED_CODES:
+                return cand
+        cookie_hdr = self.headers.get("Cookie", "")
+        if cookie_hdr:
+            try:
+                c = cookies.SimpleCookie()
+                c.load(cookie_hdr)
+                if "airshare_lang" in c:
+                    val = c["airshare_lang"].value.strip().lower()
+                    if val in SUPPORTED_CODES:
+                        return val
+            except Exception as exc:
+                logger.debug("Не удалось разобрать Cookie языка: %s", exc)
+        return self.current_language if self.current_language in SUPPORTED_CODES else "en"
 
     def do_HEAD(self):
         if not self.check_auth_or_respond():
@@ -836,7 +860,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
         theme = self._get_request_theme(params)
-        lang = self.current_language
+        lang = self._get_request_lang(params)
         displaypath = html.escape(urllib.parse.unquote(parsed.path))
 
         total_items = len(list_dir)
@@ -957,7 +981,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 r.append(f'<a class="upload-btn" href="?page={page - 1}">{html.escape(tr("web_page_prev", lang))}</a>')
             r.append(f'<span>{html.escape(tr("web_page_info", lang, page=page, total=total_pages))}</span>')
             if page < total_pages:
-                r.append(f'<a class="upload-btn" href="?page={page + 1}">{html.escape(tr("web_page_info", lang, page=page + 1, total=total_pages))}</a>')
+                r.append(f'<a class="upload-btn" href="?page={page + 1}">{html.escape(tr("web_page_next", lang))}</a>')
             r.append('</div>')
 
         if total_items > 0:
@@ -978,5 +1002,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(encoded)))
         if "theme" in params and params["theme"]:
             self.send_header("Set-Cookie", f"airshare_theme={theme}; Path=/; Max-Age=31536000; SameSite=Lax")
+        if "lang" in params and params["lang"]:
+            self.send_header("Set-Cookie", f"airshare_lang={lang}; Path=/; Max-Age=31536000; SameSite=Lax")
         self.end_headers()
         return BytesIO(encoded)

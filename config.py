@@ -44,4 +44,4 @@ else:
 SETTINGS_FILE = os.path.join(SETTINGS_DIR, ".airshare_settings.json")
 
 APP_NAME = "AirShare PC"
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.3.2"

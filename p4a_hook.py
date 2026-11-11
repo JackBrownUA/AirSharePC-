@@ -1,8 +1,9 @@
 # Хук сборки python-for-android (p4a.hook) для AirShare PC:
 # 1. Принудительно обновляет target=android-35 в закэшированном project.properties (обход бага Buildozer с кэшем).
-# 2. Выставляет targetSdkVersion=35 и compileSdkVersion=35 в build.gradle и AndroidManifest.xml (убирает окно Play Защиты).
-# 3. Патчит HIDDeviceManager.java (SDL2) флагом RECEIVER_EXPORTED (2) для Android 14/15+ (предотвращает SecurityException при старте).
-# 4. Отключает самообновление pip (pip install -U pip) в pythonforandroid/build.py (обход бага p4a #3364 с capture_logging).
+# 2. Выставляет targetSdkVersion=35 и compileSdkVersion=35 в build.gradle и AndroidManifest.xml (убирает окно Play Защиты о старой версии Android).
+# 3. Убирает разрешение REQUEST_IGNORE_BATTERY_OPTIMIZATIONS из манифеста и восстанавливает стандартный сертификат CN=Android Debug, O=Android, C=US (убирает ложное срабатывание эвристики Play Защиты «Вредоносное приложение»).
+# 4. Патчит HIDDeviceManager.java (SDL2) флагом RECEIVER_EXPORTED (2) для Android 14/15+ (предотвращает SecurityException при старте).
+# 5. Отключает самообновление pip (pip install -U pip) в pythonforandroid/build.py (обход бага p4a #3364 с capture_logging).
 
 import os
 import re
@@ -51,6 +52,12 @@ def _patch_manifest_file(path_obj: Path) -> bool:
         old_text,
     )
     new_text = new_text.replace('android:requestLegacyExternalStorage="true"', "")
+    # Удаляем REQUEST_IGNORE_BATTERY_OPTIMIZATIONS из закэшированного манифеста, так как в связке с MANAGE_EXTERNAL_STORAGE он вызывает ложную эвристику Play Защиты
+    new_text = re.sub(
+        r'<uses-permission[^>]*REQUEST_IGNORE_BATTERY_OPTIMIZATIONS[^>]*/>\s*',
+        "",
+        new_text,
+    )
     if new_text != old_text:
         path_obj.write_text(new_text, encoding="utf-8")
         return True
@@ -102,16 +109,21 @@ def _patch_p4a_venv_pip_upgrade(path_obj: Path) -> bool:
     return False
 
 
-def _ensure_custom_keystore():
+def _restore_standard_debug_keystore():
+    # Play Защита не блокирует debug-сборки со стандартным ключом Android SDK (CN=Android Debug, O=Android, C=US),
+    # но помечает как «Вредоносное приложение» debug-сборки с нестандартным самоподписанным сертификатом.
     if not shutil.which("keytool"):
         return
     android_dir = Path.home() / ".android"
     ks_path = android_dir / "debug.keystore"
-    marker_path = android_dir / ".airshare_ks_v2"
-    if ks_path.exists() and marker_path.exists():
+    old_marker = android_dir / ".airshare_ks_v2"
+    std_marker = android_dir / ".airshare_std_debug_ks"
+    if ks_path.exists() and std_marker.exists() and not old_marker.exists():
         return
     try:
         android_dir.mkdir(parents=True, exist_ok=True)
+        if old_marker.exists():
+            old_marker.unlink()
         if ks_path.exists():
             ks_path.unlink()
         subprocess.run(
@@ -134,13 +146,13 @@ def _ensure_custom_keystore():
                 "-validity",
                 "10000",
                 "-dname",
-                "CN=JackBrownUA, OU=AirSharePC, O=JackBrownUA, L=Kyiv, ST=Kyiv, C=UA",
+                "CN=Android Debug, O=Android, C=US",
             ],
             check=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        marker_path.write_text("ok\n", encoding="utf-8")
+        std_marker.write_text("ok\n", encoding="utf-8")
     except Exception:
         pass
 
@@ -200,14 +212,14 @@ def _extract_dist_dir(toolchain):
 
 
 def before_apk_build(toolchain=None, *_args, **_kwargs):
-    _ensure_custom_keystore()
+    _restore_standard_debug_keystore()
     dist_dir = _extract_dist_dir(toolchain)
     counts = patch_build_tree(dist_dir)
     print(f"[AirShare p4a_hook] before_apk_build patched: {counts}")
 
 
 def after_apk_build(toolchain=None, *_args, **_kwargs):
-    _ensure_custom_keystore()
+    _restore_standard_debug_keystore()
     dist_dir = _extract_dist_dir(toolchain)
     counts = patch_build_tree(dist_dir)
     print(f"[AirShare p4a_hook] after_apk_build patched: {counts}")
@@ -220,5 +232,5 @@ def after_apk_assemble(toolchain=None, *_args, **_kwargs):
 
 
 # Выполняем патч также сразу при импорте модуля p4a_hook
-_ensure_custom_keystore()
+_restore_standard_debug_keystore()
 patch_build_tree()
