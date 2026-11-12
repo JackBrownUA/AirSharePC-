@@ -20,7 +20,6 @@ from config import APP_NAME, APP_VERSION, SERVER_PORT, STORAGE_PATH
 from i18n import SUPPORTED_LANGUAGES, tr
 from android_bridge import is_android_activity_paused
 from server import AirShareHandler, ReusableThreadingServer
-from tls_cert import ensure_tls_context
 from themes import THEMES
 from ui_widgets import (
     AnimatedToggleSwitch,
@@ -66,6 +65,7 @@ class DynamicAirShareHandler(AirShareHandler):
     active_storage_path = STORAGE_PATH
 
     def __init__(self, *args, **kwargs):
+        self._pending_auth_cookie = None
         target = self.active_storage_path
         if not target or not os.path.isdir(target):
             target = STORAGE_PATH if os.path.isdir(STORAGE_PATH) else os.path.expanduser("~")
@@ -896,7 +896,6 @@ class AirShareApp(App):
 
         bind_ip = get_local_ip()
         try:
-            threading.Thread(target=ensure_tls_context, args=(bind_ip,), daemon=True).start()
             self.server = ReusableThreadingServer((bind_ip, self.server_port), DynamicAirShareHandler)
             threading.Thread(target=self.server.serve_forever, daemon=True).start()
             self.has_server_error = False

@@ -119,6 +119,7 @@ class ReusableThreadingServer(ThreadingHTTPServer):
 class AirShareHandler(SimpleHTTPRequestHandler):
     timeout = SOCKET_TIMEOUT_SECONDS
 
+    _pending_auth_cookie = None
     current_password = ""
     default_theme = "dark"
     current_language = "en"

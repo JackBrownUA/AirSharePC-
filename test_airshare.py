@@ -1,5 +1,6 @@
-# Автоматические тесты безопасности (security.py), плеера (player_ui.py), PWA и поиска (pwa_search.py), Android-моста (android_bridge.py), POST /login, SHA-256 и p4a_hook (v1.3.5)
+# Автоматические тесты безопасности (security.py), плеера (player_ui.py), PWA и поиска (pwa_search.py), Android-моста (android_bridge.py), графа импортов (main.py), POST /login, SHA-256 и p4a_hook (v1.3.5)
 
+import ast
 import base64
 import hashlib
 import io
@@ -8,7 +9,10 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
+import tokenize
+import types
 import unittest
 import urllib.parse
 import zipfile
@@ -266,7 +270,6 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn(b"X-Content-Type-Options: nosniff", hdr)
         self.assertEqual(body, b"56789ABCDE")
 
-        # Проверяем генерацию ярлыка быстрого запуска (/?shortcut=1)
         sc_resp = _run_request(self.storage_dir, b"GET /?shortcut=1 HTTP/1.1\r\nHost: 192.168.50.98:8080\r\n\r\n")
         self.assertIn(b"[InternetShortcut]", sc_resp)
         self.assertIn(b"URL=http://192.168.50.98:8080/", sc_resp)
@@ -286,7 +289,6 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertEqual(utils.get_sslip_domain("192.168.50.72"), "192-168-50-72.sslip.io")
         self.assertEqual(utils.format_size(604), "604 B")
 
-        # Проверяем валидность синтаксиса всех генерируемых JS-скриптов через node --check (если установлен node)
         if shutil.which("node"):
             for code in ("en", "es", "de", "lt", "ru", "uk"):
                 for name, js_code in (
@@ -375,6 +377,7 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         main_code = Path("main.py").read_text(encoding="utf-8")
         self.assertNotIn('shorten_from="middle"', main_code)
         self.assertNotIn("request_ignore_battery_optimizations", main_code)
+        self.assertNotIn("tls_cert", main_code)
         nav_match = re.search(r"def _on_nav_transfer\(.*?(?=\n    def )", main_code, re.S)
         self.assertIsNotNone(nav_match)
         self.assertNotIn("toggle_server", nav_match.group(0))
@@ -430,6 +433,141 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn('android:targetSdkVersion="35"', manifest_file.read_text(encoding="utf-8"))
         self.assertNotIn("REQUEST_IGNORE_BATTERY_OPTIMIZATIONS", manifest_file.read_text(encoding="utf-8"))
         self.assertNotIn("FOREGROUND_SERVICE", manifest_file.read_text(encoding="utf-8"))
+
+    def test_11_import_graph_ruff_and_dynamic_handler_startup(self):
+        # 1. Проверяем граф импортов всех .py файлов (защита от ModuleNotFoundError при запуске на Android)
+        external_allowed = {"kivy", "jnius", "android"}
+        stdlib = sys.stdlib_module_names
+        py_files = {p.stem: p for p in Path(".").glob("*.py")}
+
+        for _stem, p in sorted(py_files.items()):
+            src = p.read_text(encoding="utf-8")
+            tree = ast.parse(src, filename=str(p))
+
+            # Проверка F541 (f-строки без плейсхолдеров)
+            for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+                if tok.type == tokenize.STRING:
+                    s = tok.string
+                    prefix = ""
+                    for ch in s:
+                        if ch in "\"'":
+                            break
+                        prefix += ch.lower()
+                    if "f" in prefix and "{" not in s:
+                        self.fail(f"F541 f-string without placeholders in {p}:{tok.start[0]}")
+
+            # Проверка существования всех импортируемых локальных модулей и символов
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        root = alias.name.split(".")[0]
+                        self.assertTrue(
+                            root in stdlib or root in external_allowed or root in py_files,
+                            f"Missing module {alias.name} imported in {p}:{node.lineno}",
+                        )
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    root = node.module.split(".")[0]
+                    if root not in stdlib and root not in external_allowed:
+                        self.assertIn(root, py_files, f"Missing module {node.module} imported in {p}:{node.lineno}")
+                        target_tree = ast.parse(py_files[root].read_text(encoding="utf-8"))
+                        defined = set()
+                        for tnode in ast.walk(target_tree):
+                            if isinstance(tnode, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                                defined.add(tnode.name)
+                            elif isinstance(tnode, ast.Assign):
+                                for t in tnode.targets:
+                                    if isinstance(t, ast.Name):
+                                        defined.add(t.id)
+                            elif isinstance(tnode, ast.Import):
+                                for a in tnode.names:
+                                    defined.add(a.asname or a.name.split(".")[0])
+                            elif isinstance(tnode, ast.ImportFrom):
+                                for a in tnode.names:
+                                    defined.add(a.asname or a.name)
+                        for alias in node.names:
+                            self.assertIn(
+                                alias.name,
+                                defined,
+                                f"Missing symbol {alias.name} from {root} in {p}:{node.lineno}",
+                            )
+
+        # 2. Проверяем импорт main.py с заглушками Kivy и работу DynamicAirShareHandler
+        dummy_kivy_mods = {}
+        for mod_name in (
+            "kivy",
+            "kivy.animation",
+            "kivy.app",
+            "kivy.clock",
+            "kivy.core",
+            "kivy.core.window",
+            "kivy.core.clipboard",
+            "kivy.graphics",
+            "kivy.metrics",
+            "kivy.properties",
+            "kivy.uix",
+            "kivy.uix.anchorlayout",
+            "kivy.uix.behaviors",
+            "kivy.uix.boxlayout",
+            "kivy.uix.floatlayout",
+            "kivy.uix.image",
+            "kivy.uix.label",
+            "kivy.uix.scrollview",
+            "kivy.uix.stencilview",
+            "kivy.uix.textinput",
+            "kivy.uix.widget",
+            "kivy.utils",
+        ):
+            class _KivyMod(types.ModuleType):
+                def __getattr__(self, name):
+                    return type(name, (object,), {"__init__": lambda s, *a, **kw: None})
+            m = _KivyMod(mod_name)
+            for cls_name in (
+                "Animation",
+                "App",
+                "AnchorLayout",
+                "ButtonBehavior",
+                "BoxLayout",
+                "FloatLayout",
+                "Image",
+                "Label",
+                "ScrollView",
+                "StencilView",
+                "TextInput",
+                "Widget",
+                "Color",
+                "Ellipse",
+                "Line",
+                "Rectangle",
+                "RoundedRectangle",
+                "Scale",
+                "PushMatrix",
+                "PopMatrix",
+                "Translate",
+            ):
+                setattr(m, cls_name, type(cls_name, (object,), {"__init__": lambda self, *a, **kw: None}))
+            for prop_name in ("BooleanProperty", "ColorProperty", "ListProperty", "NumericProperty", "StringProperty"):
+                setattr(m, prop_name, lambda default=None, **kw: default)
+            m.Clock = mock.MagicMock()
+            m.Window = mock.MagicMock()
+            m.Clipboard = mock.MagicMock()
+            m.dp = lambda x: x
+            m.sp = lambda x: x
+            m.platform = "linux"
+            dummy_kivy_mods[mod_name] = m
+
+        with mock.patch.dict(sys.modules, dummy_kivy_mods):
+            import importlib
+            import main as app_main
+            importlib.reload(app_main)
+            app_main.DynamicAirShareHandler.active_storage_path = self.storage_dir
+            app_main.DynamicAirShareHandler.current_password = "918273"
+            sock = _DummySocket(
+                ("GET / HTTP/1.1\r\nHost: localhost\r\n" + _basic_auth_header("airshare", "918273") + "\r\n").encode(
+                    "utf-8"
+                )
+            )
+            app_main.DynamicAirShareHandler(sock, ("192.168.1.55", 54321), None)
+            self.assertIn(b"200 OK", sock._wfile.getvalue().splitlines()[0])
 
 
 if __name__ == "__main__":
