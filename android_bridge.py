@@ -177,6 +177,25 @@ def set_android_foreground_notification(active=True, url_text="", lang="en"):
         activity = getattr(PythonActivity, "mActivity", None)
         if activity is None:
             return
+        title_str = f"{APP_NAME} — {tr('server_active', lang)}"
+        body_str = url_text or tr("wifi_online", lang)
+        try:
+            Intent = autoclass("android.content.Intent")
+            ServiceClass = autoclass("org.kivy.android.AirShareKeepAliveService")
+            srv_intent = Intent(activity, ServiceClass)
+            if not active:
+                srv_intent.setAction("STOP")
+                activity.startService(srv_intent)
+            else:
+                srv_intent.putExtra("title", title_str)
+                srv_intent.putExtra("body", body_str)
+                BuildVersion = autoclass("android.os.Build$VERSION")
+                if BuildVersion.SDK_INT >= 26:
+                    activity.startForegroundService(srv_intent)
+                else:
+                    activity.startService(srv_intent)
+        except Exception as svc_exc:
+            logger.debug("AirShareKeepAliveService fallback: %s", svc_exc)
         nm = activity.getSystemService(Context.NOTIFICATION_SERVICE)
         if nm is None:
             return
@@ -230,3 +249,15 @@ def set_android_foreground_notification(active=True, url_text="", lang="en"):
         nm.notify(NOTIFICATION_ID, notif)
     except Exception as exc:
         logger.debug("Не удалось обновить фоновое уведомление Android: %s", exc)
+
+
+def is_android_activity_paused() -> bool:
+    try:
+        from kivy.utils import platform
+        if platform != "android":
+            return False
+        from jnius import autoclass
+        SDLActivity = autoclass("org.libsdl.app.SDLActivity")
+        return bool(getattr(SDLActivity, "sIsActivityPaused", False))
+    except Exception:
+        return False

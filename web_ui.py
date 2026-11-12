@@ -739,6 +739,19 @@ def get_css(theme="dark"):
         width: 100%;
         margin: 18px 0 14px;
     }}
+    .pin-input.masked {{
+        -webkit-text-security: disc;
+        text-security: disc;
+    }}
+    .https-pill-btn {{
+        text-decoration: none;
+        cursor: pointer;
+        border-color: rgba(56, 217, 169, 0.45);
+    }}
+    .https-pill-btn:hover {{
+        border-color: rgba(56, 217, 169, 0.85);
+        box-shadow: 0 8px 24px rgba(32, 201, 151, 0.35);
+    }}
     .pin-input {{
         width: 100%;
         padding: 14px 48px;
@@ -1241,15 +1254,13 @@ def get_theme_script():
             function showPin(e) {
                 if (e && e.type === "mousedown" && e.button !== 0) return;
                 if (e && e.cancelable) e.preventDefault();
-                pinInput.type = "text";
+                pinInput.classList.remove("masked");
                 eyeBtn.classList.add("active");
                 if (eyeClosed) eyeClosed.style.display = "none";
                 if (eyeOpen) eyeOpen.style.display = "block";
             }
             function hidePin() {
-                if (pinInput.type !== "password") {
-                    pinInput.type = "password";
-                }
+                pinInput.classList.add("masked");
                 eyeBtn.classList.remove("active");
                 if (eyeClosed) eyeClosed.style.display = "block";
                 if (eyeOpen) eyeOpen.style.display = "none";
@@ -1266,7 +1277,40 @@ def get_theme_script():
         }
     })();
 
+    async function submitPinForm(e) {
+        if (!window.fetch) return true;
+        e.preventDefault();
+        const form = e.target;
+        const pinVal = (document.getElementById("pinInput") || {}).value || "";
+        const nextVal = (form.querySelector("input[name=\"next\"]") || {}).value || "/";
+        try {
+            const body = "pin=" + encodeURIComponent(pinVal) + "&next=" + encodeURIComponent(nextVal);
+            const res = await fetch("/login", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: body,
+                credentials: "same-origin",
+                redirect: "follow"
+            });
+            if (res.ok || res.redirected) {
+                window.location.replace(nextVal);
+                return false;
+            }
+            const htmlTxt = await res.text();
+            document.open();
+            document.write(htmlTxt);
+            document.close();
+        } catch (err) {
+            form.submit();
+        }
+        return false;
+    }
+
     (function initThemeAndPreview() {
+        const httpsBtn = document.getElementById("httpsSetupBtn");
+        if (httpsBtn && window.location.protocol === "https:") {
+            httpsBtn.style.display = "none";
+        }
         const url = new URL(window.location.href);
         const urlTheme = url.searchParams.get("theme");
         let saved = null;
@@ -1353,8 +1397,13 @@ def get_top_controls_html(theme="dark", lang="en", show_preview_toggle=False):
             '</span>'
             '</label>'
         )
+    https_pill = (
+        '<a class="ctrl-pill https-pill-btn" id="httpsSetupBtn" href="/?https_setup=1" '
+        'title="Скачать одноразовый сертификат HTTPS для Windows (убирает Not secure)">🔒 HTTPS</a>'
+    )
     right_html = (
         '<div class="top-right-controls">'
+        f'{https_pill}'
         f'{preview_pill}'
         f'{_get_lang_selector_html(lang)}'
         '</div>'
@@ -1395,10 +1444,10 @@ def get_pin_login_page(theme="dark", lang="en", error_msg="", next_path="/"):
         '<div class="pin-card">'
         '<h1 style="font-size:30px;margin-bottom:8px;">AirShare PC</h1>'
         f'<p style="opacity:0.75;font-size:14px;">{title_txt}</p>'
-        '<form method="POST" action="/login">'
+        '<form method="POST" action="/login" autocomplete="off" onsubmit="return submitPinForm(event)">'
         f'<input type="hidden" name="next" value="{safe_next}">'
         '<div class="pin-input-wrap">'
-        f'<input type="password" id="pinInput" name="pin" class="pin-input" placeholder="••••••" title="{hint_txt}" autocomplete="off" autofocus required>'
+        f'<input type="text" id="pinInput" name="pin" class="pin-input masked" inputmode="numeric" placeholder="••••••" title="{hint_txt}" autocomplete="off" data-lpignore="true" data-1p-ignore="true" autofocus required>'
         f'<button type="button" class="pin-eye-btn" id="pinEyeBtn" title="{show_pin_txt}" aria-label="{show_pin_txt}">'
         f'{eye_closed_svg}{eye_open_svg}'
         '</button>'

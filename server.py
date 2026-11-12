@@ -47,7 +47,8 @@ from security import (
     register_auth_failure,
     verify_sha256_digest,
 )
-from utils import add_recent_ip, format_size, load_settings
+from tls_cert import build_windows_https_installer_bat, ensure_tls_context
+from utils import add_recent_ip, format_size, get_local_ip, load_settings
 from web_ui import (
     get_css,
     get_download_svg,
@@ -60,8 +61,9 @@ from web_ui import (
 
 logger = logging.getLogger("airshare.server")
 
-STREAM_CHUNK_SIZE = 1024 * 1024
-SOCKET_SEND_BUFFER = 4 * 1024 * 1024
+STREAM_CHUNK_SIZE = 2 * 1024 * 1024
+SOCKET_SEND_BUFFER = 8 * 1024 * 1024
+SCRUB_MAX_BYTES = 1024 * 1024
 
 
 class _ZipStream:
@@ -108,6 +110,13 @@ class ReusableThreadingServer(ThreadingHTTPServer):
                 request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 request.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, SOCKET_SEND_BUFFER)
                 request.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, SOCKET_SEND_BUFFER)
+                request.settimeout(SOCKET_TIMEOUT_SECONDS)
+                first_byte = request.recv(1, socket.MSG_PEEK)
+                if first_byte == b"\x16":
+                    srv_ip = self.server_address[0] if self.server_address else get_local_ip()
+                    ssl_ctx, _ = ensure_tls_context(srv_ip)
+                    if ssl_ctx is not None:
+                        request = ssl_ctx.wrap_socket(request, server_side=True)
             except Exception:
                 pass
             self.process_request_thread(request, client_address)
@@ -553,9 +562,42 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             return
         super().do_HEAD()
 
+    def _serve_https_helper(self, params):
+        srv_ip = get_local_ip()
+        srv_port = self.server.server_address[1] if getattr(self, "server", None) and getattr(self.server, "server_address", None) else 8080
+        _ctx, ca_pem = ensure_tls_context(srv_ip)
+        if not ca_pem:
+            self.send_error(500, "TLS CA unavailable")
+            return True
+        if "ca_cert" in params:
+            body = ca_pem.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-x509-ca-cert")
+            self.send_header("Content-Disposition", make_content_disposition("AirShare_Root_CA.crt"))
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return True
+        if "https_setup" in params:
+            pwd = self._ensure_password_loaded()
+            https_url = f"https://{srv_ip}:{srv_port}/?pin={urllib.parse.quote(pwd, safe='')}"
+            body = build_windows_https_installer_bat(ca_pem, https_url)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Disposition", make_content_disposition("Enable_AirShare_HTTPS.bat"))
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return True
+        return False
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         if serve_pwa_asset(self, parsed.path):
+            return
+        pre_params = urllib.parse.parse_qs(parsed.query)
+        if "https_setup" in pre_params or "ca_cert" in pre_params:
+            self._serve_https_helper(pre_params)
             return
 
         if not self.check_auth_or_respond():
@@ -837,8 +879,11 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 return
 
+            is_scrub = "scrub=1" in urllib.parse.urlparse(self.path).query
             if byte_range is not None:
                 start, end = byte_range
+                if is_scrub and (end - start + 1) > SCRUB_MAX_BYTES:
+                    end = min(file_size - 1, start + SCRUB_MAX_BYTES - 1)
                 chunk_len = end - start + 1
                 self.send_response(206, "Partial Content")
                 self.send_header("Content-Type", ctype)

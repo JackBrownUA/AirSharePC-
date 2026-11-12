@@ -327,7 +327,7 @@ def get_media_modal_html(lang: str = "en") -> str:
         f'<button type="button" class="p-chip-btn close-btn" onclick="closeMediaPlayer()">✕ {close_txt}</button>'
         '</div></div>'
         '<div class="player-stage">'
-        '<video id="mainVideo" controls playsinline preload="metadata"></video>'
+        '<video id="mainVideo" controls playsinline preload="auto"></video>'
         '<img id="mainImage" alt="">'
         '<div class="player-osd" id="playerOsd"></div>'
         '<div class="resume-banner" id="resumeBanner">'
@@ -340,7 +340,7 @@ def get_media_modal_html(lang: str = "en") -> str:
         '<span class="scrub-time" id="scrubTime">00:00</span>'
         '</div>'
         '<div class="timeline-track"><div class="timeline-fill" id="timelineFill"></div></div>'
-        '<video id="scrubVideo" muted playsinline preload="metadata" style="display:none;"></video>'
+        '<video id="scrubVideo" muted playsinline preload="none" style="display:none;"></video>'
         '</div>'
         '</div></div>'
         '<div class="upload-dock" id="uploadProgressDock">'
@@ -411,7 +411,7 @@ def get_player_script(lang: str = "en") -> str:
             vid.style.display = "block";
             if (tlWrap) tlWrap.style.display = "block";
             vid.src = url;
-            if (scrubVid) scrubVid.src = url;
+            if (scrubVid) {{ scrubVid.removeAttribute("src"); scrubVid.dataset.src = url + (url.indexOf("?") === -1 ? "?scrub=1" : "&scrub=1"); }}
             try {{
                 const savedVol = localStorage.getItem("airshare_vol");
                 if (savedVol !== null) vid.volume = Math.max(0, Math.min(1, parseFloat(savedVol)));
@@ -560,6 +560,7 @@ def get_player_script(lang: str = "en") -> str:
                 scrubVid.addEventListener("seeked", function() {{
                     try {{ sCtx.drawImage(scrubVid, 0, 0, scrubCanvas.width, scrubCanvas.height); }} catch (e) {{}}
                 }});
+                let _scrubDebounce = null;
                 tlWrap.addEventListener("mousemove", function(e) {{
                     if (!vid.duration) return;
                     const rect = tlWrap.getBoundingClientRect();
@@ -568,15 +569,25 @@ def get_player_script(lang: str = "en") -> str:
                     scrubBox.style.display = "flex";
                     scrubBox.style.left = (ratio * 100) + "%";
                     if (scrubTime) scrubTime.innerText = formatClock(targetSec);
-                    if (Math.abs((scrubVid.currentTime || 0) - targetSec) > 0.8 && !scrubVid.seeking) {{
-                        scrubVid.currentTime = targetSec;
-                    }}
+                    if (_scrubDebounce) clearTimeout(_scrubDebounce);
+                    _scrubDebounce = setTimeout(function() {{
+                        if (!vid.seeking) {{
+                            if (!scrubVid.getAttribute("src") && scrubVid.dataset.src) {{
+                                scrubVid.src = scrubVid.dataset.src;
+                            }}
+                            if (Math.abs((scrubVid.currentTime || 0) - targetSec) > 1.2 && !scrubVid.seeking) {{
+                                scrubVid.currentTime = targetSec;
+                            }}
+                        }}
+                    }}, 140);
                 }});
                 tlWrap.addEventListener("mouseleave", function() {{
+                    if (_scrubDebounce) clearTimeout(_scrubDebounce);
                     scrubBox.style.display = "none";
                 }});
                 tlWrap.addEventListener("click", function(e) {{
                     if (!vid.duration) return;
+                    if (_scrubDebounce) clearTimeout(_scrubDebounce);
                     const rect = tlWrap.getBoundingClientRect();
                     const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
                     vid.currentTime = ratio * vid.duration;

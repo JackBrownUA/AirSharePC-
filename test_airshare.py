@@ -21,6 +21,7 @@ import player_ui
 import pwa_search
 import security
 import server
+import tls_cert
 import utils
 import web_ui
 
@@ -260,6 +261,15 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         resp = _run_request(self.storage_dir, range_req, client_ip="192.168.1.77")
         hdr, _, body = resp.partition(b"\r\n\r\n")
         self.assertIn(b"206 Partial Content", hdr.splitlines()[0])
+
+        # Проверяем генерацию сертификата HTTPS (?ca_cert=1 и ?https_setup=1)
+        ca_resp = _run_request(self.storage_dir, b"GET /?ca_cert=1 HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        self.assertIn(b"BEGIN CERTIFICATE", ca_resp)
+        bat_resp = _run_request(self.storage_dir, b"GET /?https_setup=1 HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        self.assertIn(b"certutil -user -addstore Root", bat_resp)
+        ctx, ca_pem = tls_cert.ensure_tls_context("192.168.50.98")
+        self.assertIsNotNone(ctx)
+        self.assertIn("BEGIN CERTIFICATE", ca_pem)
         self.assertIn(b"Content-Range: bytes 5-14/20", hdr)
         self.assertIn(b"X-Content-Type-Options: nosniff", hdr)
         self.assertEqual(body, b"56789ABCDE")
@@ -383,11 +393,25 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+        (fake_dist / "src" / "main" / "java" / "org" / "kivy" / "android").mkdir(parents=True, exist_ok=True)
+        sdl_file = fake_dist / "src" / "main" / "java" / "org" / "libsdl" / "app" / "SDLActivity.java"
+        sdl_file.write_text(
+            "class SDLActivity {\n"
+            "  public static boolean mIsPaused = false;\n"
+            "  static void handlePause() { SDLActivity.nativePause(); }\n"
+            "  static void handleResume() { SDLActivity.nativeResume(); }\n"
+            "}\n",
+            encoding="utf-8",
+        )
         counts = p4a_hook.patch_build_tree(fake_dist)
         self.assertEqual(counts["props"], 1)
         self.assertEqual(counts["gradle"], 1)
         self.assertEqual(counts["manifest"], 1)
         self.assertEqual(counts["hid"], 1)
+        self.assertEqual(counts["sdl"], 1)
+        self.assertNotIn("SDLActivity.nativePause();", sdl_file.read_text(encoding="utf-8"))
+        self.assertTrue((fake_dist / "src" / "main" / "java" / "org" / "kivy" / "android" / "AirShareKeepAliveService.java").is_file())
+        self.assertIn("AirShareKeepAliveService", manifest_file.read_text(encoding="utf-8"))
 
         self.assertIn("targetSdkVersion 36", gradle_file.read_text(encoding="utf-8"))
         self.assertIn('android:targetSdkVersion="36"', manifest_file.read_text(encoding="utf-8"))

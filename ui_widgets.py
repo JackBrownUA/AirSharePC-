@@ -27,6 +27,7 @@ from kivy.uix.image import Image
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
+from android_bridge import is_android_activity_paused
 from i18n import tr
 
 
@@ -665,6 +666,8 @@ class RadarCard(RoundedCard):
             self._update_rings()
 
     def _step_wave(self, _dt):
+        if is_android_activity_paused():
+            return
         self.wave_phase = (self.wave_phase + 0.14) % (2.0 * math.pi)
         self._update_rings()
 

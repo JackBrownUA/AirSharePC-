@@ -18,7 +18,9 @@ from kivy.uix.textinput import TextInput
 
 from config import APP_NAME, APP_VERSION, SERVER_PORT, STORAGE_PATH
 from i18n import SUPPORTED_LANGUAGES, tr
+from android_bridge import is_android_activity_paused
 from server import AirShareHandler, ReusableThreadingServer
+from tls_cert import ensure_tls_context
 from themes import THEMES
 from ui_widgets import (
     AnimatedToggleSwitch,
@@ -843,6 +845,8 @@ class AirShareApp(App):
         Clock.schedule_once(lambda _dt: self.show_toast(self._t("toast_bad_pin", ip=ip), kind="error"), 0)
 
     def _on_transfer_progress(self, filename, transferred_bytes, total_bytes, direction):
+        if is_android_activity_paused():
+            return
         def _upd(_dt):
             pct = (transferred_bytes / total_bytes) if total_bytes > 0 else 0.0
             pct = min(1.0, max(0.0, pct))
@@ -855,6 +859,11 @@ class AirShareApp(App):
         Clock.schedule_once(_upd, 0)
 
     def _on_file_transfer(self, filename, size_str, direction):
+        act = self._t("uploaded") if direction == "upload" else self._t("downloaded")
+        entry_str = f"{filename} ({act} • {size_str})"
+        if is_android_activity_paused():
+            self.transfer_history.insert(0, entry_str)
+            return
         def _upd(_dt):
             if self.transfer_history:
                 prev_entry = self.transfer_history[0]
@@ -887,6 +896,7 @@ class AirShareApp(App):
 
         bind_ip = get_local_ip()
         try:
+            threading.Thread(target=ensure_tls_context, args=(bind_ip,), daemon=True).start()
             self.server = ReusableThreadingServer((bind_ip, self.server_port), DynamicAirShareHandler)
             threading.Thread(target=self.server.serve_forever, daemon=True).start()
             self.has_server_error = False
