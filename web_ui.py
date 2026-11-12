@@ -4,7 +4,7 @@ import html
 import json
 
 from i18n import SUPPORTED_LANGUAGES, tr
-from player_ui import get_media_modal_html, get_player_css, get_player_script
+from player_ui import get_player_css, get_player_script
 from pwa_search import get_search_and_pwa_script
 from security import get_sha256_js
 
@@ -1432,8 +1432,8 @@ def _get_lang_selector_html(lang="en"):
         items_html.append(
             f'<button type="button" class="lang-item{active_cls}" onclick="setWebLanguage(\'{code}\')">'
             f'<span class="lang-item-left">{flag_svg}<span>{safe_name}</span></span>'
-            f'<span class="lang-radio"></span>'
-            f'</button>'
+            '<span class="lang-radio"></span>'
+            '</button>'
         )
     return (
         '<div class="lang-menu-wrap" id="langMenuWrap">'
@@ -1485,7 +1485,7 @@ def get_top_controls_html(theme="dark", lang="en", show_preview_toggle=False):
             '</label>'
         )
     shortcut_pill = (
-        f'<button type="button" class="ctrl-pill shortcut-pill-btn" id="shortcutBtn" '
+        '<button type="button" class="ctrl-pill shortcut-pill-btn" id="shortcutBtn" '
         f'title="{html.escape(sc_tip, quote=True)}" '
         f'data-pc-msg="{html.escape(sc_pc_msg, quote=True)}" '
         f'data-mob-msg="{html.escape(sc_mob_msg, quote=True)}" '

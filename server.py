@@ -1094,7 +1094,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         r.append(f'<div class="header"><h1>AirShare PC</h1><p>{displaypath}</p>')
         r.append('<div class="actions-bar">')
         r.append(
-            f'<button type="button" class="upload-btn" onclick="triggerUpload()">'
+            '<button type="button" class="upload-btn" onclick="triggerUpload()">'
             f'{html.escape(tr("web_upload_btn", lang))}</button>'
         )
         r.append('<input type="file" id="up" multiple style="display:none" onchange="uploadFiles(this.files)">')
@@ -1116,7 +1116,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         if total_items > 0:
             r.append(
                 '<div class="toolbar">'
-                f'<label><input type="checkbox" class="checkbox" onchange="toggleSelectAll(this)"> '
+                '<label><input type="checkbox" class="checkbox" onchange="toggleSelectAll(this)"> '
                 f'{html.escape(tr("web_select_all", lang))}</label>'
                 f'<span>{html.escape(tr("web_total_items", lang, count=total_items))}</span>'
                 '</div>'
@@ -1138,12 +1138,12 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 r.append(
                     f'<li class="file-item" data-name="{safe_data_name}">'
                     f'<input type="checkbox" class="checkbox" name="files" value="{safe_val}">'
-                    f'<div class="file-info"><div class="file-text-col">'
+                    '<div class="file-info"><div class="file-text-col">'
                     f'<a class="file-link" href="{urllib.parse.quote(name + "/")}">📁 {safe_name}</a>'
                     f'<div class="file-meta"><span>{folder_label}</span></div></div></div>'
-                    f'<div class="item-actions">'
+                    '<div class="item-actions">'
                     f'<a class="download-btn" href="?zip={quoted_name}" title="ZIP">{dl_svg}</a>'
-                    f'</div></li>'
+                    '</div></li>'
                 )
             else:
                 try:
@@ -1155,51 +1155,51 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 ext_low = ext.lower()
                 hash_badge = (
                     f'<span class="hash-pill" onclick="verifyFileHash(\'{quoted_name}\', this)" '
-                    f'title="SHA-256">🛡️ SHA-256</span>'
+                    'title="SHA-256">🛡️ SHA-256</span>'
                 )
                 if ext_low in IMAGE_EXTENSIONS:
                     play_onclick = f"return openMediaPlayer('{quoted_name}', '{js_safe_name}', 'image');"
                     r.append(
                         f'<li class="file-item has-thumb" data-name="{safe_data_name}">'
                         f'<input type="checkbox" class="checkbox" name="files" value="{safe_val}">'
-                        f'<div class="file-info">'
+                        '<div class="file-info">'
                         f'<a class="thumb-box" href="{quoted_name}" onclick="{play_onclick}" tabindex="-1">'
                         f'<img class="file-thumb" data-src="{quoted_name}" loading="lazy" decoding="async" alt="">'
-                        f'</a>'
-                        f'<div class="file-text-col">'
+                        '</a>'
+                        '<div class="file-text-col">'
                         f'<a class="file-link" href="{quoted_name}" onclick="{play_onclick}"><span class="doc-icon">📄 </span>{safe_name}</a>'
                         f'<div class="file-meta"><span>{size_str}</span>{hash_badge}</div></div></div>'
-                        f'<div class="item-actions">'
+                        '<div class="item-actions">'
                         f'<a class="download-btn" href="?download={quoted_name}" download="{safe_name}">{dl_svg}</a>'
-                        f'</div></li>'
+                        '</div></li>'
                     )
                 elif ext_low in VIDEO_EXTENSIONS:
                     play_onclick = f"return openMediaPlayer('{quoted_name}', '{js_safe_name}', 'video');"
                     r.append(
                         f'<li class="file-item has-thumb" data-name="{safe_data_name}">'
                         f'<input type="checkbox" class="checkbox" name="files" value="{safe_val}">'
-                        f'<div class="file-info">'
+                        '<div class="file-info">'
                         f'<a class="thumb-box" href="{quoted_name}" onclick="{play_onclick}" tabindex="-1">'
                         f'<video class="file-thumb" data-src="{quoted_name}#t=0.5" preload="metadata" muted playsinline></video>'
-                        f'<span class="vid-badge">▶</span>'
-                        f'</a>'
-                        f'<div class="file-text-col">'
+                        '<span class="vid-badge">▶</span>'
+                        '</a>'
+                        '<div class="file-text-col">'
                         f'<a class="file-link" href="{quoted_name}" onclick="{play_onclick}"><span class="doc-icon">📄 </span>{safe_name}</a>'
                         f'<div class="file-meta"><span>{size_str}</span>{hash_badge}</div></div></div>'
-                        f'<div class="item-actions">'
+                        '<div class="item-actions">'
                         f'<a class="download-btn" href="?download={quoted_name}" download="{safe_name}">{dl_svg}</a>'
-                        f'</div></li>'
+                        '</div></li>'
                     )
                 else:
                     r.append(
                         f'<li class="file-item" data-name="{safe_data_name}">'
                         f'<input type="checkbox" class="checkbox" name="files" value="{safe_val}">'
-                        f'<div class="file-info"><div class="file-text-col">'
+                        '<div class="file-info"><div class="file-text-col">'
                         f'<a class="file-link" href="{quoted_name}" target="_blank">📄 {safe_name}</a>'
                         f'<div class="file-meta"><span>{size_str}</span>{hash_badge}</div></div></div>'
-                        f'<div class="item-actions">'
+                        '<div class="item-actions">'
                         f'<a class="download-btn" href="?download={quoted_name}" download="{safe_name}">{dl_svg}</a>'
-                        f'</div></li>'
+                        '</div></li>'
                     )
 
         r.append('</ul>')
