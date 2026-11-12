@@ -573,7 +573,8 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
 
     def test_12_ui_radius_clamp_modal_reset_and_session_cap(self):
         uw_src = Path("ui_widgets.py").read_text(encoding="utf-8")
-        self.assertIn("self.height * 0.48", uw_src)
+        self.assertIn("self.b_rect = RoundedRectangle", uw_src)
+        self.assertNotIn("bev_line", uw_src)
         self.assertNotIn("1794233814531.jpg", uw_src)
 
         m_src = Path("main.py").read_text(encoding="utf-8")

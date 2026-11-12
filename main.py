@@ -323,19 +323,19 @@ class AirShareApp(App):
         self.keep_alive_row.add_widget(self.keep_alive_switch)
         keep_alive_anchor.add_widget(self.keep_alive_row)
 
+        addr_anchor = AnchorLayout(size_hint=(1, 0.18))
         addr_row = BoxLayout(
             orientation="horizontal",
-            size_hint=(1, 0.18),
+            size_hint=(0.94, None),
+            height=dp(38),
             spacing=dp(8),
-            padding=[dp(4), dp(2), dp(4), dp(2)],
         )
         self.addr_pill = ClickableCard(
             bg_color=p["pill_bg"],
             border_color=p["card_border"],
-            radius=dp(19),
-            size_hint=(1, None),
-            height=dp(38),
-            pos_hint={"center_y": 0.5},
+            radius=dp(16),
+            orientation="horizontal",
+            size_hint=(1, 1),
             padding=[dp(12), dp(4), dp(12), dp(4)],
         )
         self.addr_label = make_label("", size=12, halign="center", shorten=True, shorten_from="center")
@@ -346,15 +346,15 @@ class AirShareApp(App):
             bg_color=p["pill_bg"],
             border_color=p["card_border"],
             radius=dp(14),
-            size_hint=(None, None),
-            size=(dp(38), dp(38)),
-            pos_hint={"center_y": 0.5},
+            size_hint=(None, 1),
+            width=dp(38),
         )
         self.copy_icon = VectorIcon(icon_type="copy", color=p["text"], size_hint=(1, 1))
         self.copy_btn.add_widget(self.copy_icon)
         self.copy_btn.bind(on_press=self.copy_address)
         addr_row.add_widget(self.addr_pill)
         addr_row.add_widget(self.copy_btn)
+        addr_anchor.add_widget(addr_row)
 
         self.http_warn_label = make_label(
             self._t("http_warn"),
@@ -363,7 +363,7 @@ class AirShareApp(App):
             size_hint=(1, 0.08),
         )
 
-        for w in (icon_holder, btn_anchor, keep_alive_anchor, addr_row, self.http_warn_label):
+        for w in (icon_holder, btn_anchor, keep_alive_anchor, addr_anchor, self.http_warn_label):
             self.radar_card.add_widget(w)
         self.main_content.add_widget(self.radar_card)
 
