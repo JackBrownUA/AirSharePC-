@@ -1,4 +1,4 @@
-# Вспомогательные функции AirShare PC: проверка Wi-Fi, форматирование размеров и потокобезопасные настройки
+# Вспомогательные функции AirShare PC (v1.3.5): проверка Wi-Fi, домен sslip.io, форматирование размеров и потокобезопасные настройки
 
 import json
 import logging
@@ -6,8 +6,16 @@ import os
 import secrets
 import shutil
 import socket
-import struct
 import threading
+
+from android_bridge import (
+    get_android_device_name,
+    get_android_system_theme,
+    get_android_wifi_ip,
+    has_android_storage_permission,
+    request_android_full_storage,
+    set_android_foreground_notification,
+)
 from config import (
     COMPROMISED_PASSWORDS,
     MAX_RECENT_IPS,
@@ -22,7 +30,24 @@ logger = logging.getLogger("airshare.utils")
 _settings_lock = threading.RLock()
 _seen_recent_ips = set()
 
-_WIFI_IFACE_PREFIXES = ("wlan", "swlan", "ap", "softap", "wifi", "p2p", "eth", "rndis", "en", "wl")
+__all__ = [
+    "add_recent_ip",
+    "format_size",
+    "generate_pin",
+    "get_device_info",
+    "get_device_theme",
+    "get_local_ip",
+    "get_network_label",
+    "get_sslip_domain",
+    "get_storage_stats",
+    "has_android_storage_permission",
+    "is_private_lan_ip",
+    "is_wifi_connected",
+    "load_settings",
+    "request_android_full_storage",
+    "save_settings",
+    "set_android_foreground_notification",
+]
 
 
 def generate_pin():
@@ -38,8 +63,6 @@ def _sanitize_pin(candidate):
 
 
 def is_private_lan_ip(ip_str):
-    # Проверяем, что адрес принадлежит локальной сети RFC 1918 (192.168.x.x, 10.x.x.x, 172.16-31.x.x),
-    # исключая мобильные сети CG-NAT (100.64.0.0/10) и loopback (127.x.x.x)
     if not ip_str or not isinstance(ip_str, str):
         return False
     parts = ip_str.strip().split(".")
@@ -60,51 +83,11 @@ def is_private_lan_ip(ip_str):
     return False
 
 
-def _get_android_wifi_ip():
-    # На Android берём IP только с интерфейсов Wi-Fi / точки доступа (wlan*, ap*, swlan*),
-    # игнорируя мобильный интернет (rmnet*, ccmni*)
-    try:
-        from jnius import autoclass
-        NetworkInterface = autoclass("java.net.NetworkInterface")
-        interfaces = NetworkInterface.getNetworkInterfaces()
-        if interfaces is not None:
-            while interfaces.hasMoreElements():
-                nif = interfaces.nextElement()
-                if nif is None or not nif.isUp() or nif.isLoopback():
-                    continue
-                name = str(nif.getName() or "").lower()
-                if not name.startswith(_WIFI_IFACE_PREFIXES):
-                    continue
-                addrs = nif.getInetAddresses()
-                while addrs.hasMoreElements():
-                    addr = addrs.nextElement()
-                    if addr is None or addr.isLoopbackAddress():
-                        continue
-                    host = str(addr.getHostAddress() or "").split("%")[0].strip()
-                    if is_private_lan_ip(host):
-                        return host
-    except Exception as exc:
-        logger.debug("Не удалось проверить NetworkInterface на Android: %s", exc)
-
-    try:
-        from jnius import autoclass
-        PythonActivity = autoclass("org.kivy.android.PythonActivity")
-        Context = autoclass("android.content.Context")
-        activity = getattr(PythonActivity, "mActivity", None)
-        if activity is not None:
-            wm = activity.getApplicationContext().getSystemService(Context.WIFI_SERVICE)
-            if wm is not None and wm.isWifiEnabled():
-                info = wm.getConnectionInfo()
-                if info is not None:
-                    ip_int = info.getIpAddress()
-                    if ip_int:
-                        ip_str = socket.inet_ntoa(struct.pack("<I", ip_int & 0xFFFFFFFF))
-                        if is_private_lan_ip(ip_str):
-                            return ip_str
-    except Exception as exc:
-        logger.debug("Не удалось получить IP через WifiManager: %s", exc)
-
-    return None
+def get_sslip_domain(ip_str):
+    # Преобразует локальный IP (например, 192.168.50.72) в wildcard-домен 192-168-50-72.sslip.io
+    if is_private_lan_ip(ip_str):
+        return f"{ip_str.strip().replace('.', '-')}.sslip.io"
+    return str(ip_str or "127.0.0.1").strip()
 
 
 def get_local_ip():
@@ -114,7 +97,7 @@ def get_local_ip():
         platform = "unknown"
 
     if platform == "android":
-        wifi_ip = _get_android_wifi_ip()
+        wifi_ip = get_android_wifi_ip(is_private_lan_ip)
         return wifi_ip if wifi_ip else "127.0.0.1"
 
     try:
@@ -138,12 +121,10 @@ def get_local_ip():
 
 
 def is_wifi_connected():
-    ip = get_local_ip()
-    return is_private_lan_ip(ip)
+    return is_private_lan_ip(get_local_ip())
 
 
 def get_network_label(lang=None):
-    # В верхнем правом чипе показываем аккуратный статус без обрезанного IP с точками посередине
     if lang is None:
         lang = load_settings().get("language", "en")
     if is_wifi_connected():
@@ -152,7 +133,6 @@ def get_network_label(lang=None):
 
 
 def format_size(size):
-    # Байты выводим целым числом без дробной части ("604 B" вместо "604.0 B")
     size = float(size)
     if size < 1024:
         return f"{int(round(size))} B"
@@ -171,41 +151,7 @@ def get_device_info():
         platform = "unknown"
 
     if platform == "android":
-        try:
-            from jnius import autoclass
-            PythonActivity = autoclass("org.kivy.android.PythonActivity")
-            SettingsGlobal = autoclass("android.provider.Settings$Global")
-            activity = PythonActivity.mActivity
-            if activity is not None:
-                resolver = activity.getContentResolver()
-                dev_name = SettingsGlobal.getString(resolver, "device_name")
-                if dev_name and str(dev_name).strip():
-                    return str(dev_name).strip()
-        except Exception as exc:
-            logger.debug("Не удалось получить Settings.Global.device_name: %s", exc)
-        try:
-            from jnius import autoclass
-            Build = autoclass("android.os.Build")
-            model = str(Build.MODEL or "").strip()
-            known_models = {
-                "SM-S928B": "Galaxy S24 Ultra",
-                "SM-S928U": "Galaxy S24 Ultra",
-                "SM-S928N": "Galaxy S24 Ultra",
-                "SM-S926B": "Galaxy S24+",
-                "SM-S921B": "Galaxy S24",
-                "SM-S918B": "Galaxy S23 Ultra",
-            }
-            if model in known_models:
-                return known_models[model]
-            manufacturer = str(Build.MANUFACTURER or "").capitalize()
-            if model.startswith(manufacturer):
-                return model
-            full_name = f"{manufacturer} {model}".strip()
-            if full_name:
-                return full_name
-        except Exception as exc:
-            logger.debug("Не удалось прочитать android.os.Build: %s", exc)
-        return "Android Device"
+        return get_android_device_name()
 
     try:
         hostname = socket.gethostname()
@@ -386,77 +332,6 @@ def get_device_theme():
         platform = "unknown"
 
     if platform == "android":
-        try:
-            from jnius import autoclass
-            PythonActivity = autoclass("org.kivy.android.PythonActivity")
-            Configuration = autoclass("android.content.res.Configuration")
-            activity = PythonActivity.mActivity
-            if activity is not None:
-                ui_mode = activity.getResources().getConfiguration().uiMode
-                night_mask = ui_mode & Configuration.UI_MODE_NIGHT_MASK
-                if night_mask == Configuration.UI_MODE_NIGHT_NO:
-                    return "light"
-                if night_mask == Configuration.UI_MODE_NIGHT_YES:
-                    return "dark"
-        except Exception as exc:
-            logger.debug("Не удалось определить системную тему Android: %s", exc)
-        return "dark"
+        return get_android_system_theme()
 
     return "dark"
-
-
-def request_android_full_storage():
-    # Запрашиваем доступ ко всем файлам (MANAGE_EXTERNAL_STORAGE) только когда пользователь явно выбрал весь накопитель
-    try:
-        from kivy.utils import platform
-    except Exception:
-        return
-    if platform != "android":
-        return
-    try:
-        from jnius import autoclass
-        BuildVersion = autoclass("android.os.Build$VERSION")
-        if BuildVersion.SDK_INT >= 30:
-            Environment = autoclass("android.os.Environment")
-            if not Environment.isExternalStorageManager():
-                Intent = autoclass("android.content.Intent")
-                Settings = autoclass("android.provider.Settings")
-                Uri = autoclass("android.net.Uri")
-                PythonActivity = autoclass("org.kivy.android.PythonActivity")
-                activity = PythonActivity.mActivity
-                intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
-                uri = Uri.parse(f"package:{activity.getPackageName()}")
-                intent.setData(uri)
-                activity.startActivity(intent)
-        else:
-            from android.permissions import Permission, request_permissions
-            request_permissions([Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE])
-    except Exception as exc:
-        logger.warning("Не удалось запросить доступ к хранилищу Android: %s", exc)
-
-
-def request_ignore_battery_optimizations():
-    # Просим Android (One UI / MIUI) не усыплять фоновый поток сервера при сворачивании приложения
-    try:
-        from kivy.utils import platform
-    except Exception:
-        return
-    if platform != "android":
-        return
-    try:
-        from jnius import autoclass
-        PythonActivity = autoclass("org.kivy.android.PythonActivity")
-        Context = autoclass("android.content.Context")
-        Intent = autoclass("android.content.Intent")
-        Settings = autoclass("android.provider.Settings")
-        Uri = autoclass("android.net.Uri")
-        activity = getattr(PythonActivity, "mActivity", None)
-        if activity is not None:
-            pkg = activity.getPackageName()
-            pm = activity.getSystemService(Context.POWER_SERVICE)
-            if pm is not None and not pm.isIgnoringBatteryOptimizations(pkg):
-                intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                intent.setData(Uri.parse(f"package:{pkg}"))
-                activity.startActivity(intent)
-    except Exception as exc:
-        logger.debug("Не удалось запросить исключение из оптимизации батареи: %s", exc)

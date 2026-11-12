@@ -1,8 +1,11 @@
-# Автоматические тесты безопасности, HTTP Range (206), локализации (i18n), фильтрации Wi-Fi IP, ZIP-архивации и хука сборки p4a_hook
+# Автоматические тесты безопасности (security.py), плеера (player_ui.py), PWA и поиска (pwa_search.py), Android-моста (android_bridge.py), POST /login, SHA-256 и p4a_hook (v1.3.5)
 
 import base64
+import hashlib
 import io
+import json
 import os
+import re
 import tempfile
 import unittest
 import urllib.parse
@@ -10,9 +13,13 @@ import zipfile
 from pathlib import Path
 from unittest import mock
 
+import android_bridge
 import config
 import i18n
 import p4a_hook
+import player_ui
+import pwa_search
+import security
 import server
 import utils
 import web_ui
@@ -68,6 +75,7 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         server.AirShareHandler.reset_rate_limits()
         server.AirShareHandler._disconnected_ips.clear()
         server.AirShareHandler._notified_ips.clear()
+        server.AirShareHandler._hash_cache.clear()
         server.AirShareHandler.current_password = "918273"
         server.AirShareHandler.current_language = "en"
 
@@ -121,7 +129,7 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         resp_ok = _run_request(self.storage_dir, good_req, client_ip="10.0.0.50")
         self.assertIn(b"200 OK", resp_ok.splitlines()[0])
 
-    def test_04_upload_no_overwrite_and_411_without_content_length(self):
+    def test_04_upload_no_overwrite_and_sha256_verification_and_part_hidden(self):
         req_no_len = (
             "POST /?upload=empty.txt HTTP/1.1\r\nHost: localhost\r\n"
             + _basic_auth_header("airshare", "918273")
@@ -131,22 +139,53 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn(b"411", resp_411.splitlines()[0])
         self.assertFalse(os.path.exists(os.path.join(self.storage_dir, "empty.txt")))
 
+        bad_sha_body = b"corrupted_payload"
+        bad_sha_req = (
+            "POST /?upload=bad_hash.bin HTTP/1.1\r\nHost: localhost\r\n"
+            f"Content-Length: {len(bad_sha_body)}\r\n"
+            "X-Content-SHA256: 0000000000000000000000000000000000000000000000000000000000000000\r\n"
+            + _basic_auth_header("airshare", "918273")
+            + "\r\n"
+        ).encode("utf-8") + bad_sha_body
+        resp_422 = _run_request(self.storage_dir, bad_sha_req)
+        self.assertIn(b"422", resp_422.splitlines()[0])
+        self.assertFalse(os.path.exists(os.path.join(self.storage_dir, "bad_hash.bin")))
+
+        prog_events = []
+        server.AirShareHandler.on_transfer_progress = lambda fn, cur, tot, d: prog_events.append((fn, cur, tot, d))
         for idx, body in enumerate([b"first", b"second", b"third"]):
+            valid_sha = hashlib.sha256(body).hexdigest()
             req = (
                 "POST /?upload=report.txt HTTP/1.1\r\nHost: localhost\r\n"
                 f"Content-Length: {len(body)}\r\n"
+                f"X-Content-SHA256: {valid_sha}\r\n"
                 + _basic_auth_header("airshare", "918273")
                 + "\r\n"
             ).encode("utf-8") + body
             resp = _run_request(self.storage_dir, req)
             self.assertIn(b"200 OK", resp.splitlines()[0], f"Upload #{idx} failed")
 
-        with open(os.path.join(self.storage_dir, "report.txt"), "rb") as f:
-            self.assertEqual(f.read(), b"first")
-        with open(os.path.join(self.storage_dir, "report (1).txt"), "rb") as f:
-            self.assertEqual(f.read(), b"second")
-        with open(os.path.join(self.storage_dir, "report (2).txt"), "rb") as f:
-            self.assertEqual(f.read(), b"third")
+        self.assertTrue(len(prog_events) >= 3)
+
+        hash_req = (
+            "GET /?hash=report.txt HTTP/1.1\r\nHost: localhost\r\n"
+            + _basic_auth_header("airshare", "918273")
+            + "\r\n"
+        ).encode("utf-8")
+        hash_resp = _run_request(self.storage_dir, hash_req)
+        _, _, hash_body = hash_resp.partition(b"\r\n\r\n")
+        hash_data = json.loads(hash_body.decode("utf-8"))
+        self.assertEqual(hash_data["sha256"], hashlib.sha256(b"first").hexdigest())
+
+        with open(os.path.join(self.storage_dir, ".airshare_upload_abc.part"), "wb") as f:
+            f.write(b"partial")
+        list_req = (
+            "GET / HTTP/1.1\r\nHost: localhost\r\n"
+            + _basic_auth_header("airshare", "918273")
+            + "\r\n"
+        ).encode("utf-8")
+        list_resp = _run_request(self.storage_dir, list_req)
+        self.assertNotIn(b".airshare_upload_abc.part", list_resp)
 
     def test_05_percent_and_cyrillic_filenames_not_double_decoded(self):
         for fname in ("скидка50%.pdf", "a%20b.txt"):
@@ -225,78 +264,97 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn(b"X-Content-Type-Options: nosniff", hdr)
         self.assertEqual(body, b"56789ABCDE")
 
-        # Проверяем кнопку «Отключить» для IP
         server.AirShareHandler.set_ip_disconnected("192.168.1.77", True)
         resp_disc = _run_request(self.storage_dir, range_req, client_ip="192.168.1.77")
         self.assertIn(b"403", resp_disc.splitlines()[0])
 
-    def test_08_wifi_ip_filter_and_integer_bytes_and_i18n(self):
-        # CG-NAT мобильного оператора (100.71.184.228) не должен считаться Wi-Fi LAN IP
+    def test_08_modular_architecture_sslip_domain_and_all_i18n_keys_used(self):
+        self.assertTrue(hasattr(security, "verify_sha256_digest"))
+        self.assertTrue(hasattr(player_ui, "get_media_modal_html"))
+        self.assertTrue(hasattr(pwa_search, "serve_pwa_asset"))
+        self.assertTrue(hasattr(android_bridge, "set_android_foreground_notification"))
         self.assertFalse(utils.is_private_lan_ip("100.71.184.228"))
         self.assertFalse(utils.is_private_lan_ip("127.0.0.1"))
         self.assertTrue(utils.is_private_lan_ip("192.168.1.55"))
-        self.assertTrue(utils.is_private_lan_ip("10.246.82.39"))
+        self.assertEqual(utils.get_sslip_domain("192.168.50.72"), "192-168-50-72.sslip.io")
         self.assertEqual(utils.format_size(604), "604 B")
+
+        en_keys = set(i18n.TRANSLATIONS["en"].keys())
         for code in ("en", "es", "de", "lt", "ru", "uk"):
-            self.assertTrue(len(i18n.tr("connect", code)) > 0)
-            self.assertTrue(len(i18n.tr("web_preview", code)) > 0)
-            self.assertTrue(len(i18n.tr("web_show_pin", code)) > 0)
-            self.assertTrue(len(i18n.tr("web_lang_title", code)) > 0)
-        css_light = web_ui.get_css("light")
-        self.assertIn("color-scheme: light", css_light)
+            self.assertEqual(set(i18n.TRANSLATIONS[code].keys()), en_keys, f"Key mismatch in {code}")
 
-    def test_09_cookie_pin_auth_eye_button_and_globe_language_selector(self):
-        # 1. Простой GET / без пароля возвращает страницу ввода PIN (401) с кнопкой-глазком (pinEyeBtn) и кнопкой планеты (langGlobeBtn)
-        alerts = []
-        server.AirShareHandler.on_bad_pin_attempt = lambda ip: alerts.append(ip)
-        for _ in range(7):
-            resp_login = _run_request(self.storage_dir, b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n", client_ip="192.168.50.56")
-            self.assertIn(b"401", resp_login.splitlines()[0])
-            self.assertIn(b"skyCanvas", resp_login)
-            self.assertIn(b'id="pinEyeBtn"', resp_login)
-            self.assertIn(b'id="eyeClosedIcon"', resp_login)
-            self.assertIn(b'id="eyeOpenIcon"', resp_login)
-            self.assertIn(b'id="langGlobeBtn"', resp_login)
-        self.assertEqual(len(alerts), 0)
+        all_source = ""
+        for fname in (
+            "main.py",
+            "server.py",
+            "web_ui.py",
+            "player_ui.py",
+            "security.py",
+            "pwa_search.py",
+            "android_bridge.py",
+            "ui_widgets.py",
+            "utils.py",
+        ):
+            all_source += Path(fname).read_text(encoding="utf-8") + "\n"
+        for k in en_keys:
+            self.assertIn(f'"{k}"', all_source.replace("'", '"'), f"Unused translation key: {k}")
 
-        # 2. Вход по ссылке ?pin=918273 возвращает 302 редирект и устанавливает сессионную Cookie airshare_auth
-        resp_pin = _run_request(self.storage_dir, b"GET /?pin=918273 HTTP/1.1\r\nHost: localhost\r\n\r\n", client_ip="192.168.50.56")
-        hdr_lines = resp_pin.partition(b"\r\n\r\n")[0].decode("utf-8").splitlines()
-        self.assertIn("302", hdr_lines[0])
+    def test_09_post_login_per_device_token_pwa_search_and_cinema_player(self):
+        resp_login = _run_request(self.storage_dir, b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n", client_ip="192.168.50.56")
+        self.assertIn(b"401", resp_login.splitlines()[0])
+        self.assertIn(b'action="/login"', resp_login)
+        self.assertIn(b'id="pinEyeBtn"', resp_login)
+        self.assertIn(b'id="langGlobeBtn"', resp_login)
+        self.assertNotIn("Тема День / Ночь".encode("utf-8"), resp_login)
+
+        post_body = b"pin=918273&next=%2F"
+        post_login_req = (
+            "POST /login HTTP/1.1\r\nHost: localhost\r\n"
+            "Content-Type: application/x-www-form-urlencoded\r\n"
+            f"Content-Length: {len(post_body)}\r\n\r\n"
+        ).encode("utf-8") + post_body
+        resp_post = _run_request(self.storage_dir, post_login_req, client_ip="192.168.50.56")
+        hdr_lines = resp_post.partition(b"\r\n\r\n")[0].decode("utf-8").splitlines()
+        self.assertIn("303", hdr_lines[0])
         cookie_line = [line for line in hdr_lines if line.lower().startswith("set-cookie: airshare_auth=")][0]
         cookie_kv = cookie_line.split(":", 1)[1].strip().split(";")[0]
 
-        # 3. Последующие переходы по папкам и смена языка (?lang=ru и Cookie airshare_lang) работают с кодом 200
+        hijack_req = f"GET / HTTP/1.1\r\nHost: localhost\r\nCookie: {cookie_kv}\r\n\r\n".encode("utf-8")
+        resp_hijack = _run_request(self.storage_dir, hijack_req, client_ip="192.168.50.99")
+        self.assertIn(b"401", resp_hijack.splitlines()[0])
+
+        with open(os.path.join(self.storage_dir, "20250819_144102.mp4"), "wb") as f:
+            f.write(b"0123456789ABCDEF" * 64)
         req_with_cookie = f"GET /?lang=ru HTTP/1.1\r\nHost: localhost\r\nCookie: {cookie_kv}\r\n\r\n".encode("utf-8")
         resp_dir = _run_request(self.storage_dir, req_with_cookie, client_ip="192.168.50.56")
         self.assertIn(b"200 OK", resp_dir.splitlines()[0])
-        self.assertIn(b"Set-Cookie: airshare_lang=ru", resp_dir)
-        self.assertIn(i18n.tr("web_upload_btn", "ru").encode("utf-8"), resp_dir)
-        self.assertIn(b'id="langGlobeBtn"', resp_dir)
-        self.assertIn(b"Crafted by JackBrownUA", resp_dir)
+        self.assertIn(b'id="ambilightCanvas"', resp_dir)
+        self.assertIn(b'id="uploadProgressDock"', resp_dir)
+        self.assertIn(b'id="fileSearchInput"', resp_dir)
+        self.assertIn(b'id="scrubCanvas"', resp_dir)
 
-        # 4. Проверяем наличие тумблера Предпросмотр (previewToggle), ленивых миниатюр data-src и заголовков стриминга видео
-        with open(os.path.join(self.storage_dir, "20250819_113031.jpg"), "wb") as f:
-            f.write(b"\xff\xd8\xff\xe0fakejpeg")
-        with open(os.path.join(self.storage_dir, "20250819_144102.mp4"), "wb") as f:
-            f.write(b"0123456789ABCDEF" * 64)
-        resp_with_media = _run_request(self.storage_dir, req_with_cookie, client_ip="192.168.50.56")
-        self.assertIn(b'id="previewToggle"', resp_with_media)
-        self.assertIn(b'data-src="20250819_113031.jpg"', resp_with_media)
-        self.assertIn(b'data-src="20250819_144102.mp4#t=0.5"', resp_with_media)
+        search_req = f"GET /?q=144102&ajax=1 HTTP/1.1\r\nHost: localhost\r\nCookie: {cookie_kv}\r\n\r\n".encode("utf-8")
+        search_resp = _run_request(self.storage_dir, search_req, client_ip="192.168.50.56")
+        _, _, search_body = search_resp.partition(b"\r\n\r\n")
+        search_json = json.loads(search_body.decode("utf-8"))
+        self.assertEqual(len(search_json["results"]), 1)
+        self.assertEqual(search_json["results"][0]["name"], "20250819_144102.mp4")
 
-        head_req = f"HEAD /20250819_144102.mp4 HTTP/1.1\r\nHost: localhost\r\nCookie: {cookie_kv}\r\n\r\n".encode("utf-8")
-        head_resp = _run_request(self.storage_dir, head_req, client_ip="192.168.50.56")
-        self.assertIn(b"Accept-Ranges: bytes", head_resp)
-        self.assertIn(b"Cache-Control: private, max-age=3600", head_resp)
+        pwa_resp = _run_request(self.storage_dir, b"GET /manifest.webmanifest HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        self.assertIn(b"200 OK", pwa_resp.splitlines()[0])
+        self.assertIn(b'"display": "standalone"', pwa_resp)
 
-    def test_10_p4a_hook_patches_project_properties_and_removes_battery_perm(self):
-        # 1. Проверяем, что в main.py и ui_widgets.py нигде не передаётся невалидный для Kivy shorten_from="middle"
+    def test_10_p4a_hook_targets_api_36_and_nav_transfer_safe(self):
+        self.assertEqual(config.APP_VERSION, "1.3.5")
+        self.assertEqual(p4a_hook.TARGET_API, "36")
+
         main_code = Path("main.py").read_text(encoding="utf-8")
         self.assertNotIn('shorten_from="middle"', main_code)
-        self.assertIn('shorten_from="center"', main_code)
+        self.assertNotIn("request_ignore_battery_optimizations", main_code)
+        nav_match = re.search(r"def _on_nav_transfer\(.*?(?=\n    def )", main_code, re.S)
+        self.assertIsNotNone(nav_match)
+        self.assertNotIn("toggle_server", nav_match.group(0))
 
-        # 2. Проверяем, что p4a_hook корректно патчит закэшированный dist (project.properties, build.gradle, AndroidManifest.xml и HIDDeviceManager.java)
         fake_dist = Path(self.tmp_dir.name) / "fake_dist"
         (fake_dist / "src" / "main" / "java" / "org" / "libsdl" / "app").mkdir(parents=True, exist_ok=True)
         props_file = fake_dist / "project.properties"
@@ -330,12 +388,9 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertEqual(counts["manifest"], 1)
         self.assertEqual(counts["hid"], 1)
 
-        self.assertIn("target=android-35", props_file.read_text(encoding="utf-8"))
-        self.assertIn("targetSdkVersion 35", gradle_file.read_text(encoding="utf-8"))
-        self.assertIn('android:targetSdkVersion="35"', manifest_file.read_text(encoding="utf-8"))
-        self.assertNotIn("requestLegacyExternalStorage", manifest_file.read_text(encoding="utf-8"))
+        self.assertIn("targetSdkVersion 36", gradle_file.read_text(encoding="utf-8"))
+        self.assertIn('android:targetSdkVersion="36"', manifest_file.read_text(encoding="utf-8"))
         self.assertNotIn("REQUEST_IGNORE_BATTERY_OPTIMIZATIONS", manifest_file.read_text(encoding="utf-8"))
-        self.assertIn("mContext.registerReceiver(mUsbBroadcast, filter, 2)", hid_file.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

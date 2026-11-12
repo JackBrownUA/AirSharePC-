@@ -1,12 +1,25 @@
-# Веб-интерфейс AirShare PC: реалистичное звёздное небо с метеорами и 3D-параллаксом, тумблеры, предпросмотр, выбор языка (глобус) и глазок просмотра PIN
+# Веб-интерфейс AirShare PC (v1.3.5): вёрстка страницы, звёздное небо с метеорами и 3D-параллаксом, тумблеры, выбор языка и отправка файлов через XMLHttpRequest
 
 import html
 import json
 from i18n import SUPPORTED_LANGUAGES, tr
+from player_ui import get_media_modal_html, get_player_css, get_player_script
+from pwa_search import get_search_and_pwa_script
+from security import get_sha256_js
+
+__all__ = [
+    "get_css",
+    "get_download_svg",
+    "get_media_modal_html",
+    "get_pin_login_page",
+    "get_star_script",
+    "get_theme_script",
+    "get_top_controls_html",
+    "get_upload_script",
+]
 
 
 def get_flag_svg(code="en"):
-    # Векторные значки флагов для 6 языков (корректно отображаются во всех браузерах на Windows, macOS и Android)
     if code == "uk":
         return (
             '<svg class="lang-flag" viewBox="0 0 28 20">'
@@ -70,7 +83,7 @@ def get_globe_svg():
 
 def get_css(theme="dark"):
     scheme = "light" if theme == "light" else "dark"
-    return f"""
+    base_css = f"""
     :root {{ color-scheme: {scheme}; }}
     * {{ margin: 0; padding: 0; box-sizing: border-box; }}
     body {{
@@ -104,7 +117,6 @@ def get_css(theme="dark"):
             transition: none !important;
         }}
     }}
-    /* Верхняя левая панель (Тема День/Ночь + 3D-Параллакс) и правая панель (Предпросмотр + Планета выбора языка) */
     .top-controls {{
         position: fixed;
         top: 18px;
@@ -147,7 +159,16 @@ def get_css(theme="dark"):
         color: #1e293b;
         box-shadow: 0 6px 20px rgba(30, 41, 59, 0.10), inset 0 1px 1px rgba(255, 255, 255, 0.9);
     }}
-    /* Кнопка планеты (выбор языка) и всплывающее окошко языков */
+    .pwa-install-btn {{
+        display: none;
+        cursor: pointer;
+        border-color: rgba(56, 217, 169, 0.45);
+        font-family: inherit;
+    }}
+    .pwa-install-btn:hover {{
+        border-color: rgba(56, 217, 169, 0.85);
+        box-shadow: 0 8px 24px rgba(32, 201, 151, 0.35);
+    }}
     .lang-menu-wrap {{
         position: relative;
         display: inline-flex;
@@ -355,7 +376,7 @@ def get_css(theme="dark"):
     }}
     .header {{
         text-align: center;
-        margin-bottom: 34px;
+        margin-bottom: 26px;
     }}
     .header h1 {{
         color: #ffffff;
@@ -373,7 +394,7 @@ def get_css(theme="dark"):
     .header p {{
         color: rgba(226, 232, 240, 0.65);
         font-size: 14px;
-        margin-bottom: 20px;
+        margin-bottom: 18px;
         word-break: break-all;
     }}
     body.light .header p {{
@@ -414,6 +435,43 @@ def get_css(theme="dark"):
     body.light .upload-btn {{
         background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
         box-shadow: 0 6px 18px rgba(37, 99, 235, 0.32), inset 0 1px 1px rgba(255, 255, 255, 0.4);
+    }}
+    .search-wrap {{
+        position: relative;
+        margin-bottom: 12px;
+    }}
+    .search-input {{
+        width: 100%;
+        padding: 13px 42px 13px 18px;
+        border-radius: 14px;
+        background: rgba(24, 30, 48, 0.74);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        backdrop-filter: blur(12px);
+        color: #f8fafc;
+        font-size: 15px;
+        outline: none;
+        transition: border-color 0.25s ease, box-shadow 0.25s ease, background 0.3s ease;
+    }}
+    .search-input:focus {{
+        border-color: rgba(96, 165, 250, 0.75);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.20);
+    }}
+    body.light .search-input {{
+        background: rgba(255, 255, 255, 0.90);
+        border-color: rgba(15, 23, 42, 0.12);
+        color: #0f172a;
+    }}
+    .search-clear-btn {{
+        position: absolute;
+        right: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: none;
+        border: none;
+        color: rgba(203, 213, 225, 0.7);
+        font-size: 18px;
+        cursor: pointer;
+        display: none;
     }}
     .toolbar {{
         display: flex;
@@ -483,7 +541,6 @@ def get_css(theme="dark"):
     .file-item:last-child {{
         border-bottom: none;
     }}
-    /* Миниатюра предпросмотра файла (скрыта, пока тумблер «Предпросмотр» выключен) */
     .thumb-box {{
         display: none;
         width: 46px;
@@ -497,6 +554,7 @@ def get_css(theme="dark"):
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.38);
         align-items: center;
         justify-content: center;
+        cursor: pointer;
     }}
     body.light .thumb-box {{
         background: #e2e8f0;
@@ -546,6 +604,7 @@ def get_css(theme="dark"):
         display: block;
         margin-bottom: 4px;
         word-break: break-word;
+        cursor: pointer;
         transition: color 0.2s ease;
     }}
     .file-link:hover {{
@@ -560,11 +619,44 @@ def get_css(theme="dark"):
     .file-meta {{
         color: rgba(203, 213, 225, 0.55);
         font-size: 13px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
     }}
     body.light .file-meta {{
         color: #64748b;
     }}
-    /* Объёмная 3D-кнопка скачивания файла */
+    .hash-pill {{
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 1px 7px;
+        border-radius: 8px;
+        background: rgba(59, 130, 246, 0.14);
+        border: 1px solid rgba(96, 165, 250, 0.26);
+        color: #93c5fd;
+        font-size: 11px;
+        font-family: monospace;
+        cursor: pointer;
+        user-select: none;
+        transition: background 0.2s ease, color 0.2s ease;
+    }}
+    .hash-pill:hover {{
+        background: rgba(59, 130, 246, 0.28);
+        color: #ffffff;
+    }}
+    body.light .hash-pill {{
+        background: rgba(37, 99, 235, 0.10);
+        border-color: rgba(37, 99, 235, 0.25);
+        color: #1d4ed8;
+    }}
+    .item-actions {{
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+    }}
     .download-btn {{
         width: 44px;
         height: 44px;
@@ -606,7 +698,6 @@ def get_css(theme="dark"):
         flex-shrink: 0;
         accent-color: #3b82f6;
     }}
-    /* Подпись автора в правом нижнем углу сайта */
     .credit-badge {{
         position: fixed;
         bottom: 14px;
@@ -627,7 +718,6 @@ def get_css(theme="dark"):
         border: 1px solid rgba(15, 23, 42, 0.10);
         color: #475569;
     }}
-    /* Карточка ввода PIN-кода и кнопка-глазок для просмотра пароля при удерживании */
     .pin-card {{
         max-width: 390px;
         margin: 90px auto 0;
@@ -729,10 +819,10 @@ def get_css(theme="dark"):
         pointer-events: none;
     }}
     """
+    return base_css + get_player_css()
 
 
 def get_download_svg():
-    # Объёмная SVG-иконка скачивания вместо плоской стрелки
     return (
         '<svg viewBox="0 0 24 24">'
         '<path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 19h14"/>'
@@ -741,7 +831,6 @@ def get_download_svg():
 
 
 def get_star_script():
-    # Реалистичное плотное звёздное небо (260 звёзд в 3 слоях глубины) + падающие звёзды (метеоры) + 3D-параллакс
     return """
     (function(){
         const canvas = document.getElementById("skyCanvas");
@@ -898,7 +987,17 @@ def get_upload_script(lang="en"):
     msg_err = json.dumps(tr("web_upload_err", lang))
     msg_warn = json.dumps(tr("web_select_warn", lang))
     msg_prep = json.dumps(tr("web_prep_zip", lang))
+    msg_hash_ok = json.dumps(tr("web_hash_ok", lang))
+    msg_hash_err = json.dumps(tr("web_hash_err", lang))
+    msg_eta = json.dumps(tr("web_eta", lang))
+    sha_js = get_sha256_js()
+    player_js = get_player_script(lang)
+    search_pwa_js = get_search_and_pwa_script()
     return f"""
+    {sha_js}
+    {player_js}
+    {search_pwa_js}
+
     function triggerUpload() {{
         const input = document.getElementById("up");
         if (input) {{
@@ -907,45 +1006,94 @@ def get_upload_script(lang="en"):
         }}
     }}
 
+    function uploadSingleViaXhr(url, file, clientSha, onProgress) {{
+        return new Promise(function(resolve, reject) {{
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", url, true);
+            xhr.withCredentials = true;
+            xhr.setRequestHeader("X-File-Name", encodeURIComponent(file.name));
+            if (clientSha) {{
+                xhr.setRequestHeader("X-Content-SHA256", clientSha);
+            }}
+            xhr.upload.onprogress = function(e) {{
+                if (e.lengthComputable && onProgress) {{
+                    onProgress(e.loaded, e.total);
+                }}
+            }};
+            xhr.onload = function() {{
+                if (xhr.status >= 200 && xhr.status < 300) {{
+                    resolve(xhr.responseText);
+                }} else {{
+                    reject(new Error(xhr.responseText || ("HTTP " + xhr.status)));
+                }}
+            }};
+            xhr.onerror = function() {{
+                reject(new Error("Network error"));
+            }};
+            xhr.send(file);
+        }});
+    }}
+
     async function uploadFiles(files) {{
         if (!files || files.length === 0) return;
         const st = document.getElementById("status");
+        const dock = document.getElementById("uploadProgressDock");
+        const dockName = document.getElementById("dockFileName");
+        const dockPct = document.getElementById("dockPct");
+        const dockFill = document.getElementById("dockBarFill");
+        const dockSpeed = document.getElementById("dockSpeed");
+        const dockEta = document.getElementById("dockEta");
         const cleanOrigin = window.location.protocol + "//" + window.location.host;
         const basePath = window.location.pathname || "/";
         let uploadedCount = 0;
 
+        if (dock) dock.classList.add("visible");
+
         for (let i = 0; i < files.length; i++) {{
             const file = files[i];
+            const labelPrefix = "(" + (i + 1) + "/" + files.length + ") " + file.name;
             if (st) {{
                 st.style.color = "#60a5fa";
-                st.innerText = {msg_uploading} + " " + file.name + " (" + (i + 1) + "/" + files.length + ")...";
+                st.innerText = {msg_uploading} + " " + labelPrefix + "...";
             }}
+            if (dockName) dockName.innerText = labelPrefix;
+            if (dockPct) dockPct.innerText = "0%";
+            if (dockFill) dockFill.style.width = "0%";
+            if (dockSpeed) dockSpeed.innerText = "SHA-256...";
+            if (dockEta) dockEta.innerText = "";
+
+            let clientSha = "";
+            try {{
+                clientSha = await computeFileSha256(file);
+            }} catch (e) {{}}
+
+            const tStart = performance.now();
             try {{
                 const targetUrl = cleanOrigin + basePath + "?upload=" + encodeURIComponent(file.name);
-                const res = await fetch(targetUrl, {{
-                    method: "POST",
-                    body: file,
-                    credentials: "same-origin",
-                    headers: {{
-                        "X-File-Name": encodeURIComponent(file.name)
-                    }}
+                await uploadSingleViaXhr(targetUrl, file, clientSha, function(loaded, total) {{
+                    const pct = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
+                    const elapsedSec = Math.max(0.05, (performance.now() - tStart) / 1000);
+                    const bytesPerSec = loaded / elapsedSec;
+                    const mbps = (bytesPerSec / (1024 * 1024)).toFixed(1) + " MB/s";
+                    const remSec = bytesPerSec > 0 ? (total - loaded) / bytesPerSec : 0;
+                    if (dockPct) dockPct.innerText = pct + "%";
+                    if (dockFill) dockFill.style.width = pct + "%";
+                    if (dockSpeed) dockSpeed.innerText = mbps + (clientSha ? " • " + {msg_hash_ok} : "");
+                    if (dockEta) dockEta.innerText = {msg_eta} + ": " + formatClock(remSec);
                 }});
-                if (!res.ok) {{
-                    const errText = await res.text();
-                    throw new Error(errText || ("HTTP " + res.status));
-                }}
                 uploadedCount++;
             }} catch (err) {{
                 if (st) {{
                     st.style.color = "#ff453a";
                     st.innerText = {msg_err} + file.name + ": " + err.message;
                 }}
+                if (dockSpeed) dockSpeed.innerText = {msg_hash_err};
                 return;
             }}
         }}
         if (st && uploadedCount > 0) {{
             st.style.color = "#20c997";
-            st.innerText = {msg_done} + uploadedCount;
+            st.innerText = {msg_done} + uploadedCount + " (" + {msg_hash_ok} + ")";
         }}
         window.location.href = cleanOrigin + basePath;
     }}
@@ -953,7 +1101,9 @@ def get_upload_script(lang="en"):
     function toggleSelectAll(masterCheckbox) {{
         const boxes = document.querySelectorAll('input[name="files"]');
         for (let i = 0; i < boxes.length; i++) {{
-            boxes[i].checked = masterCheckbox.checked;
+            if (boxes[i].closest("li").style.display !== "none") {{
+                boxes[i].checked = masterCheckbox.checked;
+            }}
         }}
     }}
 
@@ -1083,7 +1233,6 @@ def get_theme_script():
             }
         });
 
-        // Кнопка-глазок в поле ввода пароля: показывает пароль при нажатии и удерживании левой кнопки мыши (или касании)
         const pinInput = document.getElementById("pinInput");
         const eyeBtn = document.getElementById("pinEyeBtn");
         const eyeClosed = document.getElementById("eyeClosedIcon");
@@ -1170,16 +1319,19 @@ def _get_lang_selector_html(lang="en"):
 
 def get_top_controls_html(theme="dark", lang="en", show_preview_toggle=False):
     is_dark_checked = "checked" if theme != "light" else ""
+    theme_tip = html.escape(tr("web_theme_tip", lang))
+    parallax_tip = html.escape(tr("web_parallax_tip", lang))
+    pwa_txt = html.escape(tr("web_install_pwa", lang))
     left_html = (
         '<div class="top-controls">'
-        '<label class="ctrl-pill" title="Тема День / Ночь">'
+        f'<label class="ctrl-pill" title="{theme_tip}">'
         '<span>☀️ / 🌙</span>'
         '<span class="switch">'
         f'<input type="checkbox" id="themeToggle" {is_dark_checked} onchange="onThemeSwitchChange(this)">'
         '<span class="switch-slider"></span>'
         '</span>'
         '</label>'
-        '<label class="ctrl-pill" id="parallaxPill" title="Живые 3D-обои звёздного неба">'
+        f'<label class="ctrl-pill" id="parallaxPill" title="{parallax_tip}">'
         '<span>✨ Parallax 3D</span>'
         '<span class="switch">'
         '<input type="checkbox" id="parallaxToggle" checked>'
@@ -1192,6 +1344,7 @@ def get_top_controls_html(theme="dark", lang="en", show_preview_toggle=False):
     if show_preview_toggle:
         preview_label = html.escape(tr("web_preview", lang))
         preview_pill = (
+            f'<button type="button" class="ctrl-pill pwa-install-btn" id="pwaInstallBtn" onclick="installPwaApp()">{pwa_txt}</button>'
             f'<label class="ctrl-pill" title="{preview_label}">'
             f'<span>{preview_label}</span>'
             '<span class="switch">'
@@ -1209,11 +1362,12 @@ def get_top_controls_html(theme="dark", lang="en", show_preview_toggle=False):
     return left_html + right_html
 
 
-def get_pin_login_page(theme="dark", lang="en", error_msg=""):
+def get_pin_login_page(theme="dark", lang="en", error_msg="", next_path="/"):
     title_txt = html.escape(tr("web_auth_req", lang))
     hint_txt = html.escape(tr("pin_hint", lang))
     show_pin_txt = html.escape(tr("web_show_pin", lang))
     btn_txt = html.escape(tr("connect", lang))
+    safe_next = html.escape(next_path or "/", quote=True)
     err_html = f'<p style="color:#ff453a;margin-top:10px;font-size:14px;">{html.escape(error_msg)}</p>' if error_msg else ""
     eye_closed_svg = (
         '<svg id="eyeClosedIcon" viewBox="0 0 24 24">'
@@ -1231,6 +1385,7 @@ def get_pin_login_page(theme="dark", lang="en", error_msg=""):
     return (
         '<!DOCTYPE html><html><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+        '<link rel="manifest" href="/manifest.webmanifest">'
         '<title>AirShare PC — PIN</title>'
         f'<style>{get_css(theme)}</style>'
         f'</head><body class="{theme}">'
@@ -1240,7 +1395,8 @@ def get_pin_login_page(theme="dark", lang="en", error_msg=""):
         '<div class="pin-card">'
         '<h1 style="font-size:30px;margin-bottom:8px;">AirShare PC</h1>'
         f'<p style="opacity:0.75;font-size:14px;">{title_txt}</p>'
-        '<form method="GET" action="/">'
+        '<form method="POST" action="/login">'
+        f'<input type="hidden" name="next" value="{safe_next}">'
         '<div class="pin-input-wrap">'
         f'<input type="password" id="pinInput" name="pin" class="pin-input" placeholder="••••••" title="{hint_txt}" autocomplete="off" autofocus required>'
         f'<button type="button" class="pin-eye-btn" id="pinEyeBtn" title="{show_pin_txt}" aria-label="{show_pin_txt}">'

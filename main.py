@@ -1,4 +1,4 @@
-# Главный модуль приложения AirShare PC: многоязычный интерфейс, контроль Wi-Fi, выбор папки и управление сервером
+# Главный модуль приложения AirShare PC (v1.3.5): многоязычный интерфейс, контроль Wi-Fi, живой прогресс передач, перезапуск порта на лету и уведомление в шторке
 
 import logging
 import os
@@ -41,17 +41,20 @@ from ui_widgets import (
     make_label,
 )
 from utils import (
+    format_size,
     generate_pin,
     get_device_info,
     get_device_theme,
     get_local_ip,
     get_network_label,
+    get_sslip_domain,
     get_storage_stats,
+    has_android_storage_permission,
     is_wifi_connected,
     load_settings,
     request_android_full_storage,
-    request_ignore_battery_optimizations,
     save_settings,
+    set_android_foreground_notification,
 )
 
 logger = logging.getLogger("airshare.app")
@@ -74,13 +77,12 @@ class AirShareApp(App):
         self.server = None
         self.is_stopping = False
         self.has_server_error = False
-        # По умолчанию раздаём безопасную папку Downloads (п. 28.b); весь накопитель включается с предупреждением
         self.active_folder_key = "Downloads"
         self.active_nav_tab = "transfer"
         self.keep_alive_locked = True
         self._wake_lock = None
         self._wifi_lock = None
-        self._battery_opt_requested = False
+        self._pending_all_storage_path = None
         self.transfer_history = []
         self.active_modal = None
         self.theme_mode = "dark"
@@ -111,16 +113,17 @@ class AirShareApp(App):
         return path_val
 
     def get_connection_url(self):
-        # Полная ссылка с ?pin= для автоматического входа без Basic Auth при копировании
+        # При копировании даём красивую доменную ссылку sslip.io с ?pin= для мгновенного входа и установки PWA
         if not is_wifi_connected():
             return self._t("no_wifi_url")
         ip = get_local_ip()
+        host = get_sslip_domain(ip)
         pwd = (self.saved_password or "").strip()
         if not pwd:
             pwd = load_settings().get("password", "")
             self.saved_password = pwd
         quoted_pwd = urllib.parse.quote(pwd, safe="")
-        return f"http://{ip}:{self.server_port}/?pin={quoted_pwd}"
+        return f"http://{host}:{self.server_port}/?pin={quoted_pwd}"
 
     def get_display_url_text(self):
         # На экране показываем короткий адрес и PIN, чтобы его было легко ввести вручную в браузере
@@ -180,7 +183,7 @@ class AirShareApp(App):
             logger.warning("Не удалось переключить WakeLock/WifiLock: %s", exc)
 
     def _apply_android_system_insets(self, *_args):
-        # На Android 15+ (targetSdkVersion 35) учитываем системные отступы статус-бара и нижней панели навигации
+        # На Android 15–17 (targetSdkVersion 35/36) учитываем системные отступы статус-бара и нижней панели навигации
         try:
             from kivy.utils import platform
             if platform != "android":
@@ -404,7 +407,6 @@ class AirShareApp(App):
         self.tr_row1.add_widget(ico1)
         self.tr_row1.add_widget(info1)
 
-        # Вторая строка передач скрыта, пока в сессии меньше 2 переданных файлов (п. 19)
         self.tr_row2 = BoxLayout(orientation="horizontal", spacing=dp(12), size_hint=(1, 0.5), opacity=0.0)
         ico2 = VectorIcon(
             icon_type="img_badge", size_hint=(None, None), size=(dp(42), dp(42)), pos_hint={"center_y": 0.5}
@@ -544,7 +546,6 @@ class AirShareApp(App):
         self.drawer_status_card.bind(on_press=self.toggle_server)
         self.drawer.add_widget(self.drawer_status_card)
 
-        # В боковой панели вместо дублирующего Shared Folders первой строкой стоит выбор языка (Language) с иконкой глобуса
         menu_box = BoxLayout(orientation="vertical", spacing=dp(4), size_hint=(1, 1))
         self.menu_items_refs = []
         for menu_key, ico_name, cb in [
@@ -586,6 +587,7 @@ class AirShareApp(App):
 
         DynamicAirShareHandler.on_client_connected = self._on_client_connected
         DynamicAirShareHandler.on_file_transfer = self._on_file_transfer
+        DynamicAirShareHandler.on_transfer_progress = self._on_transfer_progress
         DynamicAirShareHandler.on_bad_pin_attempt = self._on_bad_pin_attempt
         self.update_connection_url_display()
         self.apply_theme()
@@ -607,6 +609,8 @@ class AirShareApp(App):
         DynamicAirShareHandler.current_language = lang_code
         self.apply_language()
         self.apply_theme()
+        if self.server is not None:
+            set_android_foreground_notification(True, self.get_display_url_text(), self.language)
 
     def apply_language(self):
         self.wifi_label.text = get_network_label(self.language)
@@ -635,12 +639,19 @@ class AirShareApp(App):
         self.update_connection_url_display()
 
     def on_pause(self):
-        # Возвращаем True, чтобы Android/Kivy не замораживал фоновый HTTP-сервер при сворачивании приложения
         if self.server is not None and self.keep_alive_locked:
             self.set_keep_alive(True)
+            set_android_foreground_notification(True, self.get_display_url_text(), self.language)
         return True
 
     def on_resume(self):
+        if self._pending_all_storage_path is not None:
+            pending = self._pending_all_storage_path
+            self._pending_all_storage_path = None
+            if has_android_storage_permission():
+                self._apply_folder_selection("All Storage", pending)
+        elif self.active_folder_key == "All Storage" and not has_android_storage_permission():
+            self._apply_folder_selection("Downloads", self._resolve_folder_path("Downloads"))
         if self.server is not None and self.keep_alive_locked:
             self.set_keep_alive(True)
         self.refresh_network_status()
@@ -648,6 +659,7 @@ class AirShareApp(App):
     def on_stop(self):
         self.radar_card.set_wave_active(False)
         self.set_keep_alive(False)
+        set_android_foreground_notification(False)
         if self.server is not None:
             srv, self.server = self.server, None
             try:
@@ -669,8 +681,10 @@ class AirShareApp(App):
             widget.set_active_style(act, p["pill_active"], p["text"] if act else p["subtext"])
 
     def _on_nav_transfer(self, *_args):
+        # Клик по вкладке «Transfer» только переключает экран и закрывает боковое меню, НЕ выключая работающий сервер
         self.set_active_nav("transfer")
-        self.toggle_server()
+        if self.drawer.is_open:
+            self.close_drawer()
 
     def _on_nav_files(self, inst, *_args):
         self.set_active_nav("files")
@@ -828,12 +842,26 @@ class AirShareApp(App):
     def _on_bad_pin_attempt(self, ip):
         Clock.schedule_once(lambda _dt: self.show_toast(self._t("toast_bad_pin", ip=ip), kind="error"), 0)
 
+    def _on_transfer_progress(self, filename, transferred_bytes, total_bytes, direction):
+        def _upd(_dt):
+            pct = (transferred_bytes / total_bytes) if total_bytes > 0 else 0.0
+            pct = min(1.0, max(0.0, pct))
+            self.tr1_name.text = filename
+            self.tr1_pct.text = f"{int(pct * 100)}%"
+            act = self._t("uploaded") if direction == "upload" else self._t("downloaded")
+            self.tr1_sub.text = f"{act} • {format_size(transferred_bytes)} / {format_size(total_bytes)}"
+            self.tr1_bar.set_percent(pct)
+
+        Clock.schedule_once(_upd, 0)
+
     def _on_file_transfer(self, filename, size_str, direction):
         def _upd(_dt):
             if self.transfer_history:
-                self.tr2_name.text = self.tr1_name.text
-                self.tr2_pct.text = self.tr1_pct.text
-                self.tr2_sub.text = self.tr1_sub.text
+                prev_entry = self.transfer_history[0]
+                prev_name, _, prev_meta = prev_entry.rpartition(" (")
+                self.tr2_name.text = prev_name or prev_entry
+                self.tr2_pct.text = "100%"
+                self.tr2_sub.text = prev_meta.rstrip(")") if prev_meta else ""
                 self.tr2_bar.set_percent(1.0)
                 self.tr_row2.opacity = 1.0
             self.tr1_name.text, self.tr1_pct.text = filename, "100%"
@@ -844,41 +872,63 @@ class AirShareApp(App):
 
         Clock.schedule_once(_upd, 0)
 
+    def _start_server_instance(self):
+        settings = load_settings()
+        self.saved_password = settings.get("password", "")
+        self.server_port = settings.get("port", SERVER_PORT)
+        DynamicAirShareHandler.current_password = self.saved_password
+        DynamicAirShareHandler.default_theme = self._get_effective_theme()
+        DynamicAirShareHandler.current_language = self.language
+        DynamicAirShareHandler._notified_ips.clear()
+        self.update_connection_url_display()
+
+        if not has_android_storage_permission():
+            request_android_full_storage()
+
+        bind_ip = get_local_ip()
+        try:
+            self.server = ReusableThreadingServer((bind_ip, self.server_port), DynamicAirShareHandler)
+            threading.Thread(target=self.server.serve_forever, daemon=True).start()
+            self.has_server_error = False
+            self.set_keep_alive(True)
+            set_android_foreground_notification(True, self.get_display_url_text(), self.language)
+        except OSError as exc:
+            logger.error("Не удалось запустить HTTP-сервер на %s:%s: %s", bind_ip, self.server_port, exc)
+            self.server = None
+            self.has_server_error = True
+        self.apply_theme()
+
+    def _restart_server_on_new_port(self):
+        if self.server is None or self.is_stopping:
+            return
+        self.is_stopping = True
+        old_srv, self.server = self.server, None
+
+        def _restart():
+            try:
+                old_srv.shutdown()
+                old_srv.server_close()
+            except Exception as exc:
+                logger.debug("Ошибка при перезапуске сервера на новом порту: %s", exc)
+
+            def _finish(_dt):
+                self.is_stopping = False
+                self._start_server_instance()
+
+            Clock.schedule_once(_finish, 0)
+
+        threading.Thread(target=_restart, daemon=True).start()
+
     def toggle_server(self, *_args):
         if self.is_stopping:
             return
         if self.server is None:
-            # Проверяем подключение к Wi-Fi перед запуском сервера (п. 13)
             if not is_wifi_connected():
                 self.open_no_wifi_modal(self.connect_btn)
                 self.update_connection_url_display()
                 self.apply_theme()
                 return
-
-            settings = load_settings()
-            self.saved_password = settings.get("password", "")
-            self.server_port = settings.get("port", SERVER_PORT)
-            DynamicAirShareHandler.current_password = self.saved_password
-            DynamicAirShareHandler.default_theme = self._get_effective_theme()
-            DynamicAirShareHandler.current_language = self.language
-            DynamicAirShareHandler._notified_ips.clear()
-            self.update_connection_url_display()
-
-            bind_ip = get_local_ip()
-            try:
-                # Привязываем сокет именно к локальному Wi-Fi IP, а не к 0.0.0.0 (п. 13)
-                self.server = ReusableThreadingServer((bind_ip, self.server_port), DynamicAirShareHandler)
-                threading.Thread(target=self.server.serve_forever, daemon=True).start()
-                self.has_server_error = False
-                self.set_keep_alive(True)
-                if self.keep_alive_locked and not self._battery_opt_requested:
-                    self._battery_opt_requested = True
-                    request_ignore_battery_optimizations()
-            except OSError as exc:
-                logger.error("Не удалось запустить HTTP-сервер на %s:%s: %s", bind_ip, self.server_port, exc)
-                self.server = None
-                self.has_server_error = True
-            self.apply_theme()
+            self._start_server_instance()
         else:
             self.is_stopping = True
             srv, self.server = self.server, None
@@ -896,6 +946,7 @@ class AirShareApp(App):
     def _on_server_stopped(self, _dt):
         self.is_stopping = self.has_server_error = False
         self.set_keep_alive(False)
+        set_android_foreground_notification(False)
         self.apply_theme()
 
     def _create_mac_modal(self, title_text, subtitle_text="", height_dp=280, source_widget=None):
@@ -971,7 +1022,6 @@ class AirShareApp(App):
         card.add_widget(btn_ok)
 
     def open_language_modal(self, source_widget=None, *_args):
-        # Модальное окно выбора из 6 языков с увеличенной высотой (490dp) и фиксированным контейнером списка
         modal, card, p = self._create_mac_modal(
             self._t("lang_title"), self._t("lang_subtitle"), 490, source_widget
         )
@@ -1036,7 +1086,6 @@ class AirShareApp(App):
         self.apply_theme()
 
     def open_all_storage_confirm_modal(self, path_val, source_widget=None):
-        # Объёмное окно предупреждения в тон приложения: красная кнопка «Отмена» и зелёная «Разрешить» без жёлтой рамки
         modal, card, p = self._create_mac_modal(
             self._t("all_storage_warn_title"), "", 260, source_widget
         )
@@ -1067,8 +1116,11 @@ class AirShareApp(App):
         )
 
         def _confirm(*_):
-            request_android_full_storage()
-            self._apply_folder_selection("All Storage", path_val)
+            if has_android_storage_permission():
+                self._apply_folder_selection("All Storage", path_val)
+            else:
+                self._pending_all_storage_path = path_val
+                request_android_full_storage()
             modal.dismiss()
 
         btn_cancel.bind(on_press=lambda *_: modal.dismiss())
@@ -1205,6 +1257,8 @@ class AirShareApp(App):
             self.saved_password = DynamicAirShareHandler.current_password = final_pwd
             DynamicAirShareHandler.reset_rate_limits()
             self.update_connection_url_display()
+            if self.server is not None:
+                set_android_foreground_notification(True, self.get_display_url_text(), self.language)
             modal.dismiss()
 
         btn_gen.bind(on_press=lambda *_: _save(generate_pin()))
@@ -1243,21 +1297,24 @@ class AirShareApp(App):
         )
 
         def _save_port(_b):
+            port_changed = False
             try:
                 val = int(inp.text.strip())
-                if 1024 <= val <= 65535:
+                if 1024 <= val <= 65535 and val != self.server_port:
                     self.server_port = val
                     save_settings(port=val)
                     self.update_connection_url_display()
+                    port_changed = True
             except ValueError:
                 pass
             modal.dismiss()
+            if port_changed and self.server is not None:
+                self._restart_server_on_new_port()
 
         btn_save.bind(on_press=_save_port)
         card.add_widget(btn_save)
 
     def open_devices_modal(self, source_widget=None, *_args):
-        # Список подключённых устройств с кнопкой «Отключить» / «Разрешить» напротив каждого IP (п. 3)
         modal, card, p = self._create_mac_modal(
             self._t("devices_title"), self._t("devices_subtitle"), 345, source_widget
         )
@@ -1326,6 +1383,7 @@ class AirShareApp(App):
 
         def _clear(*_):
             save_settings(recent_ips=[])
+            self.show_toast(self._t("history_cleared"), kind="info")
             _populate()
 
         btn_clr.bind(on_press=_clear)

@@ -1,8 +1,8 @@
-# Хук сборки python-for-android (p4a.hook) для AirShare PC:
-# 1. Принудительно обновляет target=android-35 в закэшированном project.properties (обход бага Buildozer с кэшем).
-# 2. Выставляет targetSdkVersion=35 и compileSdkVersion=35 в build.gradle и AndroidManifest.xml (убирает окно Play Защиты о старой версии Android).
-# 3. Убирает разрешение REQUEST_IGNORE_BATTERY_OPTIMIZATIONS из манифеста и восстанавливает стандартный сертификат CN=Android Debug, O=Android, C=US (убирает ложное срабатывание эвристики Play Защиты «Вредоносное приложение»).
-# 4. Патчит HIDDeviceManager.java (SDL2) флагом RECEIVER_EXPORTED (2) для Android 14/15+ (предотвращает SecurityException при старте).
+# Хук сборки python-for-android (p4a.hook) для AirShare PC (v1.3.5):
+# 1. Выставляет TARGET_API = "36" (targetSdkVersion=36, compileSdkVersion=36 и target=android-36) для Android 16/17.
+# 2. При необходимости автоматически доустанавливает platforms;android-36 через sdkmanager.
+# 3. Убирает разрешение REQUEST_IGNORE_BATTERY_OPTIMIZATIONS из манифеста и восстанавливает стандартный сертификат CN=Android Debug, O=Android, C=US.
+# 4. Патчит HIDDeviceManager.java (SDL2) флагом RECEIVER_EXPORTED (2) для Android 14–17.
 # 5. Отключает самообновление pip (pip install -U pip) в pythonforandroid/build.py (обход бага p4a #3364 с capture_logging).
 
 import os
@@ -11,29 +11,76 @@ import shutil
 import subprocess
 from pathlib import Path
 
-TARGET_API = "35"
+TARGET_API = "36"
+FALLBACK_COMPILE_API = "35"
 
 
-def _patch_project_properties(path_obj: Path) -> bool:
+def _ensure_sdk_platform() -> str:
+    # Проверяем наличие platforms/android-36 в SDK Buildozer; если нет — пробуем установить через sdkmanager
+    sdk_candidates = []
+    for env_var in ("ANDROIDSDK", "ANDROID_HOME", "ANDROID_SDK_ROOT"):
+        val = os.environ.get(env_var)
+        if val:
+            sdk_candidates.append(Path(val))
+    sdk_candidates.append(Path.home() / ".buildozer" / "android" / "platform" / "android-sdk")
+    sdk_candidates.append(Path.cwd() / ".buildozer" / "android" / "platform" / "android-sdk")
+
+    sdk_root = None
+    for cand in sdk_candidates:
+        if (cand / "platforms").is_dir():
+            sdk_root = cand
+            break
+
+    if sdk_root is None:
+        return TARGET_API
+
+    target_plat = sdk_root / "platforms" / f"android-{TARGET_API}"
+    if target_plat.is_dir():
+        return TARGET_API
+
+    sdkmanager_bins = list(sdk_root.glob("cmdline-tools/*/bin/sdkmanager")) + list(
+        sdk_root.glob("tools/bin/sdkmanager")
+    )
+    if sdkmanager_bins:
+        try:
+            subprocess.run(
+                [str(sdkmanager_bins[0]), f"platforms;android-{TARGET_API}"],
+                input=b"y\ny\ny\n",
+                timeout=120,
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
+
+    if target_plat.is_dir():
+        return TARGET_API
+    if (sdk_root / "platforms" / f"android-{FALLBACK_COMPILE_API}").is_dir():
+        return FALLBACK_COMPILE_API
+    return TARGET_API
+
+
+def _patch_project_properties(path_obj: Path, compile_api: str = TARGET_API) -> bool:
     try:
         old_text = path_obj.read_text(encoding="utf-8")
     except OSError:
         return False
-    new_text = re.sub(r"target=android-\d+", f"target=android-{TARGET_API}", old_text)
-    if f"target=android-{TARGET_API}" not in new_text:
-        new_text = f"target=android-{TARGET_API}\n" + new_text
+    new_text = re.sub(r"target=android-\d+", f"target=android-{compile_api}", old_text)
+    if f"target=android-{compile_api}" not in new_text:
+        new_text = f"target=android-{compile_api}\n" + new_text
     if new_text != old_text:
         path_obj.write_text(new_text, encoding="utf-8")
         return True
     return False
 
 
-def _patch_gradle_file(path_obj: Path) -> bool:
+def _patch_gradle_file(path_obj: Path, compile_api: str = TARGET_API) -> bool:
     try:
         old_text = path_obj.read_text(encoding="utf-8")
     except OSError:
         return False
-    new_text = re.sub(r"compileSdkVersion\s+\d+", f"compileSdkVersion {TARGET_API}", old_text)
+    new_text = re.sub(r"compileSdkVersion\s+\d+", f"compileSdkVersion {compile_api}", old_text)
     new_text = re.sub(r"targetSdkVersion\s+\d+", f"targetSdkVersion {TARGET_API}", new_text)
     if new_text != old_text:
         path_obj.write_text(new_text, encoding="utf-8")
@@ -52,7 +99,6 @@ def _patch_manifest_file(path_obj: Path) -> bool:
         old_text,
     )
     new_text = new_text.replace('android:requestLegacyExternalStorage="true"', "")
-    # Удаляем REQUEST_IGNORE_BATTERY_OPTIMIZATIONS из закэшированного манифеста, так как в связке с MANAGE_EXTERNAL_STORAGE он вызывает ложную эвристику Play Защиты
     new_text = re.sub(
         r'<uses-permission[^>]*REQUEST_IGNORE_BATTERY_OPTIMIZATIONS[^>]*/>\s*',
         "",
@@ -110,8 +156,7 @@ def _patch_p4a_venv_pip_upgrade(path_obj: Path) -> bool:
 
 
 def _restore_standard_debug_keystore():
-    # Play Защита не блокирует debug-сборки со стандартным ключом Android SDK (CN=Android Debug, O=Android, C=US),
-    # но помечает как «Вредоносное приложение» debug-сборки с нестандартным самоподписанным сертификатом.
+    # Play Защита доверяет стандартному отладочному ключу Android SDK (CN=Android Debug, O=Android, C=US)
     if not shutil.which("keytool"):
         return
     android_dir = Path.home() / ".android"
@@ -158,6 +203,7 @@ def _restore_standard_debug_keystore():
 
 
 def patch_build_tree(root_dir=None) -> dict:
+    compile_api = _ensure_sdk_platform()
     counts = {"props": 0, "gradle": 0, "manifest": 0, "hid": 0, "p4a_pip": 0}
     search_roots = []
     if root_dir is not None:
@@ -178,10 +224,10 @@ def patch_build_tree(root_dir=None) -> dict:
                     continue
                 seen.add(real_key)
                 if fname == "project.properties":
-                    if _patch_project_properties(fpath):
+                    if _patch_project_properties(fpath, compile_api):
                         counts["props"] += 1
                 elif fname in ("build.gradle", "build.tmpl.gradle"):
-                    if _patch_gradle_file(fpath):
+                    if _patch_gradle_file(fpath, compile_api):
                         counts["gradle"] += 1
                 elif fname.startswith("AndroidManifest") and fname.endswith(".xml"):
                     if _patch_manifest_file(fpath):
@@ -215,20 +261,20 @@ def before_apk_build(toolchain=None, *_args, **_kwargs):
     _restore_standard_debug_keystore()
     dist_dir = _extract_dist_dir(toolchain)
     counts = patch_build_tree(dist_dir)
-    print(f"[AirShare p4a_hook] before_apk_build patched: {counts}")
+    print(f"[AirShare p4a_hook] before_apk_build (target API {TARGET_API}) patched: {counts}")
 
 
 def after_apk_build(toolchain=None, *_args, **_kwargs):
     _restore_standard_debug_keystore()
     dist_dir = _extract_dist_dir(toolchain)
     counts = patch_build_tree(dist_dir)
-    print(f"[AirShare p4a_hook] after_apk_build patched: {counts}")
+    print(f"[AirShare p4a_hook] after_apk_build (target API {TARGET_API}) patched: {counts}")
 
 
 def after_apk_assemble(toolchain=None, *_args, **_kwargs):
     dist_dir = _extract_dist_dir(toolchain)
     counts = patch_build_tree(dist_dir)
-    print(f"[AirShare p4a_hook] after_apk_assemble patched: {counts}")
+    print(f"[AirShare p4a_hook] after_apk_assemble (target API {TARGET_API}) patched: {counts}")
 
 
 # Выполняем патч также сразу при импорте модуля p4a_hook
