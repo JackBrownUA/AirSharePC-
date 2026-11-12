@@ -273,6 +273,7 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertTrue(hasattr(player_ui, "get_media_modal_html"))
         self.assertTrue(hasattr(pwa_search, "serve_pwa_asset"))
         self.assertTrue(hasattr(android_bridge, "set_android_foreground_notification"))
+        self.assertIn("color-scheme: light", web_ui.get_css("light"))
         self.assertFalse(utils.is_private_lan_ip("100.71.184.228"))
         self.assertFalse(utils.is_private_lan_ip("127.0.0.1"))
         self.assertTrue(utils.is_private_lan_ip("192.168.1.55"))
