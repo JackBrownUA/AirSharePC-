@@ -1,4 +1,4 @@
-# Модуль интеграции с Android / Pyjnius для AirShare PC (v1.3.5): Wi-Fi IP, имя устройства, системная тема, права памяти, WakeLock/WifiLock и уведомление в шторке
+# Модуль интеграции с Android / Pyjnius для AirShare PC (v1.3.5): Wi-Fi IP, имя устройства, системная тема, права памяти и фоновый режим
 
 import logging
 import socket
@@ -177,25 +177,6 @@ def set_android_foreground_notification(active=True, url_text="", lang="en"):
         activity = getattr(PythonActivity, "mActivity", None)
         if activity is None:
             return
-        title_str = f"{APP_NAME} — {tr('server_active', lang)}"
-        body_str = url_text or tr("wifi_online", lang)
-        try:
-            Intent = autoclass("android.content.Intent")
-            ServiceClass = autoclass("org.kivy.android.AirShareKeepAliveService")
-            srv_intent = Intent(activity, ServiceClass)
-            if not active:
-                srv_intent.setAction("STOP")
-                activity.startService(srv_intent)
-            else:
-                srv_intent.putExtra("title", title_str)
-                srv_intent.putExtra("body", body_str)
-                BuildVersion = autoclass("android.os.Build$VERSION")
-                if BuildVersion.SDK_INT >= 26:
-                    activity.startForegroundService(srv_intent)
-                else:
-                    activity.startService(srv_intent)
-        except Exception as svc_exc:
-            logger.debug("AirShareKeepAliveService fallback: %s", svc_exc)
         nm = activity.getSystemService(Context.NOTIFICATION_SERVICE)
         if nm is None:
             return
@@ -204,13 +185,6 @@ def set_android_foreground_notification(active=True, url_text="", lang="en"):
             return
 
         BuildVersion = autoclass("android.os.Build$VERSION")
-        if BuildVersion.SDK_INT >= 33:
-            try:
-                from android.permissions import request_permissions
-                request_permissions(["android.permission.POST_NOTIFICATIONS"])
-            except Exception:
-                pass
-
         if BuildVersion.SDK_INT >= 26:
             NotificationChannel = autoclass("android.app.NotificationChannel")
             NotificationManager = autoclass("android.app.NotificationManager")
@@ -232,7 +206,7 @@ def set_android_foreground_notification(active=True, url_text="", lang="en"):
         body_str = url_text or tr("wifi_online", lang)
 
         Intent = autoclass("android.content.Intent")
-        PendingIntent = autoclass("android.content.PendingIntent")
+        PendingIntent = autoclass("android.app.PendingIntent")
         intent = Intent(activity, activity.getClass())
         intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP)
         pi_flags = PendingIntent.FLAG_UPDATE_CURRENT

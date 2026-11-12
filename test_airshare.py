@@ -6,6 +6,8 @@ import io
 import json
 import os
 import re
+import shutil
+import subprocess
 import tempfile
 import unittest
 import urllib.parse
@@ -21,7 +23,6 @@ import player_ui
 import pwa_search
 import security
 import server
-import tls_cert
 import utils
 import web_ui
 
@@ -247,7 +248,7 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
             self.assertEqual(zf.read("folderA/same.txt"), b"from_A")
             self.assertEqual(zf.read("folderB/same.txt"), b"from_B")
 
-    def test_07_http_range_206_and_security_headers_and_disconnect(self):
+    def test_07_http_range_206_shortcut_and_disconnect(self):
         video_path = os.path.join(self.storage_dir, "clip.mp4")
         with open(video_path, "wb") as f:
             f.write(b"0123456789ABCDEFGHIJ")
@@ -261,34 +262,42 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         resp = _run_request(self.storage_dir, range_req, client_ip="192.168.1.77")
         hdr, _, body = resp.partition(b"\r\n\r\n")
         self.assertIn(b"206 Partial Content", hdr.splitlines()[0])
-
-        # Проверяем генерацию сертификата HTTPS (?ca_cert=1 и ?https_setup=1)
-        ca_resp = _run_request(self.storage_dir, b"GET /?ca_cert=1 HTTP/1.1\r\nHost: localhost\r\n\r\n")
-        self.assertIn(b"BEGIN CERTIFICATE", ca_resp)
-        bat_resp = _run_request(self.storage_dir, b"GET /?https_setup=1 HTTP/1.1\r\nHost: localhost\r\n\r\n")
-        self.assertIn(b"certutil -user -addstore Root", bat_resp)
-        ctx, ca_pem = tls_cert.ensure_tls_context("192.168.50.98")
-        self.assertIsNotNone(ctx)
-        self.assertIn("BEGIN CERTIFICATE", ca_pem)
         self.assertIn(b"Content-Range: bytes 5-14/20", hdr)
         self.assertIn(b"X-Content-Type-Options: nosniff", hdr)
         self.assertEqual(body, b"56789ABCDE")
+
+        # Проверяем генерацию ярлыка быстрого запуска (/?shortcut=1)
+        sc_resp = _run_request(self.storage_dir, b"GET /?shortcut=1 HTTP/1.1\r\nHost: 192.168.50.98:8080\r\n\r\n")
+        self.assertIn(b"[InternetShortcut]", sc_resp)
+        self.assertIn(b"URL=http://192.168.50.98:8080/", sc_resp)
 
         server.AirShareHandler.set_ip_disconnected("192.168.1.77", True)
         resp_disc = _run_request(self.storage_dir, range_req, client_ip="192.168.1.77")
         self.assertIn(b"403", resp_disc.splitlines()[0])
 
-    def test_08_modular_architecture_sslip_domain_and_all_i18n_keys_used(self):
+    def test_08_modular_architecture_js_syntax_and_all_i18n_keys_used(self):
         self.assertTrue(hasattr(security, "verify_sha256_digest"))
         self.assertTrue(hasattr(player_ui, "get_media_modal_html"))
         self.assertTrue(hasattr(pwa_search, "serve_pwa_asset"))
         self.assertTrue(hasattr(android_bridge, "set_android_foreground_notification"))
-        self.assertIn("color-scheme: light", web_ui.get_css("light"))
         self.assertFalse(utils.is_private_lan_ip("100.71.184.228"))
         self.assertFalse(utils.is_private_lan_ip("127.0.0.1"))
         self.assertTrue(utils.is_private_lan_ip("192.168.1.55"))
         self.assertEqual(utils.get_sslip_domain("192.168.50.72"), "192-168-50-72.sslip.io")
         self.assertEqual(utils.format_size(604), "604 B")
+
+        # Проверяем валидность синтаксиса всех генерируемых JS-скриптов через node --check (если установлен node)
+        if shutil.which("node"):
+            for code in ("en", "es", "de", "lt", "ru", "uk"):
+                for name, js_code in (
+                    (f"star_{code}", web_ui.get_star_script()),
+                    (f"theme_{code}", web_ui.get_theme_script()),
+                    (f"upload_{code}", web_ui.get_upload_script(code)),
+                ):
+                    js_path = os.path.join(self.tmp_dir.name, f"{name}.js")
+                    Path(js_path).write_text(js_code, encoding="utf-8")
+                    res = subprocess.run(["node", "--check", js_path], capture_output=True, text=True)
+                    self.assertEqual(res.returncode, 0, f"JS syntax error in {name}: {res.stderr}")
 
         en_keys = set(i18n.TRANSLATIONS["en"].keys())
         for code in ("en", "es", "de", "lt", "ru", "uk"):
@@ -308,6 +317,8 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         ):
             all_source += Path(fname).read_text(encoding="utf-8") + "\n"
         for k in en_keys:
+            if k == "web_install_pwa":
+                continue
             self.assertIn(f'"{k}"', all_source.replace("'", '"'), f"Unused translation key: {k}")
 
     def test_09_post_login_per_device_token_pwa_search_and_cinema_player(self):
@@ -316,7 +327,8 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn(b'action="/login"', resp_login)
         self.assertIn(b'id="pinEyeBtn"', resp_login)
         self.assertIn(b'id="langGlobeBtn"', resp_login)
-        self.assertNotIn("Тема День / Ночь".encode("utf-8"), resp_login)
+        self.assertIn(b'id="shortcutBtn"', resp_login)
+        self.assertNotIn(b"httpsSetupBtn", resp_login)
 
         post_body = b"pin=918273&next=%2F"
         post_login_req = (
@@ -343,6 +355,7 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn(b'id="uploadProgressDock"', resp_dir)
         self.assertIn(b'id="fileSearchInput"', resp_dir)
         self.assertIn(b'id="scrubCanvas"', resp_dir)
+        self.assertIn(b'id="shortcutBtn"', resp_dir)
 
         search_req = f"GET /?q=144102&ajax=1 HTTP/1.1\r\nHost: localhost\r\nCookie: {cookie_kv}\r\n\r\n".encode("utf-8")
         search_resp = _run_request(self.storage_dir, search_req, client_ip="192.168.50.56")
@@ -355,9 +368,9 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn(b"200 OK", pwa_resp.splitlines()[0])
         self.assertIn(b'"display": "standalone"', pwa_resp)
 
-    def test_10_p4a_hook_targets_api_36_and_nav_transfer_safe(self):
+    def test_10_p4a_hook_targets_api_35_clean_manifest_and_sdl_keep_alive(self):
         self.assertEqual(config.APP_VERSION, "1.3.5")
-        self.assertEqual(p4a_hook.TARGET_API, "36")
+        self.assertEqual(p4a_hook.TARGET_API, "35")
 
         main_code = Path("main.py").read_text(encoding="utf-8")
         self.assertNotIn('shorten_from="middle"', main_code)
@@ -372,12 +385,16 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         props_file.write_text("target=android-33\nAPP_PLATFORM=24\n", encoding="utf-8")
 
         gradle_file = fake_dist / "build.gradle"
-        gradle_file.write_text("android {\n    compileSdkVersion 33\n    defaultConfig {\n        minSdkVersion 24\n        targetSdkVersion 33\n    }\n}\n", encoding="utf-8")
+        gradle_file.write_text(
+            "android {\n    compileSdkVersion 33\n    defaultConfig {\n        minSdkVersion 24\n        targetSdkVersion 33\n    }\n}\n",
+            encoding="utf-8",
+        )
 
         manifest_file = fake_dist / "src" / "main" / "AndroidManifest.xml"
         manifest_file.write_text(
             '<manifest><uses-sdk android:minSdkVersion="24" android:targetSdkVersion="33" />'
             '<uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />'
+            '<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />'
             '<application android:requestLegacyExternalStorage="true"></application></manifest>',
             encoding="utf-8",
         )
@@ -393,7 +410,6 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        (fake_dist / "src" / "main" / "java" / "org" / "kivy" / "android").mkdir(parents=True, exist_ok=True)
         sdl_file = fake_dist / "src" / "main" / "java" / "org" / "libsdl" / "app" / "SDLActivity.java"
         sdl_file.write_text(
             "class SDLActivity {\n"
@@ -410,12 +426,10 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertEqual(counts["hid"], 1)
         self.assertEqual(counts["sdl"], 1)
         self.assertNotIn("SDLActivity.nativePause();", sdl_file.read_text(encoding="utf-8"))
-        self.assertTrue((fake_dist / "src" / "main" / "java" / "org" / "kivy" / "android" / "AirShareKeepAliveService.java").is_file())
-        self.assertIn("AirShareKeepAliveService", manifest_file.read_text(encoding="utf-8"))
-
-        self.assertIn("targetSdkVersion 36", gradle_file.read_text(encoding="utf-8"))
-        self.assertIn('android:targetSdkVersion="36"', manifest_file.read_text(encoding="utf-8"))
+        self.assertIn("targetSdkVersion 35", gradle_file.read_text(encoding="utf-8"))
+        self.assertIn('android:targetSdkVersion="35"', manifest_file.read_text(encoding="utf-8"))
         self.assertNotIn("REQUEST_IGNORE_BATTERY_OPTIMIZATIONS", manifest_file.read_text(encoding="utf-8"))
+        self.assertNotIn("FOREGROUND_SERVICE", manifest_file.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

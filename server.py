@@ -25,7 +25,6 @@ from config import (
     MAX_CONCURRENT_CONNECTIONS,
     MAX_DIR_ITEMS_PER_PAGE,
     MAX_UPLOAD_SIZE,
-    RATE_LIMIT_BLOCK_SECONDS,
     SOCKET_TIMEOUT_SECONDS,
     STORAGE_PATH,
 )
@@ -47,7 +46,6 @@ from security import (
     register_auth_failure,
     verify_sha256_digest,
 )
-from tls_cert import build_windows_https_installer_bat, ensure_tls_context
 from utils import add_recent_ip, format_size, get_local_ip, load_settings
 from web_ui import (
     get_css,
@@ -111,12 +109,6 @@ class ReusableThreadingServer(ThreadingHTTPServer):
                 request.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, SOCKET_SEND_BUFFER)
                 request.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, SOCKET_SEND_BUFFER)
                 request.settimeout(SOCKET_TIMEOUT_SECONDS)
-                first_byte = request.recv(1, socket.MSG_PEEK)
-                if first_byte == b"\x16":
-                    srv_ip = self.server_address[0] if self.server_address else get_local_ip()
-                    ssl_ctx, _ = ensure_tls_context(srv_ip)
-                    if ssl_ctx is not None:
-                        request = ssl_ctx.wrap_socket(request, server_side=True)
             except Exception:
                 pass
             self.process_request_thread(request, client_address)
@@ -149,400 +141,450 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         self.real_storage = os.path.realpath(STORAGE_PATH)
         super().__init__(*args, directory=self.real_storage, **kwargs)
 
-    def _get_cb(self, name):
-        for cls in type(self).__mro__:
-            if name in cls.__dict__:
-                val = cls.__dict__[name]
-                if isinstance(val, staticmethod):
-                    return val.__func__
-                return val
-        return None
-
-    def end_headers(self):
-        if getattr(self, "_pending_auth_cookie", None):
-            self.send_header(
-                "Set-Cookie",
-                f"airshare_auth={self._pending_auth_cookie}; Path=/; Max-Age=86400; HttpOnly; SameSite=Lax",
-            )
-            self._pending_auth_cookie = None
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Referrer-Policy", "no-referrer")
-        super().end_headers()
-
     @classmethod
     def reset_rate_limits(cls):
         with cls._auth_lock:
             cls._failed_attempts.clear()
             cls._device_sessions.clear()
+            cls._session_secret = secrets.token_hex(16)
 
     @classmethod
-    def set_ip_disconnected(cls, ip_str, disconnected=True):
-        clean_ip = str(ip_str).strip()
+    def reset_auth_sessions(cls, new_password=""):
+        with cls._auth_lock:
+            cls.current_password = str(new_password or "")
+            cls._session_secret = secrets.token_hex(16)
+            cls._failed_attempts.clear()
+            cls._disconnected_ips.clear()
+            cls._notified_ips.clear()
+            cls._device_sessions.clear()
+
+    @classmethod
+    def set_ip_disconnected(cls, ip, disconnected=True):
+        if not ip:
+            return
         with cls._auth_lock:
             if disconnected:
-                cls._disconnected_ips.add(clean_ip)
-                stale_tokens = [t for t, meta in cls._device_sessions.items() if meta.get("ip") == clean_ip]
-                for t in stale_tokens:
-                    cls._device_sessions.pop(t, None)
+                cls._disconnected_ips.add(ip)
+                cls._notified_ips.discard(ip)
+                to_remove = [k for k, v in cls._device_sessions.items() if v.get("ip") == ip]
+                for k in to_remove:
+                    cls._device_sessions.pop(k, None)
             else:
-                cls._disconnected_ips.discard(clean_ip)
+                cls._disconnected_ips.discard(ip)
 
     @classmethod
-    def is_ip_disconnected(cls, ip_str):
+    def is_ip_disconnected(cls, ip) -> bool:
         with cls._auth_lock:
-            return str(ip_str).strip() in cls._disconnected_ips
+            return ip in cls._disconnected_ips
 
     @classmethod
-    def _create_device_session(cls, client_ip, expected_pwd):
-        return create_device_session_token(
-            cls._session_secret,
-            cls._device_sessions,
-            cls._auth_lock,
-            client_ip,
-            expected_pwd,
+    def disconnect_client_ip(cls, ip):
+        cls.set_ip_disconnected(ip, True)
+
+    @classmethod
+    def reconnect_client_ip(cls, ip):
+        cls.set_ip_disconnected(ip, False)
+
+    @classmethod
+    def is_client_disconnected(cls, ip) -> bool:
+        return cls.is_ip_disconnected(ip)
+
+    def _is_within_storage(self, target_path: str) -> bool:
+        return is_within_storage(self.real_storage, target_path)
+
+    def translate_path(self, path):
+        raw_path = super().translate_path(path)
+        resolved = os.path.realpath(raw_path)
+        if not self._is_within_storage(resolved):
+            logger.warning("Заблокирована попытка обхода директории: %s -> %s", path, resolved)
+            return self.real_storage
+        return resolved
+
+    def end_headers(self):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "SAMEORIGIN")
+        self.send_header("Referrer-Policy", "no-referrer")
+        if self._pending_auth_cookie:
+            self.send_header("Set-Cookie", self._pending_auth_cookie)
+            self._pending_auth_cookie = None
+        super().end_headers()
+
+    def _get_client_ip(self) -> str:
+        return self.client_address[0] if self.client_address else "unknown"
+
+    def _check_rate_limit(self):
+        is_blocked, retry_after = check_ip_rate_limit(
+            self._get_client_ip(), self._failed_attempts, self._auth_lock
         )
+        return (not is_blocked), retry_after
 
-    def _get_client_ip(self):
-        if self.client_address and len(self.client_address) > 0:
-            return str(self.client_address[0])
-        return "127.0.0.1"
-
-    def _is_ip_blocked(self, client_ip):
-        return check_ip_rate_limit(client_ip, self._failed_attempts, self._auth_lock)
-
-    def _record_auth_failure(self, client_ip):
-        register_auth_failure(client_ip, self._failed_attempts, self._auth_lock)
-        cb = self._get_cb("on_bad_pin_attempt")
-        if callable(cb):
+    def _register_auth_failure(self):
+        ip = self._get_client_ip()
+        register_auth_failure(ip, self._failed_attempts, self._auth_lock)
+        cb = getattr(type(self), "on_bad_pin_attempt", None)
+        if cb:
             try:
-                cb(client_ip)
+                cb(ip)
             except Exception as exc:
-                logger.debug("Ошибка уведомления UI о неверном PIN: %s", exc)
+                logger.debug("Ошибка колбэка on_bad_pin_attempt: %s", exc)
 
-    def _clear_auth_failures(self, client_ip):
+    def _clear_auth_failures(self):
+        ip = self._get_client_ip()
         with self._auth_lock:
-            self._failed_attempts.pop(client_ip, None)
+            self._failed_attempts.pop(ip, None)
 
-    def _ensure_password_loaded(self):
-        pwd = str(self.current_password or "").strip()
+    def _ensure_password_loaded(self) -> str:
+        with self._auth_lock:
+            pwd = self.current_password
         if not pwd:
-            pwd = str(load_settings().get("password", "")).strip()
-            AirShareHandler.current_password = pwd
+            pwd = str(load_settings().get("password", "") or "")
+            with self._auth_lock:
+                if not self.current_password and pwd:
+                    self.__class__.current_password = pwd
         return pwd
 
-    def _evaluate_auth(self):
-        expected_pwd = self._ensure_password_loaded()
-        client_ip = self._get_client_ip()
+    def _issue_session_cookie_str(self) -> str:
+        pwd = self._ensure_password_loaded()
+        ip = self._get_client_ip()
+        token = create_device_session_token(
+            self._session_secret,
+            self._device_sessions,
+            self._auth_lock,
+            ip,
+            pwd,
+        )
+        return f"airshare_auth={token}; HttpOnly; Path=/; SameSite=Lax"
+
+    def _is_authenticated_request(self) -> bool:
+        pwd = self._ensure_password_loaded()
+        ip = self._get_client_ip()
+        cookie_hdr = self.headers.get("Cookie", "")
+        if cookie_hdr:
+            try:
+                jar = cookies.SimpleCookie()
+                jar.load(cookie_hdr)
+                for cname in ("airshare_auth", "airshare_session"):
+                    if cname in jar:
+                        tok = jar[cname].value
+                        if is_valid_session_cookie(
+                            tok,
+                            ip,
+                            pwd,
+                            self._session_secret,
+                            self._device_sessions,
+                            self._auth_lock,
+                        ):
+                            return True
+            except cookies.CookieError:
+                pass
+
+        auth_header = self.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Basic "):
+            try:
+                encoded = auth_header.split(" ", 1)[1].strip()
+                decoded = base64.b64decode(encoded).decode("utf-8", errors="ignore")
+                _, _, provided_pwd = decoded.partition(":")
+                if hmac.compare_digest(provided_pwd, pwd):
+                    self._pending_auth_cookie = self._issue_session_cookie_str()
+                    return True
+            except Exception as exc:
+                logger.debug("Ошибка разбора Basic-авторизации: %s", exc)
+            self._register_auth_failure()
+        return False
+
+    def _get_request_theme(self, params=None) -> str:
+        if params is None:
+            parsed = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed.query)
+        url_theme = params.get("theme", [None])[0]
+        if url_theme in ("light", "dark"):
+            return url_theme
+        cookie_hdr = self.headers.get("Cookie", "")
+        if cookie_hdr:
+            try:
+                jar = cookies.SimpleCookie()
+                jar.load(cookie_hdr)
+                if "airshare_theme" in jar:
+                    c_theme = jar["airshare_theme"].value
+                    if c_theme in ("light", "dark"):
+                        return c_theme
+            except cookies.CookieError:
+                pass
+        return self.default_theme if self.default_theme in ("light", "dark") else "dark"
+
+    def _get_request_lang(self, params=None) -> str:
+        if params is None:
+            parsed = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed.query)
+        url_lang = params.get("lang", [None])[0]
+        if url_lang and url_lang.lower() in SUPPORTED_CODES:
+            return url_lang.lower()
+        cookie_hdr = self.headers.get("Cookie", "")
+        if cookie_hdr:
+            try:
+                jar = cookies.SimpleCookie()
+                jar.load(cookie_hdr)
+                if "airshare_lang" in jar:
+                    c_lang = jar["airshare_lang"].value.lower()
+                    if c_lang in SUPPORTED_CODES:
+                        return c_lang
+            except cookies.CookieError:
+                pass
+        accept_lang = self.headers.get("Accept-Language", "")
+        if accept_lang:
+            for part in accept_lang.split(","):
+                code = part.split(";")[0].strip().lower()[:2]
+                if code in SUPPORTED_CODES:
+                    return code
+        return self.current_language if self.current_language in SUPPORTED_CODES else "en"
+
+    def _send_html_page(self, status_code: int, html_str: str, extra_headers=None):
+        body = html_str.encode("utf-8")
+        self.send_response(status_code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        if extra_headers:
+            for k, v in extra_headers.items():
+                self.send_header(k, v)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def check_auth_or_respond(self) -> bool:
+        ip = self._get_client_ip()
+        theme = self._get_request_theme()
+        lang = self._get_request_lang()
+
+        if self.is_ip_disconnected(ip):
+            msg = tr("web_dev_blocked", lang)
+            self._send_html_page(403, get_pin_login_page(theme=theme, lang=lang, error_msg=msg, next_path=self.path))
+            return False
+
+        allowed, retry_after = self._check_rate_limit()
+        if not allowed:
+            msg = tr("web_rate_limit", lang, sec=retry_after)
+            self._send_html_page(
+                429,
+                get_pin_login_page(theme=theme, lang=lang, error_msg=msg, next_path=self.path),
+                extra_headers={"Retry-After": str(retry_after)},
+            )
+            return False
 
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
         if "pin" in params and params["pin"]:
-            cand_pin = str(params["pin"][0]).strip()
-            if hmac.compare_digest(cand_pin.encode("utf-8"), expected_pwd.encode("utf-8")):
-                return "ok_pin_query"
-            return "fail_attempt"
+            provided_pin = params["pin"][0].strip()
+            pwd = self._ensure_password_loaded()
+            if hmac.compare_digest(provided_pin, pwd):
+                self._clear_auth_failures()
+                clean_query = urllib.parse.urlencode(
+                    {k: v for k, v in params.items() if k != "pin"}, doseq=True
+                )
+                redirect_target = parsed.path or "/"
+                if clean_query:
+                    redirect_target = f"{redirect_target}?{clean_query}"
+                self.send_response(303)
+                self.send_header("Location", redirect_target)
+                self.send_header("Set-Cookie", self._issue_session_cookie_str())
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return False
+            self._register_auth_failure()
+            allowed_after, retry_after_pin = self._check_rate_limit()
+            if not allowed_after:
+                msg = tr("web_rate_limit", lang, sec=retry_after_pin)
+                self._send_html_page(
+                    429,
+                    get_pin_login_page(theme=theme, lang=lang, error_msg=msg, next_path=self.path),
+                    extra_headers={"Retry-After": str(retry_after_pin)},
+                )
+                return False
 
-        cookie_hdr = self.headers.get("Cookie", "")
-        if cookie_hdr:
-            try:
-                c = cookies.SimpleCookie()
-                c.load(cookie_hdr)
-                if "airshare_auth" in c:
-                    tok = c["airshare_auth"].value.strip()
-                    if is_valid_session_cookie(
-                        tok,
-                        client_ip,
-                        expected_pwd,
-                        self._session_secret,
-                        self._device_sessions,
-                        self._auth_lock,
-                    ):
-                        return "ok"
-            except Exception:
-                pass
-
-        header = self.headers.get("Authorization", "")
-        if header.startswith("Basic "):
-            try:
-                raw = base64.b64decode(header[6:]).decode("utf-8")
-                _user, sep, pwd = raw.partition(":")
-                if sep and hmac.compare_digest(pwd.encode("utf-8"), expected_pwd.encode("utf-8")):
-                    return "ok"
-            except Exception as exc:
-                logger.warning("Ошибка разбора заголовка Authorization: %s", exc)
-            return "fail_attempt"
-
-        return "no_creds"
-
-    def is_authenticated(self):
-        return self._evaluate_auth() in ("ok", "ok_pin_query")
-
-    def check_auth_or_respond(self):
-        client_ip = self._get_client_ip()
-        parsed = urllib.parse.urlparse(self.path)
-        params = urllib.parse.parse_qs(parsed.query)
-        req_lang = self._get_request_lang(params)
-
-        if self.is_ip_disconnected(client_ip):
-            body = f"<h3>{html.escape(tr('web_dev_blocked', req_lang))}</h3>".encode("utf-8")
-            self.send_response(403, "Forbidden")
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return False
-
-        blocked, retry_after = self._is_ip_blocked(client_ip)
-        if blocked:
-            self.send_rate_limit_response(retry_after, lang=req_lang)
-            return False
-
-        status = self._evaluate_auth()
-        if status == "ok_pin_query":
-            self._clear_auth_failures(client_ip)
-            expected_pwd = self._ensure_password_loaded()
-            tok = self._create_device_session(client_ip, expected_pwd)
-            params.pop("pin", None)
-            clean_query = urllib.parse.urlencode(params, doseq=True)
-            clean_url = parsed.path or "/"
-            if clean_query:
-                clean_url = f"{clean_url}?{clean_query}"
-
-            if any(k in params for k in ("download", "zip", "download_selected", "files", "upload", "hash")):
-                self._pending_auth_cookie = tok
-                return True
-
-            self._parse_client_device()
-            self.send_response(302, "Found")
-            self.send_header(
-                "Set-Cookie", f"airshare_auth={tok}; Path=/; Max-Age=86400; HttpOnly; SameSite=Lax"
-            )
-            self.send_header("Location", clean_url)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-            return False
-
-        if status == "ok":
-            self._clear_auth_failures(client_ip)
+        if self._is_authenticated_request():
+            self._clear_auth_failures()
             return True
 
-        if status == "fail_attempt":
-            self._record_auth_failure(client_ip)
-            blocked_now, retry_after = self._is_ip_blocked(client_ip)
-            if blocked_now:
-                self.send_rate_limit_response(retry_after, lang=req_lang)
-            else:
-                self.request_auth(is_failed=True)
+        allowed_now, retry_now = self._check_rate_limit()
+        if not allowed_now:
+            msg = tr("web_rate_limit", lang, sec=retry_now)
+            self._send_html_page(
+                429,
+                get_pin_login_page(theme=theme, lang=lang, error_msg=msg, next_path=self.path),
+                extra_headers={"Retry-After": str(retry_now)},
+            )
             return False
 
-        self.request_auth(is_failed=False)
+        extra = {}
+        if "lang" in params and params["lang"]:
+            extra["Set-Cookie"] = f"airshare_lang={lang}; Path=/; Max-Age=31536000; SameSite=Lax"
+        self._send_html_page(
+            401,
+            get_pin_login_page(theme=theme, lang=lang, next_path=self.path),
+            extra_headers=extra,
+        )
         return False
 
-    def _handle_post_login(self):
-        client_ip = self._get_client_ip()
-        parsed = urllib.parse.urlparse(self.path)
-        params = urllib.parse.parse_qs(parsed.query)
-        req_lang = self._get_request_lang(params)
+    def _handle_login_post(self):
+        ip = self._get_client_ip()
+        theme = self._get_request_theme()
+        lang = self._get_request_lang()
 
-        if self.is_ip_disconnected(client_ip):
-            body = f"<h3>{html.escape(tr('web_dev_blocked', req_lang))}</h3>".encode("utf-8")
-            self.send_response(403, "Forbidden")
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+        if self.is_ip_disconnected(ip):
+            msg = tr("web_dev_blocked", lang)
+            self._send_html_page(403, get_pin_login_page(theme=theme, lang=lang, error_msg=msg))
             return
 
-        blocked, retry_after = self._is_ip_blocked(client_ip)
-        if blocked:
-            self.send_rate_limit_response(retry_after, lang=req_lang)
+        allowed, retry_after = self._check_rate_limit()
+        if not allowed:
+            msg = tr("web_rate_limit", lang, sec=retry_after)
+            self._send_html_page(
+                429,
+                get_pin_login_page(theme=theme, lang=lang, error_msg=msg),
+                extra_headers={"Retry-After": str(retry_after)},
+            )
             return
 
         try:
-            length = int(self.headers.get("Content-Length", "0"))
+            length = int(self.headers.get("Content-Length", 0))
         except ValueError:
             length = 0
-        raw_body = self.rfile.read(min(length, 4096)).decode("utf-8", errors="replace") if length > 0 else ""
-        form_data = urllib.parse.parse_qs(raw_body)
-        cand_pin = str(form_data.get("pin", [""])[0]).strip()
-        next_url = str(form_data.get("next", ["/"])[0]).strip()
-        if not next_url.startswith("/") or next_url.startswith("//") or next_url.startswith("/login"):
-            next_url = "/"
+        raw_body = self.rfile.read(min(length, 4096)).decode("utf-8", errors="ignore")
+        form = urllib.parse.parse_qs(raw_body)
+        provided_pin = (form.get("pin", [""])[0] or "").strip()
+        next_path = form.get("next", ["/"])[0] or "/"
+        if not next_path.startswith("/") or next_path.startswith("//"):
+            next_path = "/"
 
-        expected_pwd = self._ensure_password_loaded()
-        if cand_pin and hmac.compare_digest(cand_pin.encode("utf-8"), expected_pwd.encode("utf-8")):
-            self._clear_auth_failures(client_ip)
-            tok = self._create_device_session(client_ip, expected_pwd)
-            self._parse_client_device()
-            self.send_response(303, "See Other")
-            self.send_header(
-                "Set-Cookie", f"airshare_auth={tok}; Path=/; Max-Age=86400; HttpOnly; SameSite=Lax"
-            )
-            self.send_header("Location", next_url)
+        pwd = self._ensure_password_loaded()
+        if hmac.compare_digest(provided_pin, pwd):
+            self._clear_auth_failures()
+            self.send_response(303)
+            self.send_header("Location", next_path)
+            self.send_header("Set-Cookie", self._issue_session_cookie_str())
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
 
-        self._record_auth_failure(client_ip)
-        blocked_now, retry_after = self._is_ip_blocked(client_ip)
-        if blocked_now:
-            self.send_rate_limit_response(retry_after, lang=req_lang)
-        else:
-            self.request_auth(is_failed=True, next_path=next_url)
-
-    def send_rate_limit_response(self, retry_after=RATE_LIMIT_BLOCK_SECONDS, lang=None):
-        use_lang = lang or self._get_request_lang()
-        msg = tr("web_rate_limit", use_lang, sec=retry_after)
-        body = f"<h3>{html.escape(msg)}</h3>".encode("utf-8")
-        self.send_response(429, "Too Many Requests")
-        self.send_header("Retry-After", str(retry_after))
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def request_auth(self, is_failed=False, next_path=None):
-        parsed = urllib.parse.urlparse(self.path)
-        params = urllib.parse.parse_qs(parsed.query)
-        theme = self._get_request_theme(params)
-        lang = self._get_request_lang(params)
-        err_msg = tr("toast_bad_pin", lang, ip=self._get_client_ip()) if is_failed else ""
-        target_next = next_path or (parsed.path if parsed.path and parsed.path != "/login" else "/")
-        page_html = get_pin_login_page(theme=theme, lang=lang, error_msg=err_msg, next_path=target_next)
-        body = page_html.encode("utf-8")
-        self.send_response(401)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(body)))
-        if "lang" in params and params["lang"]:
-            self.send_header("Set-Cookie", f"airshare_lang={lang}; Path=/; Max-Age=31536000; SameSite=Lax")
-        self.end_headers()
-        self.wfile.write(body)
+        self._register_auth_failure()
+        allowed_now, retry_now = self._check_rate_limit()
+        if not allowed_now:
+            err = tr("web_rate_limit", lang, sec=retry_now)
+            self._send_html_page(
+                429,
+                get_pin_login_page(theme=theme, lang=lang, error_msg=err, next_path=next_path),
+                extra_headers={"Retry-After": str(retry_now)},
+            )
+            return
+        err = tr("pin_hint", lang)
+        self._send_html_page(401, get_pin_login_page(theme=theme, lang=lang, error_msg=err, next_path=next_path))
 
     def _parse_client_device(self, fast_skip_if_known=False):
-        try:
-            client_ip = self._get_client_ip()
-            if client_ip in ("127.0.0.1", "::1"):
-                return
-            if fast_skip_if_known:
-                with self._auth_lock:
-                    if client_ip in self._notified_ips:
-                        return
-            ua = self.headers.get("User-Agent", "")
-            if "Windows NT 10.0" in ua or "Windows NT 11.0" in ua:
-                device_title, os_badge = "Desktop PC", "Windows 11"
-            elif "Windows" in ua:
-                device_title, os_badge = "Desktop PC", "Windows"
-            elif "Macintosh" in ua or "Mac OS X" in ua:
-                device_title, os_badge = "MacBook", "macOS"
-            elif "Android" in ua:
-                device_title, os_badge = "Smartphone", "Android"
-            elif "iPhone" in ua or "iPad" in ua:
-                device_title, os_badge = "iPhone / iPad", "iOS"
-            elif "Linux" in ua:
-                device_title, os_badge = "Desktop PC", "Linux"
-            else:
-                device_title, os_badge = "Connected Device", client_ip
-
-            entry = f"{device_title} ({os_badge}) • {client_ip}"
-            add_recent_ip(entry)
-            is_first_notify = False
+        ip = self.client_address[0]
+        if fast_skip_if_known:
             with self._auth_lock:
-                if client_ip not in self._notified_ips:
-                    self._notified_ips.add(client_ip)
-                    is_first_notify = True
-            cb = self._get_cb("on_client_connected")
-            if callable(cb):
-                cb(device_title, os_badge, client_ip, is_first_notify)
-        except Exception as exc:
-            logger.warning("Не удалось определить устройство клиента: %s", exc)
+                if ip in self._notified_ips:
+                    return
+        ua = self.headers.get("User-Agent", "")
+        os_name = "Unknown OS"
+        if "Windows" in ua:
+            os_name = "Windows PC"
+        elif "Macintosh" in ua or "Mac OS" in ua:
+            os_name = "Mac"
+        elif "Android" in ua:
+            os_name = "Android"
+        elif "iPhone" in ua or "iPad" in ua:
+            os_name = "iOS"
+        elif "Linux" in ua:
+            os_name = "Linux PC"
 
-    def _notify_progress(self, filename, transferred_bytes, total_bytes, direction="upload"):
-        try:
-            cb = self._get_cb("on_transfer_progress")
-            if callable(cb):
-                cb(filename, transferred_bytes, total_bytes, direction)
-        except Exception as exc:
-            logger.debug("Ошибка уведомления UI о прогрессе файла: %s", exc)
+        browser = "Browser"
+        if "Edg/" in ua:
+            browser = "Edge"
+        elif "OPR/" in ua or "Opera" in ua:
+            browser = "Opera"
+        elif "Chrome/" in ua:
+            browser = "Chrome"
+        elif "Firefox/" in ua:
+            browser = "Firefox"
+        elif "Safari/" in ua and "Chrome/" not in ua:
+            browser = "Safari"
 
-    def _notify_transfer(self, filename, size_bytes, direction="done"):
-        try:
-            cb = self._get_cb("on_file_transfer")
-            if callable(cb):
+        device_title = f"{os_name} ({browser})"
+        with self._auth_lock:
+            is_new = ip not in self._notified_ips
+            if is_new:
+                self._notified_ips.add(ip)
+
+        if is_new:
+            add_recent_ip(ip)
+        cb = getattr(type(self), "on_client_connected", None)
+        if cb:
+            try:
+                cb(device_title, os_name, ip, is_first=is_new)
+            except TypeError:
+                cb(ip, device_title)
+
+    def _notify_transfer(self, filename: str, size_bytes: int, direction: str):
+        cb = getattr(type(self), "on_file_transfer", None)
+        if cb:
+            try:
                 cb(filename, format_size(size_bytes), direction)
-        except Exception as exc:
-            logger.warning("Ошибка уведомления UI о передаче файла: %s", exc)
-
-    def _is_within_storage(self, candidate_path):
-        return is_within_storage(self.real_storage, candidate_path)
-
-    def translate_path(self, path):
-        resolved = os.path.realpath(super().translate_path(path))
-        if not self._is_within_storage(resolved):
-            return self.real_storage
-        return resolved
-
-    def _get_request_theme(self, params):
-        if "theme" in params and params["theme"]:
-            t = params["theme"][0].lower()
-            if t in ("light", "dark"):
-                return t
-        cookie_hdr = self.headers.get("Cookie", "")
-        if cookie_hdr:
-            try:
-                c = cookies.SimpleCookie()
-                c.load(cookie_hdr)
-                if "airshare_theme" in c:
-                    val = c["airshare_theme"].value.lower()
-                    if val in ("light", "dark"):
-                        return val
+            except TypeError:
+                cb(filename, size_bytes, direction, self._get_client_ip())
             except Exception as exc:
-                logger.debug("Не удалось разобрать Cookie темы: %s", exc)
-        return self.default_theme if self.default_theme in ("light", "dark") else "dark"
+                logger.debug("Ошибка колбэка on_file_transfer: %s", exc)
 
-    def _get_request_lang(self, params=None):
-        if params and "lang" in params and params["lang"]:
-            cand = str(params["lang"][0]).strip().lower()
-            if cand in SUPPORTED_CODES:
-                return cand
-        cookie_hdr = self.headers.get("Cookie", "")
-        if cookie_hdr:
+    def _notify_progress(self, filename: str, done_bytes: int, total_bytes: int, direction: str):
+        cb = getattr(type(self), "on_transfer_progress", None)
+        if cb:
             try:
-                c = cookies.SimpleCookie()
-                c.load(cookie_hdr)
-                if "airshare_lang" in c:
-                    val = c["airshare_lang"].value.strip().lower()
-                    if val in SUPPORTED_CODES:
-                        return val
+                cb(filename, done_bytes, total_bytes, direction)
+            except TypeError:
+                cb(filename, done_bytes, total_bytes, direction, self._get_client_ip())
             except Exception as exc:
-                logger.debug("Не удалось разобрать Cookie языка: %s", exc)
-        return self.current_language if self.current_language in SUPPORTED_CODES else "en"
+                logger.debug("Ошибка колбэка on_transfer_progress: %s", exc)
 
-    def _serve_file_hash(self, current_url_path, target_name):
+    def _serve_file_hash(self, current_url_path: str, target_name: str):
         rel_dir = urllib.parse.unquote(current_url_path).lstrip("/")
         base_dir = os.path.realpath(os.path.join(self.real_storage, rel_dir))
         clean_target = os.path.basename(target_name)
         target_file = os.path.realpath(os.path.join(base_dir, clean_target))
-
         if not self._is_within_storage(target_file) or not os.path.isfile(target_file):
             self.send_error(404, "File not found")
             return
-
         try:
-            st = os.stat(target_file)
-            digest = compute_cached_file_sha256(target_file, st, self._hash_cache, self._auth_lock)
-            payload = json.dumps(
-                {"filename": clean_target, "sha256": digest, "size": st.st_size},
-                ensure_ascii=False,
-            ).encode("utf-8")
+            st_stat = os.stat(target_file)
+            digest = compute_cached_file_sha256(target_file, st_stat, self._hash_cache, self._auth_lock)
+            body = json.dumps({"name": clean_target, "sha256": digest}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(payload)
-        except OSError as exc:
-            logger.warning("Ошибка вычисления SHA-256 для %s: %s", clean_target, exc)
+            self.wfile.write(body)
+        except OSError:
             self.send_error(500, "Hash error")
+
+    def _serve_shortcut_file(self):
+        srv_ip = get_local_ip()
+        srv_port = (
+            self.server.server_address[1]
+            if getattr(self, "server", None) and getattr(self.server, "server_address", None)
+            else 8080
+        )
+        host_hdr = self.headers.get("Host") or f"{srv_ip}:{srv_port}"
+        target_url = f"http://{host_hdr}/"
+        body = (
+            "[InternetShortcut]\r\n"
+            f"URL={target_url}\r\n"
+            "IconIndex=0\r\n"
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/internet-shortcut")
+        self.send_header("Content-Disposition", make_content_disposition("AirShare PC.url", "attachment"))
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_HEAD(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -562,42 +604,13 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             return
         super().do_HEAD()
 
-    def _serve_https_helper(self, params):
-        srv_ip = get_local_ip()
-        srv_port = self.server.server_address[1] if getattr(self, "server", None) and getattr(self.server, "server_address", None) else 8080
-        _ctx, ca_pem = ensure_tls_context(srv_ip)
-        if not ca_pem:
-            self.send_error(500, "TLS CA unavailable")
-            return True
-        if "ca_cert" in params:
-            body = ca_pem.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/x-x509-ca-cert")
-            self.send_header("Content-Disposition", make_content_disposition("AirShare_Root_CA.crt"))
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return True
-        if "https_setup" in params:
-            pwd = self._ensure_password_loaded()
-            https_url = f"https://{srv_ip}:{srv_port}/?pin={urllib.parse.quote(pwd, safe='')}"
-            body = build_windows_https_installer_bat(ca_pem, https_url)
-            self.send_response(200)
-            self.send_header("Content-Type", "application/octet-stream")
-            self.send_header("Content-Disposition", make_content_disposition("Enable_AirShare_HTTPS.bat"))
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return True
-        return False
-
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         if serve_pwa_asset(self, parsed.path):
             return
         pre_params = urllib.parse.parse_qs(parsed.query)
-        if "https_setup" in pre_params or "ca_cert" in pre_params:
-            self._serve_https_helper(pre_params)
+        if "shortcut" in pre_params:
+            self._serve_shortcut_file()
             return
 
         if not self.check_auth_or_respond():
@@ -619,12 +632,13 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 self._search_cache,
                 self._auth_lock,
             )
-            body = json.dumps({"results": results}, ensure_ascii=False).encode("utf-8")
+            payload = json.dumps({"results": results}, ensure_ascii=False).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
-            self.wfile.write(body)
+            self.wfile.write(payload)
             return
 
         if "download" in params and params["download"]:
@@ -637,12 +651,10 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             self.stream_folder_zip(parsed.path, params["zip"][0])
             return
 
-        if "download_selected" in params or "files" in params:
-            selected = params.get("files", [])
-            if selected:
-                self._parse_client_device(fast_skip_if_known=True)
-                self.download_selected_files(selected)
-                return
+        if "download_selected" in params and "files" in params:
+            self._parse_client_device(fast_skip_if_known=True)
+            self.download_selected_files(params["files"])
+            return
 
         target_path = self.translate_path(parsed.path)
         if os.path.isfile(target_path):
@@ -657,97 +669,85 @@ class AirShareHandler(SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/login":
-            self._handle_post_login()
+            self._handle_login_post()
             return
 
         if not self.check_auth_or_respond():
             return
-
         self._parse_client_device(fast_skip_if_known=True)
+
         params = urllib.parse.parse_qs(parsed.query)
-
-        raw_name = None
+        raw_filename = ""
         if "upload" in params and params["upload"]:
-            raw_name = params["upload"][0]
-        elif self.headers.get("X-File-Name"):
-            raw_name = urllib.parse.unquote(self.headers.get("X-File-Name"))
+            raw_filename = params["upload"][0]
+        elif "X-File-Name" in self.headers:
+            raw_filename = urllib.parse.unquote(self.headers.get("X-File-Name", ""))
 
-        if not raw_name:
-            self.send_error(400, "Missing filename")
-            return
-
-        filename = os.path.basename(raw_name.strip())
+        filename = os.path.basename(raw_filename.strip())
         if not filename or filename in (".", ".."):
             self.send_error(400, "Invalid filename")
             return
 
-        raw_len = self.headers.get("Content-Length")
-        if raw_len is None:
-            self.send_error(411, "Length Required")
-            return
-        try:
-            length = int(raw_len)
-        except ValueError:
-            self.send_error(411, "Length Required")
-            return
-        if length <= 0:
-            self.send_error(411, "Length Required")
-            return
-        if length > MAX_UPLOAD_SIZE:
-            self.send_error(413, "Payload Too Large")
-            return
-
         rel_dir = urllib.parse.unquote(parsed.path).lstrip("/")
         target_dir = os.path.realpath(os.path.join(self.real_storage, rel_dir))
-
         if not self._is_within_storage(target_dir) or not os.path.isdir(target_dir):
-            self.send_error(403, "Forbidden")
+            self.send_error(403, "Forbidden target directory")
             return
 
-        dest_path, final_filename = get_unique_filepath(target_dir, filename)
-        if not self._is_within_storage(dest_path):
-            self.send_error(403, "Forbidden")
-            return
-
-        expected_sha256 = str(self.headers.get("X-Content-SHA256", "")).strip().lower()
-        tmp_name = f".airshare_upload_{secrets.token_hex(6)}.part"
-        tmp_path = os.path.join(target_dir, tmp_name)
         try:
-            bytes_received = 0
-            hasher = hashlib.sha256()
+            length = int(self.headers.get("Content-Length", -1))
+        except ValueError:
+            self.send_error(400, "Invalid Content-Length")
+            return
+
+        if length < 0:
+            self.send_error(411, "Content-Length required")
+            return
+        if length > MAX_UPLOAD_SIZE:
+            self.send_error(413, "File too large")
+            return
+
+        expected_sha256 = (self.headers.get("X-Content-SHA256") or "").strip().lower()
+        dest_path, final_filename = get_unique_filepath(target_dir, filename)
+        tmp_path = os.path.join(target_dir, f".{final_filename}.{threading.get_ident()}.part")
+
+        hasher = hashlib.sha256()
+        try:
+            remaining = length
+            received = 0
             last_prog_ts = 0.0
             with open(tmp_path, "wb") as f:
-                remaining = length
                 while remaining > 0:
-                    chunk = self.rfile.read(min(STREAM_CHUNK_SIZE, remaining))
+                    chunk_size = min(remaining, STREAM_CHUNK_SIZE)
+                    chunk = self.rfile.read(chunk_size)
                     if not chunk:
                         break
                     f.write(chunk)
                     hasher.update(chunk)
-                    bytes_received += len(chunk)
                     remaining -= len(chunk)
+                    received += len(chunk)
                     now_ts = time.monotonic()
                     if now_ts - last_prog_ts >= 0.12 or remaining == 0:
                         last_prog_ts = now_ts
-                        self._notify_progress(final_filename, bytes_received, length, "upload")
-                f.flush()
-                os.fsync(f.fileno())
+                        self._notify_progress(final_filename, received, length, "upload")
 
-            if bytes_received != length:
-                logger.warning(
-                    "Загрузка файла %s прервана (%d из %d байт)", final_filename, bytes_received, length
-                )
+            if remaining != 0:
+                logger.warning("Неполная загрузка файла %s (осталось %d байт)", final_filename, remaining)
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
                 self.send_error(400, "Incomplete upload")
                 return
 
             actual_sha256 = hasher.hexdigest().lower()
-            if not verify_sha256_digest(actual_sha256, expected_sha256):
-                logger.warning(
-                    "Несовпадение SHA-256 для %s: ожидался %s, получен %s",
+            if expected_sha256 and not verify_sha256_digest(actual_sha256, expected_sha256):
+                logger.error(
+                    "Несовпадение SHA-256 при загрузке %s: ожидался %s, получен %s",
                     final_filename,
                     expected_sha256,
                     actual_sha256,
                 )
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
                 self.send_error(422, "SHA-256 mismatch")
                 return
 
@@ -1009,10 +1009,15 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                         if is_temp_part_file(f):
                             continue
                         fp = os.path.join(root, f)
-                        real_fp = os.path.realpath(fp)
-                        if not self._is_within_storage(real_fp) or not os.path.isfile(real_fp):
-                            logger.warning("Пропущен внешний симлинк/файл в папке: %s", fp)
-                            continue
+                        if os.path.islink(fp):
+                            real_fp = os.path.realpath(fp)
+                            if not self._is_within_storage(real_fp) or not os.path.isfile(real_fp):
+                                logger.warning("Пропущен внешний симлинк в папке: %s", fp)
+                                continue
+                        else:
+                            real_fp = os.path.realpath(fp)
+                            if not self._is_within_storage(real_fp) or not os.path.isfile(real_fp):
+                                continue
                         arcname = os.path.relpath(real_fp, self.real_storage).replace("\\", "/")
                         if arcname not in seen_arcnames:
                             seen_arcnames.add(arcname)
@@ -1216,7 +1221,9 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         r.append('</form></div>')
         r.append(get_media_modal_html(lang))
         r.append('<div class="credit-badge">Crafted by JackBrownUA • Powered by Gemini</div>')
-        r.append(f'<script>{get_star_script()}{get_upload_script(lang)}{get_theme_script()}</script>')
+        r.append(f'<script>{get_star_script()}</script>')
+        r.append(f'<script>{get_upload_script(lang)}</script>')
+        r.append(f'<script>{get_theme_script()}</script>')
         r.append('</body></html>')
 
         encoded = "\n".join(r).encode("utf-8")
@@ -1230,3 +1237,13 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             self.send_header("Set-Cookie", f"airshare_lang={lang}; Path=/; Max-Age=31536000; SameSite=Lax")
         self.end_headers()
         return BytesIO(encoded)
+
+
+def run_server(port=8080, password="", theme="dark", lang="en"):
+    os.makedirs(STORAGE_PATH, exist_ok=True)
+    AirShareHandler.default_theme = theme if theme in ("light", "dark") else "dark"
+    AirShareHandler.current_language = lang if lang in SUPPORTED_CODES else "en"
+    AirShareHandler.reset_auth_sessions(password)
+    server = ReusableThreadingServer(("0.0.0.0", port), AirShareHandler)
+    logger.info("Сервер AirShare запущен на порту %d (папка: %s)", port, STORAGE_PATH)
+    return server

@@ -1,102 +1,144 @@
-# Веб-интерфейс AirShare PC (v1.3.5): вёрстка страницы, звёздное небо с метеорами и 3D-параллаксом, тумблеры, выбор языка и отправка файлов через XMLHttpRequest
+# Модуль генерации HTML, CSS и клиентского JavaScript веб-интерфейса для AirShare PC (v1.3.5)
 
 import html
 import json
+
 from i18n import SUPPORTED_LANGUAGES, tr
 from player_ui import get_media_modal_html, get_player_css, get_player_script
 from pwa_search import get_search_and_pwa_script
 from security import get_sha256_js
 
-__all__ = [
-    "get_css",
-    "get_download_svg",
-    "get_media_modal_html",
-    "get_pin_login_page",
-    "get_star_script",
-    "get_theme_script",
-    "get_top_controls_html",
-    "get_upload_script",
-]
+SHORTCUT_LABELS = {
+    "ru": (
+        "📲 Ярлык на экран",
+        "Создать ярлык быстрого запуска AirShare PC",
+        "✨ Ярлык «AirShare PC.url» скачан — перетащите его на Рабочий стол!",
+        "📲 Откройте меню браузера (⋮ или «Поделиться») → «Добавить на главный экран»",
+    ),
+    "uk": (
+        "📲 Ярлик на екран",
+        "Створити ярлик швидкого запуску AirShare PC",
+        "✨ Ярлик «AirShare PC.url» завантажено — перетягніть його на Робочий стіл!",
+        "📲 Відкрийте меню браузера (⋮ або «Поділитися») → «Додати на головний екран»",
+    ),
+    "en": (
+        "📲 Add Shortcut",
+        "Create quick-launch shortcut for AirShare PC",
+        "✨ Shortcut 'AirShare PC.url' downloaded — drag it to your Desktop!",
+        "📲 Open browser menu (⋮ or Share) → 'Add to Home screen'",
+    ),
+    "es": (
+        "📲 Crear acceso",
+        "Crear acceso directo de AirShare PC",
+        "✨ Acceso 'AirShare PC.url' descargado — ¡arrástralo a tu Escritorio!",
+        "📲 Abre el menú del navegador (⋮ o Compartir) → 'Añadir a pantalla de inicio'",
+    ),
+    "de": (
+        "📲 Verknüpfung",
+        "Schnellstart-Verknüpfung für AirShare PC erstellen",
+        "✨ Verknüpfung 'AirShare PC.url' geladen — auf den Desktop ziehen!",
+        "📲 Browsermenü öffnen (⋮ oder Teilen) → 'Zum Startbildschirm hinzufügen'",
+    ),
+    "lt": (
+        "📲 Nuoroda ekrane",
+        "Sukurti greito paleidimo nuorodą AirShare PC",
+        "✨ Nuoroda „AirShare PC.url“ atsisiųsta — perkelkite ją į Darbalaukį!",
+        "📲 Atidarykite naršyklės meniu (⋮) → „Pridėti prie pagrindinio ekrano“",
+    ),
+}
 
 
-def get_flag_svg(code="en"):
-    if code == "uk":
-        return (
-            '<svg class="lang-flag" viewBox="0 0 28 20">'
-            '<rect width="28" height="10" y="0" fill="#005BBB"/>'
-            '<rect width="28" height="10" y="10" fill="#FFD500"/>'
-            '</svg>'
-        )
+def get_flag_svg(code: str) -> str:
+    code = (code or "en").lower()
     if code == "ru":
         return (
-            '<svg class="lang-flag" viewBox="0 0 28 20">'
-            '<rect width="28" height="6.67" y="0" fill="#F8FAFC"/>'
-            '<rect width="28" height="6.67" y="6.67" fill="#0039A6"/>'
-            '<rect width="28" height="6.67" y="13.33" fill="#D52B1E"/>'
+            '<svg class="flag-svg" viewBox="0 0 24 18">'
+            '<rect width="24" height="6" y="0" fill="#ffffff"/>'
+            '<rect width="24" height="6" y="6" fill="#0039a6"/>'
+            '<rect width="24" height="6" y="12" fill="#d52b1e"/>'
             '</svg>'
         )
-    if code == "lt":
+    if code == "uk":
         return (
-            '<svg class="lang-flag" viewBox="0 0 28 20">'
-            '<rect width="28" height="6.67" y="0" fill="#FDB913"/>'
-            '<rect width="28" height="6.67" y="6.67" fill="#006A44"/>'
-            '<rect width="28" height="6.67" y="13.33" fill="#C1272D"/>'
+            '<svg class="flag-svg" viewBox="0 0 24 18">'
+            '<rect width="24" height="9" y="0" fill="#005bbb"/>'
+            '<rect width="24" height="9" y="9" fill="#ffd500"/>'
             '</svg>'
         )
     if code == "de":
         return (
-            '<svg class="lang-flag" viewBox="0 0 28 20">'
-            '<rect width="28" height="6.67" y="0" fill="#1A1D21"/>'
-            '<rect width="28" height="6.67" y="6.67" fill="#DD0000"/>'
-            '<rect width="28" height="6.67" y="13.33" fill="#FFCE00"/>'
+            '<svg class="flag-svg" viewBox="0 0 24 18">'
+            '<rect width="24" height="6" y="0" fill="#111111"/>'
+            '<rect width="24" height="6" y="6" fill="#dd0000"/>'
+            '<rect width="24" height="6" y="12" fill="#ffce00"/>'
             '</svg>'
         )
     if code == "es":
         return (
-            '<svg class="lang-flag" viewBox="0 0 28 20">'
-            '<rect width="28" height="5" y="0" fill="#AA151B"/>'
-            '<rect width="28" height="10" y="5" fill="#F1BF00"/>'
-            '<rect width="28" height="5" y="15" fill="#AA151B"/>'
+            '<svg class="flag-svg" viewBox="0 0 24 18">'
+            '<rect width="24" height="4.5" y="0" fill="#aa151b"/>'
+            '<rect width="24" height="9" y="4.5" fill="#f1bf00"/>'
+            '<rect width="24" height="4.5" y="13.5" fill="#aa151b"/>'
+            '</svg>'
+        )
+    if code == "lt":
+        return (
+            '<svg class="flag-svg" viewBox="0 0 24 18">'
+            '<rect width="24" height="6" y="0" fill="#fdb913"/>'
+            '<rect width="24" height="6" y="6" fill="#006a44"/>'
+            '<rect width="24" height="6" y="12" fill="#c1272d"/>'
             '</svg>'
         )
     return (
-        '<svg class="lang-flag" viewBox="0 0 28 20">'
-        '<rect width="28" height="20" fill="#0A2975"/>'
-        '<path d="M0,0 L28,20 M28,0 L0,20" stroke="#F8FAFC" stroke-width="3.2"/>'
-        '<rect width="28" height="5.6" y="7.2" fill="#F8FAFC"/>'
-        '<rect width="5.6" height="20" x="11.2" fill="#F8FAFC"/>'
-        '<rect width="28" height="3.2" y="8.4" fill="#D1192A"/>'
-        '<rect width="3.2" height="20" x="12.4" fill="#D1192A"/>'
+        '<svg class="flag-svg" viewBox="0 0 24 18">'
+        '<rect width="24" height="18" fill="#012169"/>'
+        '<path d="M0,0 L24,18 M24,0 L0,18" stroke="#ffffff" stroke-width="3.2"/>'
+        '<path d="M0,0 L24,18 M24,0 L0,18" stroke="#c8102e" stroke-width="1.6"/>'
+        '<path d="M12,0 V18 M0,9 H24" stroke="#ffffff" stroke-width="5.2"/>'
+        '<path d="M12,0 V18 M0,9 H24" stroke="#c8102e" stroke-width="3"/>'
         '</svg>'
     )
 
 
-def get_globe_svg():
+def get_globe_svg() -> str:
     return (
         '<svg class="globe-svg" viewBox="0 0 24 24">'
         '<circle cx="12" cy="12" r="9"/>'
-        '<path d="M3.6 9h16.8M3.6 15h16.8"/>'
-        '<path d="M11.5 3a17 17 0 0 0 0 18M12.5 3a17 17 0 0 1 0 18"/>'
+        '<ellipse cx="12" cy="12" rx="4.2" ry="9"/>'
+        '<line x1="3.4" y1="9" x2="20.6" y2="9"/>'
+        '<line x1="3.4" y1="15" x2="20.6" y2="15"/>'
         '</svg>'
     )
 
 
 def get_css(theme="dark"):
-    scheme = "light" if theme == "light" else "dark"
+    is_light = theme == "light"
+    bg_init = "#f0f4fa" if is_light else "#040508"
+    fg_init = "#0f172a" if is_light else "#f8fafc"
+
     base_css = f"""
-    :root {{ color-scheme: {scheme}; }}
-    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+    * {{
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }}
     body {{
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: {bg_init};
+        color: {fg_init};
+        padding: 20px;
         min-height: 100vh;
         overflow-x: hidden;
-        transition: background 0.55s cubic-bezier(0.22, 1, 0.36, 1), color 0.45s ease;
-        background: radial-gradient(ellipse at 50% 0%, #13192b 0%, #090c15 55%, #040508 100%);
-        color: #eef2ff;
+        position: relative;
+        transition: background 0.35s ease, color 0.35s ease;
+    }}
+    body.dark {{
+        background: radial-gradient(ellipse at 50% 0%, #101729 0%, #060811 55%, #020306 100%);
+        color: #f8fafc;
     }}
     body.light {{
-        background: linear-gradient(135deg, #dfe9f3 0%, #eef2f7 50%, #d4e4f7 100%);
-        color: #1a202c;
+        background: linear-gradient(145deg, #f4f7fb 0%, #e5edf8 50%, #dbe6f5 100%);
+        color: #0f172a;
     }}
     #skyCanvas {{
         position: fixed;
@@ -106,32 +148,29 @@ def get_css(theme="dark"):
         height: 100vh;
         z-index: 0;
         pointer-events: none;
-        transition: opacity 0.55s ease;
-        opacity: 1;
+        transition: opacity 0.45s ease;
     }}
     body.light #skyCanvas {{
         opacity: 0;
     }}
-    @media (prefers-reduced-motion: reduce) {{
-        body, .ctrl-pill, .switch-slider, .upload-btn, .download-btn, .thumb-box, .lang-dropdown {{
-            transition: none !important;
-        }}
+    body.dark #skyCanvas {{
+        opacity: 1;
     }}
     .top-controls {{
         position: fixed;
-        top: 18px;
-        left: 20px;
-        z-index: 30;
+        top: 14px;
+        left: 16px;
+        z-index: 20;
         display: flex;
         align-items: center;
-        gap: 12px;
+        gap: 10px;
         flex-wrap: wrap;
     }}
     .top-right-controls {{
         position: fixed;
-        top: 18px;
-        right: 20px;
-        z-index: 30;
+        top: 14px;
+        right: 16px;
+        z-index: 25;
         display: flex;
         align-items: center;
         gap: 10px;
@@ -139,193 +178,220 @@ def get_css(theme="dark"):
     .ctrl-pill {{
         display: inline-flex;
         align-items: center;
-        gap: 10px;
-        padding: 8px 14px;
-        border-radius: 30px;
-        background: rgba(20, 26, 42, 0.72);
-        border: 1px solid rgba(255, 255, 255, 0.16);
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), inset 0 1px 1px rgba(255, 255, 255, 0.18);
+        gap: 8px;
+        padding: 7px 13px;
+        border-radius: 24px;
+        background: rgba(20, 25, 40, 0.72);
+        border: 1px solid rgba(255, 255, 255, 0.14);
         backdrop-filter: blur(14px);
         -webkit-backdrop-filter: blur(14px);
-        font-size: 13.5px;
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.15);
+        color: #e2e8f0;
+        font-size: 13px;
         font-weight: 500;
-        color: #f1f5f9;
         user-select: none;
-        transition: background 0.4s ease, border-color 0.4s ease, color 0.4s ease, box-shadow 0.4s ease;
+        transition: transform 0.2s ease, background 0.3s ease, border-color 0.3s ease, color 0.3s ease, box-shadow 0.25s ease;
+    }}
+    .ctrl-pill:hover {{
+        transform: translateY(-1px);
+        border-color: rgba(96, 165, 250, 0.45);
     }}
     body.light .ctrl-pill {{
-        background: rgba(255, 255, 255, 0.82);
+        background: rgba(255, 255, 255, 0.85);
         border: 1px solid rgba(15, 23, 42, 0.12);
+        box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.9);
         color: #1e293b;
-        box-shadow: 0 6px 20px rgba(30, 41, 59, 0.10), inset 0 1px 1px rgba(255, 255, 255, 0.9);
     }}
-    .pwa-install-btn {{
-        display: none;
+    .shortcut-pill-btn {{
         cursor: pointer;
         border-color: rgba(56, 217, 169, 0.45);
-        font-family: inherit;
     }}
-    .pwa-install-btn:hover {{
+    .shortcut-pill-btn:hover {{
         border-color: rgba(56, 217, 169, 0.85);
-        box-shadow: 0 8px 24px rgba(32, 201, 151, 0.35);
+        box-shadow: 0 8px 24px rgba(32, 201, 151, 0.32);
+    }}
+    .shortcut-toast {{
+        position: fixed;
+        top: 66px;
+        right: 16px;
+        z-index: 120;
+        max-width: 360px;
+        padding: 12px 16px;
+        border-radius: 16px;
+        background: rgba(15, 23, 42, 0.94);
+        border: 1px solid rgba(56, 217, 169, 0.55);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
+        color: #f8fafc;
+        font-size: 13.5px;
+        line-height: 1.45;
+        opacity: 0;
+        transform: translateY(-8px);
+        pointer-events: none;
+        transition: opacity 0.25s ease, transform 0.25s ease;
+    }}
+    .shortcut-toast.visible {{
+        opacity: 1;
+        transform: translateY(0);
+    }}
+    body.light .shortcut-toast {{
+        background: rgba(255, 255, 255, 0.96);
+        border-color: rgba(16, 185, 129, 0.55);
+        color: #0f172a;
+        box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
     }}
     .lang-menu-wrap {{
         position: relative;
-        display: inline-flex;
+        display: inline-block;
     }}
     .lang-btn {{
         cursor: pointer;
-        padding: 8px 13px;
-        gap: 7px;
-        font-family: inherit;
-        outline: none;
-    }}
-    .lang-btn:hover {{
-        border-color: rgba(96, 165, 250, 0.55);
-        box-shadow: 0 8px 26px rgba(59, 130, 246, 0.28), inset 0 1px 1px rgba(255, 255, 255, 0.28);
+        padding: 6px 11px;
+        gap: 6px;
     }}
     .globe-svg {{
-        width: 19px;
-        height: 19px;
+        width: 17px;
+        height: 17px;
         stroke: #60a5fa;
         stroke-width: 1.9;
         fill: none;
         stroke-linecap: round;
         stroke-linejoin: round;
         flex-shrink: 0;
-        transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), stroke 0.3s ease;
+        transition: transform 0.25s ease, stroke 0.25s ease;
+    }}
+    .lang-btn:hover .globe-svg {{
+        transform: rotate(15deg) scale(1.06);
+        stroke: #93c5fd;
     }}
     body.light .globe-svg {{
         stroke: #2563eb;
     }}
-    .lang-btn:hover .globe-svg,
-    .lang-menu-wrap.open .globe-svg {{
-        transform: rotate(18deg) scale(1.08);
-    }}
     .lang-code-badge {{
-        font-size: 12.5px;
+        font-size: 12px;
         font-weight: 600;
         letter-spacing: 0.4px;
     }}
     .lang-dropdown {{
         position: absolute;
-        top: calc(100% + 10px);
+        top: calc(100% + 8px);
         right: 0;
-        width: 235px;
-        padding: 12px;
-        border-radius: 22px;
-        background: rgba(18, 24, 40, 0.92);
-        border: 1px solid rgba(255, 255, 255, 0.18);
-        box-shadow: 0 18px 46px rgba(0, 0, 0, 0.62), inset 0 1px 1px rgba(255, 255, 255, 0.20);
+        width: 215px;
+        padding: 8px;
+        border-radius: 18px;
+        background: rgba(16, 22, 36, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.16);
         backdrop-filter: blur(20px);
         -webkit-backdrop-filter: blur(20px);
+        box-shadow: 0 18px 42px rgba(0, 0, 0, 0.65), inset 0 1px 1px rgba(255, 255, 255, 0.18);
         opacity: 0;
         visibility: hidden;
         transform: translateY(-8px) scale(0.96);
         transform-origin: top right;
-        transition: opacity 0.22s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), visibility 0.22s ease;
-        z-index: 50;
-    }}
-    body.light .lang-dropdown {{
-        background: rgba(255, 255, 255, 0.95);
-        border: 1px solid rgba(15, 23, 42, 0.12);
-        box-shadow: 0 16px 40px rgba(15, 23, 42, 0.16), inset 0 1px 1px rgba(255, 255, 255, 0.9);
+        transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), visibility 0.2s;
+        z-index: 100;
     }}
     .lang-menu-wrap.open .lang-dropdown {{
         opacity: 1;
         visibility: visible;
         transform: translateY(0) scale(1);
     }}
+    body.light .lang-dropdown {{
+        background: rgba(255, 255, 255, 0.95);
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        box-shadow: 0 16px 38px rgba(15, 23, 42, 0.16), inset 0 1px 1px rgba(255, 255, 255, 0.9);
+    }}
     .lang-dropdown-title {{
-        font-size: 12px;
+        font-size: 11px;
         font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 0.6px;
-        color: rgba(203, 213, 225, 0.68);
-        padding: 2px 8px 8px;
+        letter-spacing: 0.7px;
+        color: rgba(148, 163, 184, 0.8);
+        padding: 4px 10px 6px;
         border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-        margin-bottom: 6px;
+        margin-bottom: 4px;
     }}
     body.light .lang-dropdown-title {{
         color: #64748b;
         border-bottom-color: rgba(15, 23, 42, 0.08);
     }}
     .lang-item {{
-        width: 100%;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 10px;
-        padding: 9px 11px;
-        margin-bottom: 4px;
-        border-radius: 13px;
-        border: 1px solid transparent;
+        width: 100%;
+        padding: 8px 10px;
+        border-radius: 12px;
+        border: none;
         background: transparent;
-        color: #f1f5f9;
-        font-family: inherit;
-        font-size: 14px;
+        color: #e2e8f0;
+        font-size: 13.5px;
         font-weight: 500;
         cursor: pointer;
         text-align: left;
-        transition: background 0.18s ease, border-color 0.18s ease, transform 0.15s ease;
-    }}
-    .lang-item:last-child {{
-        margin-bottom: 0;
+        transition: background 0.18s ease, color 0.18s ease, transform 0.15s ease;
     }}
     .lang-item:hover {{
-        background: rgba(255, 255, 255, 0.07);
+        background: rgba(59, 130, 246, 0.18);
+        color: #ffffff;
+        transform: translateX(2px);
     }}
     .lang-item.active {{
-        background: rgba(32, 201, 151, 0.14);
-        border-color: rgba(32, 201, 151, 0.48);
+        background: linear-gradient(135deg, rgba(59, 130, 246, 0.28), rgba(37, 99, 235, 0.18));
+        color: #60a5fa;
+        font-weight: 600;
     }}
     body.light .lang-item {{
-        color: #0f172a;
+        color: #1e293b;
     }}
     body.light .lang-item:hover {{
-        background: rgba(15, 23, 42, 0.05);
+        background: rgba(37, 99, 235, 0.10);
+        color: #0f172a;
     }}
     body.light .lang-item.active {{
-        background: rgba(18, 184, 134, 0.12);
-        border-color: rgba(18, 184, 134, 0.45);
+        background: rgba(37, 99, 235, 0.14);
+        color: #2563eb;
     }}
     .lang-item-left {{
         display: flex;
         align-items: center;
         gap: 10px;
     }}
-    .lang-flag {{
-        width: 24px;
-        height: 17px;
-        border-radius: 3.5px;
-        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+    .flag-svg {{
+        width: 21px;
+        height: 15px;
+        border-radius: 3px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
         flex-shrink: 0;
     }}
     .lang-radio {{
-        width: 18px;
-        height: 18px;
+        width: 15px;
+        height: 15px;
         border-radius: 50%;
-        border: 1.6px solid rgba(148, 163, 184, 0.55);
-        background: rgba(30, 41, 59, 0.65);
-        box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45);
-        position: relative;
+        border: 1.8px solid rgba(148, 163, 184, 0.55);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         flex-shrink: 0;
-        transition: all 0.2s ease;
-    }}
-    body.light .lang-radio {{
-        background: #e2e8f0;
-        border-color: #94a3b8;
     }}
     .lang-item.active .lang-radio {{
-        border-color: #20c997;
-        background: radial-gradient(circle at 35% 35%, #63e6be, #12b886);
-        box-shadow: 0 0 10px rgba(32, 201, 151, 0.55);
+        border-color: #3b82f6;
+        background: #3b82f6;
+        box-shadow: 0 0 8px rgba(59, 130, 246, 0.6);
+    }}
+    .lang-item.active .lang-radio::after {{
+        content: "";
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: #ffffff;
     }}
     .switch {{
         position: relative;
         display: inline-block;
-        width: 46px;
-        height: 25px;
+        width: 38px;
+        height: 21px;
     }}
     .switch input {{
         opacity: 0;
@@ -335,66 +401,60 @@ def get_css(theme="dark"):
     .switch-slider {{
         position: absolute;
         cursor: pointer;
-        top: 0; left: 0; right: 0; bottom: 0;
-        background: linear-gradient(145deg, #283044, #1e2433);
-        border: 1px solid rgba(255, 255, 255, 0.18);
-        border-radius: 26px;
-        box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
-        transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
-    }}
-    body.light .switch-slider {{
-        background: linear-gradient(145deg, #cbd5e1, #94a3b8);
-        border-color: rgba(0, 0, 0, 0.1);
-        box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.15);
+        inset: 0;
+        background-color: rgba(148, 163, 184, 0.38);
+        border-radius: 21px;
+        transition: 0.28s;
     }}
     .switch-slider:before {{
         position: absolute;
         content: "";
-        height: 19px;
-        width: 19px;
-        left: 2px;
-        bottom: 2px;
-        background: radial-gradient(circle at 35% 30%, #ffffff, #dbeafe);
+        height: 15px;
+        width: 15px;
+        left: 3px;
+        bottom: 3px;
+        background-color: #ffffff;
         border-radius: 50%;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
-        transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.35s ease;
+        transition: 0.28s;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
     }}
     .switch input:checked + .switch-slider {{
-        background: linear-gradient(135deg, #20c997, #12b886);
-        border-color: rgba(56, 217, 169, 0.65);
-        box-shadow: 0 0 12px rgba(32, 201, 151, 0.45), inset 0 1px 2px rgba(255, 255, 255, 0.35);
+        background: linear-gradient(135deg, #3b82f6, #20c997);
     }}
     .switch input:checked + .switch-slider:before {{
-        transform: translateX(21px);
+        transform: translateX(17px);
     }}
     .container {{
+        max-width: 840px;
+        margin: 54px auto 64px;
         position: relative;
-        z-index: 1;
-        max-width: 850px;
-        margin: 0 auto;
-        padding: 82px 20px 64px;
+        z-index: 2;
     }}
     .header {{
+        padding: 26px 24px;
+        border-radius: 22px;
+        margin-bottom: 18px;
         text-align: center;
-        margin-bottom: 26px;
+        background: rgba(18, 23, 38, 0.65);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45), inset 0 1px 1px rgba(255, 255, 255, 0.15);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+    }}
+    body.light .header {{
+        background: rgba(255, 255, 255, 0.82);
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.07), inset 0 1px 1px rgba(255, 255, 255, 0.9);
     }}
     .header h1 {{
-        color: #ffffff;
-        font-size: 44px;
-        font-weight: 600;
-        letter-spacing: -0.5px;
-        margin-bottom: 8px;
-        text-shadow: 0 4px 28px rgba(99, 102, 241, 0.55);
-        transition: color 0.4s ease, text-shadow 0.4s ease;
-    }}
-    body.light .header h1 {{
-        color: #0f172a;
-        text-shadow: 0 2px 12px rgba(15, 23, 42, 0.08);
+        font-size: 32px;
+        font-weight: 300;
+        letter-spacing: 0.6px;
+        margin-bottom: 6px;
     }}
     .header p {{
-        color: rgba(226, 232, 240, 0.65);
+        color: rgba(203, 213, 225, 0.68);
         font-size: 14px;
-        margin-bottom: 18px;
         word-break: break-all;
     }}
     body.light .header p {{
@@ -405,18 +465,15 @@ def get_css(theme="dark"):
         gap: 12px;
         justify-content: center;
         flex-wrap: wrap;
-        margin-top: 8px;
+        margin-top: 18px;
     }}
     .upload-btn {{
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        padding: 12px 26px;
-        background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%);
-        border: 1px solid rgba(255, 255, 255, 0.25);
-        border-radius: 28px;
-        color: #fff;
+        display: inline-block;
+        padding: 13px 26px;
+        border-radius: 24px;
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+        color: #ffffff;
+        border: 1px solid rgba(255, 255, 255, 0.28);
         cursor: pointer;
         font-size: 15px;
         font-weight: 500;
@@ -743,15 +800,6 @@ def get_css(theme="dark"):
         -webkit-text-security: disc;
         text-security: disc;
     }}
-    .https-pill-btn {{
-        text-decoration: none;
-        cursor: pointer;
-        border-color: rgba(56, 217, 169, 0.45);
-    }}
-    .https-pill-btn:hover {{
-        border-color: rgba(56, 217, 169, 0.85);
-        box-shadow: 0 8px 24px rgba(32, 201, 151, 0.35);
-    }}
     .pin-input {{
         width: 100%;
         padding: 14px 48px;
@@ -844,7 +892,7 @@ def get_download_svg():
 
 
 def get_star_script():
-    return """
+    return r"""
     (function(){
         const canvas = document.getElementById("skyCanvas");
         if (!canvas) return;
@@ -1141,7 +1189,7 @@ def get_upload_script(lang="en"):
 
 
 def get_theme_script():
-    return """
+    return r"""
     function applyTheme(theme) {
         const isLight = (theme === "light");
         document.body.classList.toggle("light", isLight);
@@ -1232,6 +1280,48 @@ def get_theme_script():
         window.location.href = url.toString();
     }
 
+    let _toastTimer = null;
+    function showShortcutToast(msg) {
+        const toast = document.getElementById("shortcutToast");
+        if (!toast) return;
+        toast.textContent = msg;
+        toast.classList.add("visible");
+        if (_toastTimer) clearTimeout(_toastTimer);
+        _toastTimer = setTimeout(function() {
+            toast.classList.remove("visible");
+        }, 4800);
+    }
+
+    async function createScreenShortcut(btnEl) {
+        if (typeof _deferredPwaPrompt !== "undefined" && _deferredPwaPrompt) {
+            try {
+                _deferredPwaPrompt.prompt();
+                await _deferredPwaPrompt.userChoice;
+                _deferredPwaPrompt = null;
+                return;
+            } catch (e) {}
+        }
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+        const pcMsg = (btnEl && btnEl.getAttribute("data-pc-msg")) || "";
+        const mobMsg = (btnEl && btnEl.getAttribute("data-mob-msg")) || "";
+        if (isMobile) {
+            showShortcutToast(mobMsg || pcMsg);
+            return;
+        }
+        const dlLink = document.createElement("a");
+        dlLink.href = "/?shortcut=1";
+        dlLink.download = "AirShare PC.url";
+        dlLink.style.display = "none";
+        document.body.appendChild(dlLink);
+        dlLink.click();
+        setTimeout(function() {
+            if (dlLink.parentNode) dlLink.parentNode.removeChild(dlLink);
+        }, 500);
+        if (pcMsg) {
+            showShortcutToast(pcMsg);
+        }
+    }
+
     (function initLangMenuAndPinEye() {
         document.addEventListener("click", function(e) {
             const wrap = document.getElementById("langMenuWrap");
@@ -1282,7 +1372,8 @@ def get_theme_script():
         e.preventDefault();
         const form = e.target;
         const pinVal = (document.getElementById("pinInput") || {}).value || "";
-        const nextVal = (form.querySelector("input[name=\"next\"]") || {}).value || "/";
+        const nextInput = form.querySelector('input[name="next"]');
+        const nextVal = (nextInput && nextInput.value) ? nextInput.value : "/";
         try {
             const body = "pin=" + encodeURIComponent(pinVal) + "&next=" + encodeURIComponent(nextVal);
             const res = await fetch("/login", {
@@ -1307,10 +1398,6 @@ def get_theme_script():
     }
 
     (function initThemeAndPreview() {
-        const httpsBtn = document.getElementById("httpsSetupBtn");
-        if (httpsBtn && window.location.protocol === "https:") {
-            httpsBtn.style.display = "none";
-        }
         const url = new URL(window.location.href);
         const urlTheme = url.searchParams.get("theme");
         let saved = null;
@@ -1363,9 +1450,10 @@ def _get_lang_selector_html(lang="en"):
 
 def get_top_controls_html(theme="dark", lang="en", show_preview_toggle=False):
     is_dark_checked = "checked" if theme != "light" else ""
-    theme_tip = html.escape(tr("web_theme_tip", lang))
-    parallax_tip = html.escape(tr("web_parallax_tip", lang))
-    pwa_txt = html.escape(tr("web_install_pwa", lang))
+    cur_lang = (lang or "en").lower()
+    theme_tip = html.escape(tr("web_theme_tip", cur_lang))
+    parallax_tip = html.escape(tr("web_parallax_tip", cur_lang))
+    sc_label, sc_tip, sc_pc_msg, sc_mob_msg = SHORTCUT_LABELS.get(cur_lang, SHORTCUT_LABELS["en"])
     left_html = (
         '<div class="top-controls">'
         f'<label class="ctrl-pill" title="{theme_tip}">'
@@ -1386,9 +1474,8 @@ def get_top_controls_html(theme="dark", lang="en", show_preview_toggle=False):
     )
     preview_pill = ""
     if show_preview_toggle:
-        preview_label = html.escape(tr("web_preview", lang))
+        preview_label = html.escape(tr("web_preview", cur_lang))
         preview_pill = (
-            f'<button type="button" class="ctrl-pill pwa-install-btn" id="pwaInstallBtn" onclick="installPwaApp()">{pwa_txt}</button>'
             f'<label class="ctrl-pill" title="{preview_label}">'
             f'<span>{preview_label}</span>'
             '<span class="switch">'
@@ -1397,16 +1484,20 @@ def get_top_controls_html(theme="dark", lang="en", show_preview_toggle=False):
             '</span>'
             '</label>'
         )
-    https_pill = (
-        '<a class="ctrl-pill https-pill-btn" id="httpsSetupBtn" href="/?https_setup=1" '
-        'title="Скачать одноразовый сертификат HTTPS для Windows (убирает Not secure)">🔒 HTTPS</a>'
+    shortcut_pill = (
+        f'<button type="button" class="ctrl-pill shortcut-pill-btn" id="shortcutBtn" '
+        f'title="{html.escape(sc_tip, quote=True)}" '
+        f'data-pc-msg="{html.escape(sc_pc_msg, quote=True)}" '
+        f'data-mob-msg="{html.escape(sc_mob_msg, quote=True)}" '
+        f'onclick="createScreenShortcut(this)">{html.escape(sc_label)}</button>'
     )
     right_html = (
         '<div class="top-right-controls">'
-        f'{https_pill}'
+        f'{shortcut_pill}'
         f'{preview_pill}'
-        f'{_get_lang_selector_html(lang)}'
+        f'{_get_lang_selector_html(cur_lang)}'
         '</div>'
+        '<div class="shortcut-toast" id="shortcutToast"></div>'
     )
     return left_html + right_html
 
@@ -1457,6 +1548,7 @@ def get_pin_login_page(theme="dark", lang="en", error_msg="", next_path="/"):
         f'{err_html}'
         '</div></div>'
         '<div class="credit-badge">Crafted by JackBrownUA • Powered by Gemini</div>'
-        f'<script>{get_star_script()}{get_theme_script()}</script>'
+        f'<script>{get_star_script()}</script>'
+        f'<script>{get_theme_script()}</script>'
         '</body></html>'
     )
