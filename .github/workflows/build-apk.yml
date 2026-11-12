@@ -23,7 +23,7 @@ jobs:
 
       - name: Verify modular files, lint with ruff and run unit tests
         run: |
-          for req_file in main.py server.py web_ui.py player_ui.py security.py pwa_search.py android_bridge.py ui_widgets.py themes.py utils.py config.py i18n.py p4a_hook.py buildozer.spec; do
+          for req_file in main.py server.py web_ui.py player_ui.py security.py pwa_search.py android_bridge.py tls_cert.py ui_widgets.py themes.py utils.py config.py i18n.py p4a_hook.py buildozer.spec; do
             if [ ! -f "$req_file" ]; then
               echo "ERROR: Missing required module $req_file in repository root!"
               exit 1
