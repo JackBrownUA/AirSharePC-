@@ -23,6 +23,7 @@ jobs:
 
       - name: Verify modular files, lint with ruff and run unit tests
         run: |
+          rm -f tls_cert.py
           for req_file in main.py server.py web_ui.py player_ui.py security.py pwa_search.py android_bridge.py ui_widgets.py themes.py utils.py config.py i18n.py p4a_hook.py buildozer.spec; do
             if [ ! -f "$req_file" ]; then
               echo "ERROR: Missing required module $req_file in repository root!"
@@ -98,6 +99,7 @@ jobs:
 
       - name: Build Debug APK (v1.3.5, Target API 35)
         run: |
+          rm -f tls_cert.py
           find "$HOME/.buildozer" .buildozer "$HOME/.cache" -name "charset_normalizer-3*" -delete 2>/dev/null || true
           rm -rf .buildozer/android/platform/build-arm64-v8a/build/venv 2>/dev/null || true
           python p4a_hook.py
@@ -116,3 +118,4 @@ jobs:
         with:
           name: airshare-apk
           path: bin/*.apk
+          
