@@ -863,6 +863,7 @@ class AirShareApp(App):
         entry_str = f"{filename} ({act} • {size_str})"
         if is_android_activity_paused():
             self.transfer_history.insert(0, entry_str)
+            del self.transfer_history[50:]
             return
         def _upd(_dt):
             if self.transfer_history:
@@ -878,6 +879,7 @@ class AirShareApp(App):
             self.tr1_sub.text = f"{act} • {size_str}"
             self.tr1_bar.set_percent(1.0)
             self.transfer_history.insert(0, f"{filename} ({act} • {size_str})")
+            del self.transfer_history[50:]
 
         Clock.schedule_once(_upd, 0)
 
@@ -1002,7 +1004,7 @@ class AirShareApp(App):
             card_widget=card,
             origin_pos=origin,
             scrim_rgba=p["overlay"],
-            on_dismiss_cb=lambda: (not self.drawer.is_open) and self.set_active_nav("transfer"),
+            on_dismiss_cb=lambda: (setattr(self, "active_modal", None), (not self.drawer.is_open) and self.set_active_nav("transfer")),
         )
         self.active_modal = modal
         self.root_widget.add_widget(modal)

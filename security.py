@@ -98,6 +98,9 @@ def create_device_session_token(
     msg = f"{client_ip}:{expected_pwd}:{nonce}".encode("utf-8")
     tok = hmac.new(session_secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
     with lock:
+        if len(device_sessions) >= 256:
+            oldest_key = next(iter(device_sessions))
+            device_sessions.pop(oldest_key, None)
         device_sessions[tok] = {
             "ip": str(client_ip).strip(),
             "pwd": expected_pwd,

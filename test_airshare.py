@@ -570,5 +570,22 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
             self.assertIn(b"200 OK", sock._wfile.getvalue().splitlines()[0])
 
 
+
+    def test_12_ui_radius_clamp_modal_reset_and_session_cap(self):
+        uw_src = Path("ui_widgets.py").read_text(encoding="utf-8")
+        self.assertIn("self.height * 0.48", uw_src)
+        self.assertNotIn("1794233814531.jpg", uw_src)
+
+        m_src = Path("main.py").read_text(encoding="utf-8")
+        self.assertIn("setattr(self, \"active_modal\", None)", m_src)
+        self.assertIn("del self.transfer_history[50:]", m_src)
+
+        sessions = {}
+        lock = server.threading.Lock()
+        for i in range(300):
+            security.create_device_session_token("sec", sessions, lock, f"192.168.1.{i % 250}", "918273")
+        self.assertLessEqual(len(sessions), 256)
+
+
 if __name__ == "__main__":
     unittest.main()

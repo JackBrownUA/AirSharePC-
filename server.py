@@ -178,18 +178,6 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         with cls._auth_lock:
             return ip in cls._disconnected_ips
 
-    @classmethod
-    def disconnect_client_ip(cls, ip):
-        cls.set_ip_disconnected(ip, True)
-
-    @classmethod
-    def reconnect_client_ip(cls, ip):
-        cls.set_ip_disconnected(ip, False)
-
-    @classmethod
-    def is_client_disconnected(cls, ip) -> bool:
-        return cls.is_ip_disconnected(ip)
-
     def _is_within_storage(self, target_path: str) -> bool:
         return is_within_storage(self.real_storage, target_path)
 
@@ -349,7 +337,10 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 self.send_header(k, v)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
 
     def check_auth_or_respond(self) -> bool:
         ip = self._get_client_ip()

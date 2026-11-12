@@ -495,11 +495,13 @@ class RoundedCard(BoxLayout):
         self.rect.pos, self.rect.size = self.pos, self.size
         self.sh_rect.pos, self.sh_rect.size = (self.x, self.y - dp(2.5)), self.size
         if self.width > 2 and self.height > 2:
-            r = min(self.radius_val, self.height * 0.5)
+            r = max(1.0, min(self.radius_val, self.height * 0.48, self.width * 0.48))
             self.line.rounded_rectangle = [self.x, self.y, self.width, self.height, r]
             inset = max(dp(8), r * 0.75)
             if self.width > inset * 2:
                 self.bev_line.points = [self.x + inset, self.top - dp(1.2), self.right - inset, self.top - dp(1.2)]
+            else:
+                self.bev_line.points = []
         self._update_matrix()
 
     def update_colors(self, bg_color, border_color=(0, 0, 0, 0)):
@@ -840,7 +842,7 @@ class AppSplashScreen(FloatLayout):
 
         icon_anchor = AnchorLayout(size_hint=(1, None), height=dp(136))
         icon_path = None
-        for candidate in ("splash_logo.png", "icon.png", "1794233814531.jpg"):
+        for candidate in ("splash_logo.png", "icon.png"):
             if os.path.exists(candidate):
                 icon_path = candidate
                 break
