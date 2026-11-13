@@ -68,7 +68,7 @@ public class AirShareKeepAliveService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && "STOP".equals(intent.getAction())) {
+        if (intent == null || "STOP".equals(intent.getAction())) {
             releaseLocks();
             try {
                 stopForeground(true);
@@ -128,6 +128,18 @@ public class AirShareKeepAliveService extends Service {
         } catch (Throwable ignored) {}
     }
 
+    public void onTimeout(int startId) {
+        releaseLocks();
+        try {
+            stopForeground(true);
+        } catch (Throwable ignored) {}
+        stopSelf(startId);
+    }
+
+    public void onTimeout(int startId, int fgsType) {
+        onTimeout(startId);
+    }
+
     @Override
     public void onDestroy() {
         releaseLocks();
@@ -150,6 +162,8 @@ def _patch_project_properties(path_obj: Path, compile_api: str = TARGET_API) -> 
     new_text = re.sub(r"target=android-\d+", f"target=android-{compile_api}", old_text)
     if f"target=android-{compile_api}" not in new_text:
         new_text = f"target=android-{compile_api}\n" + new_text
+    if "SDLActivity.nativePause();" in new_text:
+        raise RuntimeError(f"Failed to patch SDLActivity.nativePause() in {path_obj}")
     if new_text != old_text:
         path_obj.write_text(new_text, encoding="utf-8")
         return True
@@ -194,7 +208,7 @@ def _patch_manifest_file(path_obj: Path) -> bool:
         ]
         perm_block = ""
         for perm in required_perms:
-            if perm not in new_text:
+            if f'"{perm}"' not in new_text:
                 perm_block += f'    <uses-permission android:name="{perm}" />\n'
         if perm_block:
             new_text = new_text.replace("<application", perm_block + "    <application", 1)
@@ -271,18 +285,6 @@ def _patch_sdl_activity_keep_alive(path_obj: Path) -> bool:
                     + "\n    public static volatile boolean sIsActivityPaused = false;\n"
                     + new_text[idx + 1 :]
                 )
-    if 'Log.v(TAG, "onPause()");' in new_text and "sIsActivityPaused = true; // onPause" not in new_text:
-        new_text = new_text.replace(
-            'Log.v(TAG, "onPause()");',
-            'Log.v(TAG, "onPause()");\n        sIsActivityPaused = true; // onPause',
-            1,
-        )
-    if 'Log.v(TAG, "onResume()");' in new_text and "sIsActivityPaused = false; // onResume" not in new_text:
-        new_text = new_text.replace(
-            'Log.v(TAG, "onResume()");',
-            'Log.v(TAG, "onResume()");\n        sIsActivityPaused = false; // onResume',
-            1,
-        )
     if "SDLActivity.nativePause();" in new_text:
         new_text = new_text.replace(
             "SDLActivity.nativePause();",
@@ -391,14 +393,27 @@ def patch_build_tree(root_dir=None) -> dict:
     if home_buildozer.exists():
         search_roots.append(home_buildozer)
 
+    target_exact = {
+        "project.properties",
+        "build.gradle",
+        "build.tmpl.gradle",
+        "HIDDeviceManager.java",
+        "SDLActivity.java",
+        "PythonActivity.java",
+        "build.py",
+    }
+    skip_dirs = {"android-ndk", "android-sdk", "ndk", "packages", "other_builds", ".git"}
     seen = set()
     for base in search_roots:
         if not base.exists():
             continue
-        for dirpath, _dirnames, filenames in os.walk(base):
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [d for d in dirnames if d not in skip_dirs and not d.startswith("android-ndk")]
             for fname in filenames:
+                if fname not in target_exact and not (fname.startswith("AndroidManifest") and fname.endswith(".xml")):
+                    continue
                 fpath = Path(dirpath) / fname
-                real_key = str(fpath.resolve()) if fpath.exists() else str(fpath)
+                real_key = str(fpath)
                 if real_key in seen:
                     continue
                 seen.add(real_key)
@@ -462,9 +477,7 @@ def after_apk_build(toolchain=None, *_args, **_kwargs):
 
 
 def after_apk_assemble(toolchain=None, *_args, **_kwargs):
-    dist_dir = _extract_dist_dir(toolchain)
-    counts = patch_build_tree(dist_dir)
-    print(f"[AirShare p4a_hook] after_apk_assemble (target API {TARGET_API}) patched: {counts}")
+    print(f"[AirShare p4a_hook] after_apk_assemble (target API {TARGET_API}) completed")
 
 
 _restore_standard_debug_keystore()

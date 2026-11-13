@@ -1204,7 +1204,12 @@ def get_theme_script():
             const vEl = _vidThumbQueue.shift();
             if (!vEl || vEl.getAttribute("src") || !vEl.dataset.src) continue;
             _activeVidThumbs++;
+            let finished = false;
+            let timerId = null;
             const done = function() {
+                if (finished) return;
+                finished = true;
+                if (timerId) clearTimeout(timerId);
                 vEl.removeEventListener("loadeddata", done);
                 vEl.removeEventListener("error", done);
                 _activeVidThumbs = Math.max(0, _activeVidThumbs - 1);
@@ -1212,7 +1217,7 @@ def get_theme_script():
             };
             vEl.addEventListener("loadeddata", done);
             vEl.addEventListener("error", done);
-            setTimeout(done, 1800);
+            timerId = setTimeout(done, 1800);
             vEl.setAttribute("src", vEl.dataset.src);
         }
     }

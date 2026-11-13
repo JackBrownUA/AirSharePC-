@@ -603,5 +603,49 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertLessEqual(len(sessions), 256)
 
 
+    def test_13_claude_audit_regressions(self):
+        # 1. Non-ASCII / кириллический PIN в ?pin= и POST /login не бросает TypeError в hmac.compare_digest
+        resp_non_ascii = _run_request(
+            self.storage_dir,
+            b"GET /?pin=%D0%BF%D0%B0%D1%80%D0%BE%D0%BB%D1%8C HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            client_ip="192.168.1.188",
+        )
+        self.assertIn(b"401", resp_non_ascii.splitlines()[0])
+
+        # 2. Отрицательный Content-Length в POST /login не блокирует чтение
+        resp_neg_cl = _run_request(
+            self.storage_dir,
+            b"POST /login HTTP/1.1\r\nHost: localhost\r\nContent-Length: -50\r\n\r\n",
+            client_ip="192.168.1.189",
+        )
+        self.assertIn(b"401", resp_neg_cl.splitlines()[0])
+
+        # 3. Нулевой байт /%00 в пути не роняет translate_path с ValueError
+        resp_null = _run_request(
+            self.storage_dir,
+            ("GET /%00 HTTP/1.1\r\nHost: localhost\r\n" + _basic_auth_header("airshare", "918273") + "\r\n").encode("utf-8"),
+        )
+        self.assertIn(b"200", resp_null.splitlines()[0])
+
+        # 4. Наличие index.html в папке НЕ подменяет листинг директории
+        idx_path = os.path.join(self.storage_dir, "index.html")
+        with open(idx_path, "w", encoding="utf-8") as f:
+            f.write("<html><body>HIJACKED_INDEX</body></html>")
+        resp_list = _run_request(
+            self.storage_dir,
+            ("GET / HTTP/1.1\r\nHost: localhost\r\n" + _basic_auth_header("airshare", "918273") + "\r\n").encode("utf-8"),
+        )
+        self.assertIn(b"AirShare PC", resp_list)
+        self.assertNotIn(b"HIJACKED_INDEX", resp_list)
+
+        # 5. Проверки p4a_hook (onTimeout для Android 15 dataSync) и pwa_search (DOM-безопасный рендер)
+        hook_src = Path("p4a_hook.py").read_text(encoding="utf-8")
+        self.assertIn("public void onTimeout(int startId, int fgsType)", hook_src)
+        self.assertIn('if (intent == null || "STOP".equals(intent.getAction()))', hook_src)
+        pwa_src = Path("pwa_search.py").read_text(encoding="utf-8")
+        self.assertIn("document.createElement", pwa_src)
+        self.assertNotIn("srvBox.innerHTML = htmlRows", pwa_src)
+
+
 if __name__ == "__main__":
     unittest.main()

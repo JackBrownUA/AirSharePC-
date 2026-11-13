@@ -98,7 +98,7 @@ def search_storage_index(
                         continue
                     rel_d = os.path.relpath(full_d, real_storage).replace("\\", "/")
                     new_entries.append((d.lower(), d, rel_d, True, tr("web_folder", current_language), "folder"))
-                    if len(new_entries) >= 5000:
+                    if len(new_entries) >= 25000:
                         break
                 for f in files:
                     if is_temp_part_file(f):
@@ -115,16 +115,16 @@ def search_storage_index(
                     ext_low = ext.lower()
                     kind = "image" if ext_low in IMAGE_EXTENSIONS else ("video" if ext_low in VIDEO_EXTENSIONS else "file")
                     new_entries.append((f.lower(), f, rel_f, False, sz, kind))
-                    if len(new_entries) >= 5000:
+                    if len(new_entries) >= 25000:
                         break
-                if len(new_entries) >= 5000:
+                if len(new_entries) >= 25000:
                     break
         except OSError:
             pass
         entries = new_entries
         with lock:
             search_cache["root"] = real_storage
-            search_cache["ts"] = now
+            search_cache["ts"] = time.monotonic()
             search_cache["entries"] = entries
 
     matches = []
@@ -174,20 +174,44 @@ def get_search_and_pwa_script() -> str:
                     srvBox.style.display = "none";
                     return;
                 }
-                let htmlRows = '<ul class="file-list" style="margin-bottom:14px;">';
+                srvBox.innerHTML = "";
+                const ul = document.createElement("ul");
+                ul.className = "file-list";
+                ul.style.marginBottom = "14px";
                 data.results.forEach(function(item) {
-                    const safeHref = encodeURI(item.rel_path);
-                    const icon = item.is_dir ? "📁 " : "📄 ";
-                    const clickAttr = (!item.is_dir && (item.kind === "video" || item.kind === "image"))
-                        ? 'onclick="return openMediaPlayer(\\'' + safeHref.replace(/'/g, "\\\\'") + '\\', \\'' + item.name.replace(/'/g, "\\\\'") + '\\', \\'' + item.kind + '\\')"'
-                        : "";
-                    htmlRows += '<li class="file-item"><div class="file-info"><div class="file-text-col">' +
-                        '<a class="file-link" href="' + (item.is_dir ? safeHref + "/" : safeHref) + '" ' + clickAttr + '>' + icon + item.name + '</a>' +
-                        '<div class="file-meta"><span>' + item.rel_path + '</span><span>' + item.size_str + '</span></div>' +
-                        '</div></div></li>';
+                    const encodedParts = String(item.rel_path || "").split("/").map(encodeURIComponent).join("/");
+                    const safeHref = "/" + encodedParts + (item.is_dir ? "/" : "");
+                    const li = document.createElement("li");
+                    li.className = "file-item";
+                    const info = document.createElement("div");
+                    info.className = "file-info";
+                    const col = document.createElement("div");
+                    col.className = "file-text-col";
+                    const a = document.createElement("a");
+                    a.className = "file-link";
+                    a.href = safeHref;
+                    a.textContent = (item.is_dir ? "📁 " : "📄 ") + item.name;
+                    if (!item.is_dir && (item.kind === "video" || item.kind === "image")) {
+                        a.addEventListener("click", function(ev) {
+                            ev.preventDefault();
+                            openMediaPlayer(safeHref, item.name, item.kind);
+                        });
+                    }
+                    const meta = document.createElement("div");
+                    meta.className = "file-meta";
+                    const s1 = document.createElement("span");
+                    s1.textContent = item.rel_path;
+                    const s2 = document.createElement("span");
+                    s2.textContent = item.size_str;
+                    meta.appendChild(s1);
+                    meta.appendChild(s2);
+                    col.appendChild(a);
+                    col.appendChild(meta);
+                    info.appendChild(col);
+                    li.appendChild(info);
+                    ul.appendChild(li);
                 });
-                htmlRows += '</ul>';
-                srvBox.innerHTML = htmlRows;
+                srvBox.appendChild(ul);
                 srvBox.style.display = "block";
             } catch (e) {}
         }, 220);

@@ -98,6 +98,7 @@ class AirShareApp(App):
         self.sent_files_count = 0
         self.received_files_count = 0
         self._bg_idle_wrapped = False
+        self._notif_refresh_ev = None
         self.active_modal = None
         self.theme_mode = "dark"
         self.language = "en"
@@ -152,7 +153,16 @@ class AirShareApp(App):
         self.addr_label.text = disp
         self.addr_label.font_size = sp(11.5) if len(disp) > 34 else sp(12.5)
 
-    def _refresh_foreground_notification(self):
+    def _schedule_foreground_notification_refresh(self, delay=0.35):
+        if self._notif_refresh_ev is not None:
+            try:
+                self._notif_refresh_ev.cancel()
+            except Exception:
+                pass
+        self._notif_refresh_ev = Clock.schedule_once(lambda _dt: self._refresh_foreground_notification(), delay)
+
+    def _refresh_foreground_notification(self, *_args):
+        self._notif_refresh_ev = None
         if self.server is not None:
             set_android_foreground_notification(
                 True,
@@ -944,18 +954,25 @@ class AirShareApp(App):
         Clock.schedule_once(_upd, 0)
 
     def _on_file_transfer(self, filename, size_str, direction):
-        if direction == "upload":
-            self.received_files_count += 1
-        else:
-            self.sent_files_count += 1
-        self._refresh_foreground_notification()
         act = self._t("uploaded") if direction == "upload" else self._t("downloaded")
         entry_str = f"{filename} ({act} • {size_str})"
         if is_android_activity_paused():
-            self.transfer_history.insert(0, entry_str)
-            del self.transfer_history[50:]
+            def _bg_upd(_dt):
+                if direction == "upload":
+                    self.received_files_count += 1
+                else:
+                    self.sent_files_count += 1
+                self.transfer_history.insert(0, entry_str)
+                del self.transfer_history[50:]
+                self._schedule_foreground_notification_refresh(0.35)
+            Clock.schedule_once(_bg_upd, 0)
             return
         def _upd(_dt):
+            if direction == "upload":
+                self.received_files_count += 1
+            else:
+                self.sent_files_count += 1
+            self._schedule_foreground_notification_refresh(0.35)
             if self.transfer_history:
                 prev_entry = self.transfer_history[0]
                 prev_name, _, prev_meta = prev_entry.rpartition(" (")
@@ -988,7 +1005,7 @@ class AirShareApp(App):
 
         bind_ip = get_local_ip()
         try:
-            self.server = ReusableThreadingServer((bind_ip, self.server_port), DynamicAirShareHandler)
+            self.server = ReusableThreadingServer(("0.0.0.0", self.server_port), DynamicAirShareHandler)
             threading.Thread(target=self.server.serve_forever, daemon=True).start()
             self.has_server_error = False
             self.set_keep_alive(True)

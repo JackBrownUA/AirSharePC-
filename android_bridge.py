@@ -9,9 +9,12 @@ from i18n import tr
 
 logger = logging.getLogger("airshare.android")
 
-WIFI_IFACE_PREFIXES = ("wlan", "swlan", "ap", "softap", "wifi", "p2p", "eth", "rndis", "en", "wl")
+PRIMARY_WIFI_PREFIXES = ("wlan", "swlan", "wifi", "eth", "en", "wl")
+SECONDARY_WIFI_PREFIXES = ("ap", "softap", "rndis", "p2p")
+WIFI_IFACE_PREFIXES = PRIMARY_WIFI_PREFIXES + SECONDARY_WIFI_PREFIXES
 NOTIFICATION_ID = 1001
 NOTIFICATION_CHANNEL_ID = "airshare_fg_service"
+_fg_service_running = False
 
 
 def get_android_wifi_ip(is_private_lan_ip_fn):
@@ -19,6 +22,7 @@ def get_android_wifi_ip(is_private_lan_ip_fn):
         from jnius import autoclass
         NetworkInterface = autoclass("java.net.NetworkInterface")
         interfaces = NetworkInterface.getNetworkInterfaces()
+        fallback_ip = None
         if interfaces is not None:
             while interfaces.hasMoreElements():
                 nif = interfaces.nextElement()
@@ -27,6 +31,7 @@ def get_android_wifi_ip(is_private_lan_ip_fn):
                 name = str(nif.getName() or "").lower()
                 if not name.startswith(WIFI_IFACE_PREFIXES):
                     continue
+                is_primary = name.startswith(PRIMARY_WIFI_PREFIXES)
                 addrs = nif.getInetAddresses()
                 while addrs.hasMoreElements():
                     addr = addrs.nextElement()
@@ -34,7 +39,12 @@ def get_android_wifi_ip(is_private_lan_ip_fn):
                         continue
                     host = str(addr.getHostAddress() or "").split("%")[0].strip()
                     if is_private_lan_ip_fn(host):
-                        return host
+                        if is_primary:
+                            return host
+                        if fallback_ip is None:
+                            fallback_ip = host
+        if fallback_ip:
+            return fallback_ip
     except Exception as exc:
         logger.debug("Не удалось проверить NetworkInterface на Android: %s", exc)
 
@@ -234,18 +244,17 @@ def set_android_foreground_notification(
         clean_url = (url_text or "").strip()
         body_str = f"{stats_str}\n{clean_url}" if clean_url else stats_str
 
-        if active:
-            request_android_notification_permission()
-
-        # 1. Запускаем или останавливаем нативный Foreground Service (AirShareKeepAliveService)
+        # 1. Запускаем нативный Foreground Service только при старте сервера, а при обновлениях счётчиков обновляем через nm.notify
+        global _fg_service_running
         try:
             Intent = autoclass("android.content.Intent")
             ServiceClass = autoclass("org.kivy.android.AirShareKeepAliveService")
             srv_intent = Intent(activity, ServiceClass)
             if not active:
+                _fg_service_running = False
                 srv_intent.setAction("STOP")
                 activity.startService(srv_intent)
-            else:
+            elif not _fg_service_running:
                 srv_intent.putExtra("title", title_str)
                 srv_intent.putExtra("body", body_str)
                 BuildVersion = autoclass("android.os.Build$VERSION")
@@ -253,6 +262,7 @@ def set_android_foreground_notification(
                     activity.startForegroundService(srv_intent)
                 else:
                     activity.startService(srv_intent)
+                _fg_service_running = True
         except Exception as svc_exc:
             logger.debug("AirShareKeepAliveService fallback: %s", svc_exc)
 
@@ -310,13 +320,21 @@ def set_android_foreground_notification(
         logger.debug("Не удалось обновить фоновое уведомление Android: %s", exc)
 
 
+_sdl_activity_cls = None
+_is_android_platform = None
+
+
 def is_android_activity_paused() -> bool:
+    global _sdl_activity_cls, _is_android_platform
     try:
-        from kivy.utils import platform
-        if platform != "android":
+        if _is_android_platform is None:
+            from kivy.utils import platform
+            _is_android_platform = (platform == "android")
+        if not _is_android_platform:
             return False
-        from jnius import autoclass
-        SDLActivity = autoclass("org.libsdl.app.SDLActivity")
-        return bool(getattr(SDLActivity, "sIsActivityPaused", False))
+        if _sdl_activity_cls is None:
+            from jnius import autoclass
+            _sdl_activity_cls = autoclass("org.libsdl.app.SDLActivity")
+        return bool(getattr(_sdl_activity_cls, "sIsActivityPaused", False))
     except Exception:
         return False
