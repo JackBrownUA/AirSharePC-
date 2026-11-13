@@ -47,8 +47,9 @@ jobs:
             ~/.buildozer
             ~/.android
             .buildozer
-          key: buildozer-master-v9-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: buildozer-master-v11-${{ runner.os }}-${{ hashFiles('buildozer.spec', 'p4a_hook.py') }}
           restore-keys: |
+            buildozer-master-v11-${{ runner.os }}-
             buildozer-master-v9-${{ runner.os }}-
             buildozer-master-v8-${{ runner.os }}-
 
@@ -102,6 +103,7 @@ jobs:
           rm -f tls_cert.py
           find "$HOME/.buildozer" .buildozer "$HOME/.cache" -name "charset_normalizer-3*" -delete 2>/dev/null || true
           rm -rf .buildozer/android/platform/build-arm64-v8a/build/venv 2>/dev/null || true
+          rm -rf .buildozer/android/platform/build-arm64-v8a/dists/*/build 2>/dev/null || true
           python p4a_hook.py
           yes | buildozer -v android debug
           AAPT_BIN=$(find "$HOME/.buildozer/android/platform/android-sdk/build-tools" -name "aapt" | sort -V | tail -n 1)
