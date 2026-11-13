@@ -17,7 +17,7 @@ requirements = python3,kivy,pyjnius,charset-normalizer==2.1.1,android
 orientation = portrait
 fullscreen = 0
 
-android.permissions = INTERNET,ACCESS_NETWORK_STATE,ACCESS_WIFI_STATE,WAKE_LOCK,MANAGE_EXTERNAL_STORAGE
+android.permissions = INTERNET,ACCESS_NETWORK_STATE,ACCESS_WIFI_STATE,WAKE_LOCK,FOREGROUND_SERVICE,FOREGROUND_SERVICE_DATA_SYNC,POST_NOTIFICATIONS,MANAGE_EXTERNAL_STORAGE
 android.api = 35
 android.minapi = 24
 android.ndk = 25b

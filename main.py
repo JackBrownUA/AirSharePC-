@@ -1,10 +1,16 @@
 # Главный модуль приложения AirShare PC (v1.3.5): многоязычный интерфейс, контроль Wi-Fi, живой прогресс передач, перезапуск порта на лету и уведомление в шторке
 
+import ctypes
 import logging
 import os
 import threading
+import time
 import urllib.parse
 from http.server import SimpleHTTPRequestHandler
+
+# Запрещаем SDL2 блокировать главный поток Python при сворачивании окна или блокировке экрана
+os.environ["SDL_ANDROID_BLOCK_ON_PAUSE"] = "0"
+os.environ["SDL_ANDROID_BLOCK_ON_PAUSE_PAUSEAUDIO"] = "0"
 
 from kivy.animation import Animation
 from kivy.app import App
@@ -18,7 +24,11 @@ from kivy.uix.textinput import TextInput
 
 from config import APP_NAME, APP_VERSION, SERVER_PORT, STORAGE_PATH
 from i18n import SUPPORTED_LANGUAGES, tr
-from android_bridge import is_android_activity_paused
+from android_bridge import (
+    is_android_activity_paused,
+    move_android_task_to_back,
+    request_android_notification_permission,
+)
 from server import AirShareHandler, ReusableThreadingServer
 from themes import THEMES
 from ui_widgets import (
@@ -86,6 +96,9 @@ class AirShareApp(App):
         self._wifi_lock = None
         self._pending_all_storage_path = None
         self.transfer_history = []
+        self.sent_files_count = 0
+        self.received_files_count = 0
+        self._bg_idle_wrapped = False
         self.active_modal = None
         self.theme_mode = "dark"
         self.language = "en"
@@ -139,6 +152,60 @@ class AirShareApp(App):
         disp = self.get_display_url_text()
         self.addr_label.text = disp
         self.addr_label.font_size = sp(11.5) if len(disp) > 34 else sp(12.5)
+
+    def _refresh_foreground_notification(self):
+        if self.server is not None:
+            set_android_foreground_notification(
+                True,
+                self.get_display_url_text(),
+                self.language,
+                sent_count=self.sent_files_count,
+                received_count=self.received_files_count,
+            )
+        else:
+            set_android_foreground_notification(False)
+
+    def _install_background_idle_guard(self):
+        if self._bg_idle_wrapped:
+            return
+        self._bg_idle_wrapped = True
+        try:
+            sdl_dll = ctypes.CDLL("libSDL2.so")
+            sdl_dll.SDL_SetHint.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+            sdl_dll.SDL_SetHint.restype = ctypes.c_int
+            sdl_dll.SDL_SetHint(b"SDL_ANDROID_BLOCK_ON_PAUSE", b"0")
+            sdl_dll.SDL_SetHint(b"SDL_ANDROID_BLOCK_ON_PAUSE_PAUSEAUDIO", b"0")
+        except Exception:
+            pass
+
+        try:
+            from kivy.base import EventLoop
+        except Exception:
+            return
+        orig_idle = getattr(EventLoop, "idle", None)
+        if not callable(orig_idle):
+            return
+        state = {"was_paused": False}
+
+        def _safe_idle(*args, **kwargs):
+            if is_android_activity_paused():
+                state["was_paused"] = True
+                try:
+                    Clock.tick()
+                except Exception:
+                    pass
+                time.sleep(0.04)
+                return
+            if state["was_paused"]:
+                state["was_paused"] = False
+                try:
+                    self._sync_transfer_cards_from_history()
+                    Window.canvas.ask_update()
+                except Exception:
+                    pass
+            return orig_idle(*args, **kwargs)
+
+        EventLoop.idle = _safe_idle
 
     def set_keep_alive(self, enabled):
         self.keep_alive_locked = bool(enabled)
@@ -596,7 +663,11 @@ class AirShareApp(App):
 
         self.splash_screen = AppSplashScreen(lang=self.language, version=APP_VERSION)
         self.root_widget.add_widget(self.splash_screen)
+        self._install_background_idle_guard()
+        Window.bind(on_keyboard=self._on_keyboard)
+        Window.bind(on_request_close=self._on_request_close)
         Clock.schedule_once(self._apply_android_system_insets, 0.35)
+        Clock.schedule_once(lambda _dt: request_android_notification_permission(), 1.2)
 
         return self.root_widget
 
@@ -612,7 +683,7 @@ class AirShareApp(App):
         self.apply_language()
         self.apply_theme()
         if self.server is not None:
-            set_android_foreground_notification(True, self.get_display_url_text(), self.language)
+            self._refresh_foreground_notification()
 
     def apply_language(self):
         self.wifi_label.text = get_network_label(self.language)
@@ -640,10 +711,33 @@ class AirShareApp(App):
         self.t_btn_auto.set_text(self._t("theme_auto"))
         self.update_connection_url_display()
 
-    def on_pause(self):
+    def _on_keyboard(self, _window, key, *_args):
+        if key in (27, 1001):
+            if self.active_modal is not None:
+                try:
+                    self.active_modal.dismiss()
+                except Exception:
+                    self.active_modal = None
+                return True
+            if getattr(self, "drawer", None) is not None and self.drawer.is_open:
+                self.close_drawer()
+                return True
+            if self.server is not None and self.keep_alive_locked:
+                if move_android_task_to_back():
+                    return True
+        return False
+
+    def _on_request_close(self, *_args, **_kwargs):
         if self.server is not None and self.keep_alive_locked:
-            self.set_keep_alive(True)
-            set_android_foreground_notification(True, self.get_display_url_text(), self.language)
+            if move_android_task_to_back():
+                return True
+        return False
+
+    def on_pause(self):
+        if self.server is not None:
+            if self.keep_alive_locked:
+                self.set_keep_alive(True)
+            self._refresh_foreground_notification()
         return True
 
     def on_resume(self):
@@ -654,9 +748,30 @@ class AirShareApp(App):
                 self._apply_folder_selection("All Storage", pending)
         elif self.active_folder_key == "All Storage" and not has_android_storage_permission():
             self._apply_folder_selection("Downloads", self._resolve_folder_path("Downloads"))
-        if self.server is not None and self.keep_alive_locked:
-            self.set_keep_alive(True)
+        if self.server is not None:
+            if self.keep_alive_locked:
+                self.set_keep_alive(True)
+            self._refresh_foreground_notification()
+        self._sync_transfer_cards_from_history()
         self.refresh_network_status()
+
+    def _sync_transfer_cards_from_history(self):
+        if not self.transfer_history:
+            return
+        cur_entry = self.transfer_history[0]
+        cur_name, _, cur_meta = cur_entry.rpartition(" (")
+        self.tr1_name.text = cur_name or cur_entry
+        self.tr1_pct.text = "100%"
+        self.tr1_sub.text = cur_meta.rstrip(")") if cur_meta else ""
+        self.tr1_bar.set_percent(1.0)
+        if len(self.transfer_history) > 1:
+            prev_entry = self.transfer_history[1]
+            prev_name, _, prev_meta = prev_entry.rpartition(" (")
+            self.tr2_name.text = prev_name or prev_entry
+            self.tr2_pct.text = "100%"
+            self.tr2_sub.text = prev_meta.rstrip(")") if prev_meta else ""
+            self.tr2_bar.set_percent(1.0)
+            self.tr_row2.opacity = 1.0
 
     def on_stop(self):
         self.radar_card.set_wave_active(False)
@@ -859,6 +974,11 @@ class AirShareApp(App):
         Clock.schedule_once(_upd, 0)
 
     def _on_file_transfer(self, filename, size_str, direction):
+        if direction == "upload":
+            self.received_files_count += 1
+        else:
+            self.sent_files_count += 1
+        self._refresh_foreground_notification()
         act = self._t("uploaded") if direction == "upload" else self._t("downloaded")
         entry_str = f"{filename} ({act} • {size_str})"
         if is_android_activity_paused():
@@ -902,7 +1022,7 @@ class AirShareApp(App):
             threading.Thread(target=self.server.serve_forever, daemon=True).start()
             self.has_server_error = False
             self.set_keep_alive(True)
-            set_android_foreground_notification(True, self.get_display_url_text(), self.language)
+            self._refresh_foreground_notification()
         except OSError as exc:
             logger.error("Не удалось запустить HTTP-сервер на %s:%s: %s", bind_ip, self.server_port, exc)
             self.server = None
@@ -1269,7 +1389,7 @@ class AirShareApp(App):
             DynamicAirShareHandler.reset_rate_limits()
             self.update_connection_url_display()
             if self.server is not None:
-                set_android_foreground_notification(True, self.get_display_url_text(), self.language)
+                self._refresh_foreground_notification()
             modal.dismiss()
 
         btn_gen.bind(on_press=lambda *_: _save(generate_pin()))

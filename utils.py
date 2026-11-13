@@ -13,7 +13,10 @@ from android_bridge import (
     get_android_system_theme,
     get_android_wifi_ip,
     has_android_storage_permission,
+    is_android_activity_paused,
+    move_android_task_to_back,
     request_android_full_storage,
+    request_android_notification_permission,
     set_android_foreground_notification,
 )
 from config import (
@@ -46,6 +49,9 @@ __all__ = [
     "load_settings",
     "request_android_full_storage",
     "save_settings",
+    "is_android_activity_paused",
+    "move_android_task_to_back",
+    "request_android_notification_permission",
     "set_android_foreground_notification",
 ]
 

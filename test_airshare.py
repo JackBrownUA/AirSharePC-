@@ -432,7 +432,11 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn("targetSdkVersion 35", gradle_file.read_text(encoding="utf-8"))
         self.assertIn('android:targetSdkVersion="35"', manifest_file.read_text(encoding="utf-8"))
         self.assertNotIn("REQUEST_IGNORE_BATTERY_OPTIMIZATIONS", manifest_file.read_text(encoding="utf-8"))
-        self.assertNotIn("FOREGROUND_SERVICE", manifest_file.read_text(encoding="utf-8"))
+        manifest_txt = manifest_file.read_text(encoding="utf-8")
+        self.assertIn("FOREGROUND_SERVICE", manifest_txt)
+        self.assertIn("FOREGROUND_SERVICE_DATA_SYNC", manifest_txt)
+        self.assertIn("POST_NOTIFICATIONS", manifest_txt)
+        self.assertIn("AirShareKeepAliveService", manifest_txt)
 
     def test_11_import_graph_ruff_and_dynamic_handler_startup(self):
         # 1. Проверяем граф импортов всех .py файлов (защита от ModuleNotFoundError при запуске на Android)
@@ -580,6 +584,17 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         m_src = Path("main.py").read_text(encoding="utf-8")
         self.assertIn("setattr(self, \"active_modal\", None)", m_src)
         self.assertIn("del self.transfer_history[50:]", m_src)
+        self.assertIn("SDL_ANDROID_BLOCK_ON_PAUSE", m_src)
+        self.assertIn("move_android_task_to_back", m_src)
+        self.assertIn("sent_files_count", m_src)
+        self.assertIn("received_files_count", m_src)
+        self.assertEqual(i18n.tr("keep_alive", "ru"), "Работа в фоне")
+        self.assertIn("Передано: 3", i18n.tr("notif_stats_fmt", "ru", sent=3, received=5))
+
+        css_txt = web_ui.get_css("dark")
+        self.assertIn("appearance: none;", css_txt)
+        self.assertIn(".checkbox:checked::after", css_txt)
+        self.assertIn("#status:empty", css_txt)
 
         sessions = {}
         lock = server.threading.Lock()

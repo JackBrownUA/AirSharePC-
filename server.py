@@ -1093,7 +1093,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         if real_path != self.real_storage:
             r.append(f'<a class="upload-btn" href="../">{html.escape(tr("web_back_btn", lang))}</a>')
         r.append('</div>')
-        r.append('<p id="status" style="margin-top:12px;color:#60a5fa;min-height:20px;"></p></div>')
+        r.append('<p id="status"></p></div>')
 
         r.append(
             '<div class="search-wrap">'

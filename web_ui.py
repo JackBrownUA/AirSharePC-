@@ -426,59 +426,68 @@ def get_css(theme="dark"):
     }}
     .container {{
         max-width: 840px;
-        margin: 54px auto 64px;
+        margin: 46px auto 56px;
         position: relative;
         z-index: 2;
     }}
     .header {{
-        padding: 26px 24px;
-        border-radius: 22px;
-        margin-bottom: 18px;
+        padding: 13px 18px;
+        border-radius: 16px;
+        margin-bottom: 12px;
         text-align: center;
         background: rgba(18, 23, 38, 0.65);
         border: 1px solid rgba(255, 255, 255, 0.12);
-        box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45), inset 0 1px 1px rgba(255, 255, 255, 0.15);
+        box-shadow: 0 8px 26px rgba(0, 0, 0, 0.42), inset 0 1px 1px rgba(255, 255, 255, 0.14);
         backdrop-filter: blur(16px);
         -webkit-backdrop-filter: blur(16px);
     }}
     body.light .header {{
-        background: rgba(255, 255, 255, 0.82);
+        background: rgba(255, 255, 255, 0.84);
         border: 1px solid rgba(15, 23, 42, 0.08);
-        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.07), inset 0 1px 1px rgba(255, 255, 255, 0.9);
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.07), inset 0 1px 1px rgba(255, 255, 255, 0.9);
     }}
     .header h1 {{
-        font-size: 32px;
-        font-weight: 300;
-        letter-spacing: 0.6px;
-        margin-bottom: 6px;
+        font-size: 20px;
+        font-weight: 500;
+        letter-spacing: 0.4px;
+        margin-bottom: 2px;
     }}
     .header p {{
         color: rgba(203, 213, 225, 0.68);
-        font-size: 14px;
+        font-size: 12.5px;
         word-break: break-all;
     }}
     body.light .header p {{
         color: #475569;
     }}
+    #status {{
+        margin-top: 8px;
+        color: #60a5fa;
+        font-size: 13px;
+    }}
+    #status:empty {{
+        display: none;
+        margin-top: 0;
+    }}
     .actions-bar {{
         display: flex;
-        gap: 12px;
+        gap: 10px;
         justify-content: center;
         flex-wrap: wrap;
-        margin-top: 18px;
+        margin-top: 9px;
     }}
     .upload-btn {{
         display: inline-block;
-        padding: 13px 26px;
-        border-radius: 24px;
+        padding: 8px 18px;
+        border-radius: 18px;
         background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
         color: #ffffff;
         border: 1px solid rgba(255, 255, 255, 0.28);
         cursor: pointer;
-        font-size: 15px;
+        font-size: 13.5px;
         font-weight: 500;
         text-decoration: none;
-        box-shadow: 0 8px 22px rgba(59, 130, 246, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.35);
+        box-shadow: 0 6px 18px rgba(59, 130, 246, 0.38), inset 0 1px 1px rgba(255, 255, 255, 0.35);
         transition: transform 0.2s ease, box-shadow 0.25s ease, filter 0.2s ease;
     }}
     .upload-btn:hover {{
@@ -748,12 +757,61 @@ def get_css(theme="dark"):
         filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
     }}
     .checkbox {{
+        appearance: none;
+        -webkit-appearance: none;
+        -moz-appearance: none;
         width: 20px;
         height: 20px;
+        border-radius: 6px;
+        border: 1.5px solid rgba(148, 163, 184, 0.36);
+        background: rgba(15, 23, 42, 0.68);
+        box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.38);
         cursor: pointer;
-        margin-right: 8px;
+        margin-right: 10px;
         flex-shrink: 0;
-        accent-color: #3b82f6;
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        vertical-align: middle;
+        outline: none;
+        transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }}
+    .checkbox:hover {{
+        border-color: rgba(96, 165, 250, 0.72);
+        background: rgba(30, 41, 59, 0.85);
+    }}
+    .checkbox:active {{
+        transform: scale(0.92);
+    }}
+    body.light .checkbox {{
+        background: rgba(241, 245, 249, 0.92);
+        border-color: rgba(100, 116, 139, 0.38);
+        box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.06);
+    }}
+    body.light .checkbox:hover {{
+        border-color: rgba(37, 99, 235, 0.65);
+        background: #ffffff;
+    }}
+    .checkbox:checked,
+    body.light .checkbox:checked {{
+        background: linear-gradient(135deg, #3b82f6 0%, #20c997 100%);
+        border-color: rgba(147, 197, 253, 0.65);
+        box-shadow: 0 3px 10px rgba(59, 130, 246, 0.42), inset 0 1px 1px rgba(255, 255, 255, 0.35);
+    }}
+    .checkbox::after {{
+        content: "";
+        width: 5px;
+        height: 9px;
+        border: solid #ffffff;
+        border-width: 0 2.2px 2.2px 0;
+        border-radius: 1px;
+        transform: rotate(45deg) scale(0);
+        margin-top: -2px;
+        transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }}
+    .checkbox:checked::after {{
+        transform: rotate(45deg) scale(1);
     }}
     .credit-badge {{
         position: fixed;

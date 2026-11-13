@@ -1,4 +1,4 @@
-# Модуль интеграции с Android / Pyjnius для AirShare PC (v1.3.5): Wi-Fi IP, имя устройства, системная тема, права памяти и фоновый режим
+# Модуль интеграции с Android / Pyjnius для AirShare PC (v1.3.5): Wi-Fi IP, имя устройства, системная тема, права памяти, фоновый Foreground Service и уведомление со счётчиками передач
 
 import logging
 import socket
@@ -163,7 +163,58 @@ def request_android_full_storage():
         logger.warning("Не удалось запросить доступ к хранилищу Android: %s", exc)
 
 
-def set_android_foreground_notification(active=True, url_text="", lang="en"):
+def request_android_notification_permission():
+    try:
+        from kivy.utils import platform
+    except Exception:
+        return
+    if platform != "android":
+        return
+    try:
+        from jnius import autoclass
+        BuildVersion = autoclass("android.os.Build$VERSION")
+        if BuildVersion.SDK_INT >= 33:
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+            activity = getattr(PythonActivity, "mActivity", None)
+            if activity is not None:
+                perm = "android.permission.POST_NOTIFICATIONS"
+                try:
+                    if activity.checkSelfPermission(perm) != 0:
+                        activity.requestPermissions([perm], 1002)
+                        return
+                except Exception:
+                    pass
+            try:
+                from android.permissions import request_permissions
+                request_permissions(["android.permission.POST_NOTIFICATIONS"])
+            except Exception:
+                pass
+    except Exception as exc:
+        logger.debug("Не удалось запросить разрешение POST_NOTIFICATIONS: %s", exc)
+
+
+def move_android_task_to_back() -> bool:
+    try:
+        from kivy.utils import platform
+        if platform != "android":
+            return False
+        from jnius import autoclass
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        activity = getattr(PythonActivity, "mActivity", None)
+        if activity is not None:
+            return bool(activity.moveTaskToBack(True))
+    except Exception as exc:
+        logger.debug("Не удалось свернуть Activity в фон: %s", exc)
+    return False
+
+
+def set_android_foreground_notification(
+    active=True,
+    url_text="",
+    lang="en",
+    sent_count=0,
+    received_count=0,
+):
     try:
         from kivy.utils import platform
     except Exception:
@@ -177,6 +228,35 @@ def set_android_foreground_notification(active=True, url_text="", lang="en"):
         activity = getattr(PythonActivity, "mActivity", None)
         if activity is None:
             return
+
+        title_str = f"{APP_NAME} — {tr('server_active', lang)}"
+        stats_str = tr("notif_stats_fmt", lang, sent=int(sent_count), received=int(received_count))
+        clean_url = (url_text or "").strip()
+        body_str = f"{stats_str}\n{clean_url}" if clean_url else stats_str
+
+        if active:
+            request_android_notification_permission()
+
+        # 1. Запускаем или останавливаем нативный Foreground Service (AirShareKeepAliveService)
+        try:
+            Intent = autoclass("android.content.Intent")
+            ServiceClass = autoclass("org.kivy.android.AirShareKeepAliveService")
+            srv_intent = Intent(activity, ServiceClass)
+            if not active:
+                srv_intent.setAction("STOP")
+                activity.startService(srv_intent)
+            else:
+                srv_intent.putExtra("title", title_str)
+                srv_intent.putExtra("body", body_str)
+                BuildVersion = autoclass("android.os.Build$VERSION")
+                if BuildVersion.SDK_INT >= 26:
+                    activity.startForegroundService(srv_intent)
+                else:
+                    activity.startService(srv_intent)
+        except Exception as svc_exc:
+            logger.debug("AirShareKeepAliveService fallback: %s", svc_exc)
+
+        # 2. Напрямую обновляем уведомление в шторке через NotificationManager
         nm = activity.getSystemService(Context.NOTIFICATION_SERVICE)
         if nm is None:
             return
@@ -193,6 +273,7 @@ def set_android_foreground_notification(active=True, url_text="", lang="en"):
                 APP_NAME,
                 NotificationManager.IMPORTANCE_LOW,
             )
+            channel.setShowBadge(False)
             nm.createNotificationChannel(channel)
             NotificationBuilder = autoclass("android.app.Notification$Builder")
             builder = NotificationBuilder(activity, NOTIFICATION_CHANNEL_ID)
@@ -202,8 +283,6 @@ def set_android_foreground_notification(active=True, url_text="", lang="en"):
 
         app_info = activity.getApplicationInfo()
         icon_id = app_info.icon if app_info is not None and app_info.icon else 17301659
-        title_str = f"{APP_NAME} — {tr('server_active', lang)}"
-        body_str = url_text or tr("wifi_online", lang)
 
         Intent = autoclass("android.content.Intent")
         PendingIntent = autoclass("android.app.PendingIntent")
@@ -215,9 +294,15 @@ def set_android_foreground_notification(active=True, url_text="", lang="en"):
         pending_intent = PendingIntent.getActivity(activity, 0, intent, pi_flags)
 
         builder.setContentTitle(title_str)
-        builder.setContentText(body_str)
+        builder.setContentText(stats_str)
+        try:
+            BigTextStyle = autoclass("android.app.Notification$BigTextStyle")
+            builder.setStyle(BigTextStyle().bigText(body_str))
+        except Exception:
+            pass
         builder.setSmallIcon(icon_id)
         builder.setOngoing(True)
+        builder.setOnlyAlertOnce(True)
         builder.setContentIntent(pending_intent)
         notif = builder.build()
         nm.notify(NOTIFICATION_ID, notif)
