@@ -270,9 +270,6 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn(b"X-Content-Type-Options: nosniff", hdr)
         self.assertEqual(body, b"56789ABCDE")
 
-        sc_resp = _run_request(self.storage_dir, b"GET /?shortcut=1 HTTP/1.1\r\nHost: 192.168.50.98:8080\r\n\r\n")
-        self.assertIn(b"[InternetShortcut]", sc_resp)
-        self.assertIn(b"URL=http://192.168.50.98:8080/", sc_resp)
 
         server.AirShareHandler.set_ip_disconnected("192.168.1.77", True)
         resp_disc = _run_request(self.storage_dir, range_req, client_ip="192.168.1.77")
@@ -329,7 +326,7 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn(b'action="/login"', resp_login)
         self.assertIn(b'id="pinEyeBtn"', resp_login)
         self.assertIn(b'id="langGlobeBtn"', resp_login)
-        self.assertIn(b'id="shortcutBtn"', resp_login)
+        self.assertNotIn(b'id="shortcutBtn"', resp_login)
         self.assertNotIn(b"httpsSetupBtn", resp_login)
 
         post_body = b"pin=918273&next=%2F"
@@ -356,8 +353,8 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn(b'id="ambilightCanvas"', resp_dir)
         self.assertIn(b'id="uploadProgressDock"', resp_dir)
         self.assertIn(b'id="fileSearchInput"', resp_dir)
-        self.assertIn(b'id="scrubCanvas"', resp_dir)
-        self.assertIn(b'id="shortcutBtn"', resp_dir)
+        self.assertIn(b'id="scrubTime"', resp_dir)
+        self.assertNotIn(b'id="shortcutBtn"', resp_dir)
 
         search_req = f"GET /?q=144102&ajax=1 HTTP/1.1\r\nHost: localhost\r\nCookie: {cookie_kv}\r\n\r\n".encode("utf-8")
         search_resp = _run_request(self.storage_dir, search_req, client_ip="192.168.50.56")
@@ -595,6 +592,9 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn("appearance: none;", css_txt)
         self.assertIn(".checkbox:checked::after", css_txt)
         self.assertIn("#status:empty", css_txt)
+        self.assertNotIn("keep_alive_row", m_src)
+        self.assertNotIn("keep_alive_switch", m_src)
+        self.assertNotIn("scrubVideo", Path("player_ui.py").read_text(encoding="utf-8"))
 
         sessions = {}
         lock = server.threading.Lock()

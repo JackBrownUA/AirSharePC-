@@ -32,7 +32,6 @@ from android_bridge import (
 from server import AirShareHandler, ReusableThreadingServer
 from themes import THEMES
 from ui_widgets import (
-    AnimatedToggleSwitch,
     AppSplashScreen,
     ClickableCard,
     DrawerMenuRow,
@@ -209,8 +208,6 @@ class AirShareApp(App):
 
     def set_keep_alive(self, enabled):
         self.keep_alive_locked = bool(enabled)
-        if hasattr(self, "keep_alive_switch"):
-            self.keep_alive_switch.set_active(self.keep_alive_locked, animate=True)
         try:
             Window.allow_screensaver = not self.keep_alive_locked
         except Exception as exc:
@@ -344,16 +341,16 @@ class AirShareApp(App):
             orientation="vertical",
             padding=[dp(16), dp(16), dp(16), dp(12)],
             spacing=dp(8),
-            size_hint=(1, 0.55),
+            size_hint=(1, 0.48),
         )
-        icon_holder = AnchorLayout(size_hint=(1, 0.34))
+        icon_holder = AnchorLayout(size_hint=(1, 0.42))
         self.monitor_icon = VectorIcon(
             icon_type="pc", color=p["text"], size_hint=(None, None), size=(dp(56), dp(44))
         )
         icon_holder.add_widget(self.monitor_icon)
         self.radar_card.attach_target(self.monitor_icon)
 
-        btn_anchor = AnchorLayout(size_hint=(1, 0.22))
+        btn_anchor = AnchorLayout(size_hint=(1, 0.26))
         self.connect_btn = RoundedActionButton(
             text=self._t("connect"),
             bg_color=p["green"],
@@ -366,31 +363,7 @@ class AirShareApp(App):
         self.connect_btn.bind(on_press=self.toggle_server)
         btn_anchor.add_widget(self.connect_btn)
 
-        keep_alive_anchor = AnchorLayout(size_hint=(1, 0.18))
-        self.keep_alive_row = ClickableCard(
-            bg_color=p["pill_bg"],
-            border_color=p["card_border"],
-            radius=dp(16),
-            orientation="horizontal",
-            size_hint=(0.94, None),
-            height=dp(38),
-            padding=[dp(14), dp(5), dp(12), dp(5)],
-            spacing=dp(10),
-        )
-        self.keep_alive_label = make_label(self._t("keep_alive"), size=12)
-        self.keep_alive_switch = AnimatedToggleSwitch(
-            active=self.keep_alive_locked,
-            size_hint=(None, None),
-            size=(dp(48), dp(26)),
-            pos_hint={"center_y": 0.5},
-        )
-        self.keep_alive_switch.bind(on_press=lambda *_: self.set_keep_alive(not self.keep_alive_locked))
-        self.keep_alive_row.bind(on_press=lambda *_: self.set_keep_alive(not self.keep_alive_locked))
-        self.keep_alive_row.add_widget(self.keep_alive_label)
-        self.keep_alive_row.add_widget(self.keep_alive_switch)
-        keep_alive_anchor.add_widget(self.keep_alive_row)
-
-        addr_anchor = AnchorLayout(size_hint=(1, 0.18))
+        addr_anchor = AnchorLayout(size_hint=(1, 0.22))
         addr_row = BoxLayout(
             orientation="horizontal",
             size_hint=(0.94, None),
@@ -427,10 +400,10 @@ class AirShareApp(App):
             self._t("http_warn"),
             size=10.5,
             halign="center",
-            size_hint=(1, 0.08),
+            size_hint=(1, 0.10),
         )
 
-        for w in (icon_holder, btn_anchor, keep_alive_anchor, addr_anchor, self.http_warn_label):
+        for w in (icon_holder, btn_anchor, addr_anchor, self.http_warn_label):
             self.radar_card.add_widget(w)
         self.main_content.add_widget(self.radar_card)
 
@@ -446,7 +419,7 @@ class AirShareApp(App):
             orientation="vertical",
             padding=[dp(14), dp(12), dp(14), dp(12)],
             spacing=dp(10),
-            size_hint=(1, 0.27),
+            size_hint=(1, 0.34),
         )
         self.transfers_card.bind(on_press=self.open_transfers_modal)
 
@@ -687,7 +660,6 @@ class AirShareApp(App):
 
     def apply_language(self):
         self.wifi_label.text = get_network_label(self.language)
-        self.keep_alive_label.text = self._t("keep_alive")
         self.http_warn_label.text = self._t("http_warn")
         self.transfers_header.text = f"[b]{self._t('recent_transfers')}[/b]"
         if not self.transfer_history:
@@ -893,8 +865,6 @@ class AirShareApp(App):
         self.wifi_pill.update_colors(p["pill_bg"], p["card_border"])
         self.radar_card.update_radar_colors(p["radar_bg"], p["card_border"], p["radar_ring"], p["radar_glow"])
         self.monitor_icon.set_color(p["text"])
-        self.keep_alive_row.update_colors(p["pill_bg"], p["card_border"])
-        self.keep_alive_label.color = p["text"]
         self.addr_pill.update_colors(p["pill_bg"], p["card_border"])
         self.addr_label.color = p["text"]
         self.copy_btn.update_colors(p["pill_bg"], p["card_border"])

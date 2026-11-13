@@ -46,7 +46,7 @@ from security import (
     register_auth_failure,
     verify_sha256_digest,
 )
-from utils import add_recent_ip, format_size, get_local_ip, load_settings
+from utils import add_recent_ip, format_size, load_settings
 from web_ui import (
     get_css,
     get_download_svg,
@@ -59,9 +59,9 @@ from web_ui import (
 
 logger = logging.getLogger("airshare.server")
 
-STREAM_CHUNK_SIZE = 2 * 1024 * 1024
-SOCKET_SEND_BUFFER = 8 * 1024 * 1024
-SCRUB_MAX_BYTES = 1024 * 1024
+STREAM_CHUNK_SIZE = 1024 * 1024
+SOCKET_SEND_BUFFER = 4 * 1024 * 1024
+THUMB_MAX_BYTES = 1536 * 1024
 
 
 class _ZipStream:
@@ -557,27 +557,6 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         except OSError:
             self.send_error(500, "Hash error")
 
-    def _serve_shortcut_file(self):
-        srv_ip = get_local_ip()
-        srv_port = (
-            self.server.server_address[1]
-            if getattr(self, "server", None) and getattr(self.server, "server_address", None)
-            else 8080
-        )
-        host_hdr = self.headers.get("Host") or f"{srv_ip}:{srv_port}"
-        target_url = f"http://{host_hdr}/"
-        body = (
-            "[InternetShortcut]\r\n"
-            f"URL={target_url}\r\n"
-            "IconIndex=0\r\n"
-        ).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/internet-shortcut")
-        self.send_header("Content-Disposition", make_content_disposition("AirShare PC.url", "attachment"))
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
     def do_HEAD(self):
         parsed = urllib.parse.urlparse(self.path)
         if serve_pwa_asset(self, parsed.path):
@@ -600,11 +579,6 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         if serve_pwa_asset(self, parsed.path):
             return
-        pre_params = urllib.parse.parse_qs(parsed.query)
-        if "shortcut" in pre_params:
-            self._serve_shortcut_file()
-            return
-
         if not self.check_auth_or_respond():
             return
 
@@ -871,11 +845,11 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 return
 
-            is_scrub = "scrub=1" in urllib.parse.urlparse(self.path).query
+            is_thumb = "thumb=1" in urllib.parse.urlparse(self.path).query
             if byte_range is not None:
                 start, end = byte_range
-                if is_scrub and (end - start + 1) > SCRUB_MAX_BYTES:
-                    end = min(file_size - 1, start + SCRUB_MAX_BYTES - 1)
+                if is_thumb and (end - start + 1) > THUMB_MAX_BYTES:
+                    end = min(file_size - 1, start + THUMB_MAX_BYTES - 1)
                 chunk_len = end - start + 1
                 self.send_response(206, "Partial Content")
                 self.send_header("Content-Type", ctype)
@@ -1172,7 +1146,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                         f'<input type="checkbox" class="checkbox" name="files" value="{safe_val}">'
                         '<div class="file-info">'
                         f'<a class="thumb-box" href="{quoted_name}" onclick="{play_onclick}" tabindex="-1">'
-                        f'<video class="file-thumb" data-src="{quoted_name}#t=0.5" preload="metadata" muted playsinline></video>'
+                        f'<video class="file-thumb" data-src="{quoted_name}?thumb=1#t=0.5" preload="metadata" muted playsinline></video>'
                         '<span class="vid-badge">▶</span>'
                         '</a>'
                         '<div class="file-text-col">'

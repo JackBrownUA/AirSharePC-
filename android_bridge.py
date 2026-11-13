@@ -270,7 +270,7 @@ def set_android_foreground_notification(
             NotificationManager = autoclass("android.app.NotificationManager")
             channel = NotificationChannel(
                 NOTIFICATION_CHANNEL_ID,
-                APP_NAME,
+                f"{APP_NAME} — {tr('keep_alive', lang)}",
                 NotificationManager.IMPORTANCE_LOW,
             )
             channel.setShowBadge(False)

@@ -1,4 +1,4 @@
-# Модуль кинотеатр-плеера AirShare PC (v1.3.5): Ambilight-свечение, Resume Playback, Hover Scrubbing Preview, PiP, мини-плеер и плавающий док прогресса
+# Модуль кинотеатр-плеера AirShare PC (v1.3.5): мгновенное воспроизведение по локальной сети без дублирующих потоков, Resume Playback, PiP, мини-плеер и плавающий док прогресса
 
 import html
 import json
@@ -85,14 +85,12 @@ def get_player_css() -> str:
     body.light .dock-meta {
         color: #475569;
     }
-    /* Кинотеатр-плеер с динамической подсветкой Ambilight, Hover Scrubbing, Resume и Mini-player */
+    /* Кинотеатр-плеер для мгновенного воспроизведения по локальной сети */
     .media-modal {
         position: fixed;
         inset: 0;
         z-index: 60;
-        background: rgba(4, 6, 12, 0.86);
-        backdrop-filter: blur(18px);
-        -webkit-backdrop-filter: blur(18px);
+        background: rgba(4, 6, 12, 0.88);
         display: none;
         align-items: center;
         justify-content: center;
@@ -107,8 +105,6 @@ def get_player_css() -> str:
         height: auto;
         padding: 0;
         background: transparent;
-        backdrop-filter: none;
-        -webkit-backdrop-filter: none;
         pointer-events: auto;
     }
     .player-shell {
@@ -116,7 +112,7 @@ def get_player_css() -> str:
         width: 100%;
         max-width: 960px;
         border-radius: 24px;
-        background: rgba(14, 18, 32, 0.90);
+        background: rgba(14, 18, 32, 0.94);
         border: 1px solid rgba(255, 255, 255, 0.18);
         box-shadow: 0 24px 64px rgba(0, 0, 0, 0.78);
         padding: 16px 18px 18px;
@@ -128,15 +124,15 @@ def get_player_css() -> str:
     }
     #ambilightCanvas {
         position: absolute;
-        inset: -38px;
-        width: calc(100% + 76px);
-        height: calc(100% + 76px);
+        inset: -28px;
+        width: calc(100% + 56px);
+        height: calc(100% + 56px);
         z-index: -1;
-        filter: blur(55px) saturate(1.9);
-        opacity: 0.85;
+        filter: blur(36px) saturate(1.6);
+        opacity: 0;
         pointer-events: none;
-        border-radius: 40px;
-        transition: opacity 0.4s ease;
+        border-radius: 36px;
+        transition: opacity 0.35s ease;
     }
     .player-header {
         display: flex;
@@ -253,7 +249,6 @@ def get_player_css() -> str:
         font-weight: 600;
         cursor: pointer;
     }
-    /* Интерактивный таймлайн с превью кадра при наведении (Hover Scrubbing Preview) */
     .timeline-wrap {
         position: relative;
         margin-top: 12px;
@@ -277,27 +272,19 @@ def get_player_css() -> str:
     }
     .scrub-preview {
         position: absolute;
-        bottom: 24px;
+        bottom: 18px;
         left: 0;
         transform: translateX(-50%);
-        padding: 5px;
-        border-radius: 11px;
+        padding: 4px 9px;
+        border-radius: 8px;
         background: rgba(15, 23, 42, 0.94);
-        border: 1px solid rgba(255, 255, 255, 0.24);
-        box-shadow: 0 10px 26px rgba(0, 0, 0, 0.65);
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
         display: none;
-        flex-direction: column;
         align-items: center;
-        gap: 4px;
+        justify-content: center;
         pointer-events: none;
         z-index: 15;
-    }
-    #scrubCanvas {
-        width: 152px;
-        height: 86px;
-        border-radius: 7px;
-        background: #090d16;
-        display: block;
     }
     .scrub-time {
         font-size: 11.5px;
@@ -317,11 +304,11 @@ def get_media_modal_html(lang: str = "en") -> str:
     return (
         '<div class="media-modal" id="mediaModal">'
         '<div class="player-shell">'
-        '<canvas id="ambilightCanvas" width="64" height="36"></canvas>'
+        '<canvas id="ambilightCanvas" width="16" height="9"></canvas>'
         '<div class="player-header">'
         '<div class="player-title" id="playerTitle">AirShare Cinema</div>'
         '<div class="player-top-btns">'
-        f'<button type="button" class="p-chip-btn active" onclick="toggleAmbilight(this)">{ambi_txt}</button>'
+        f'<button type="button" class="p-chip-btn" id="ambiBtn" onclick="toggleAmbilight(this)">{ambi_txt}</button>'
         f'<button type="button" class="p-chip-btn" onclick="togglePiP()">{pip_txt}</button>'
         f'<button type="button" class="p-chip-btn" onclick="toggleMiniPlayer()">{mini_txt}</button>'
         f'<button type="button" class="p-chip-btn close-btn" onclick="closeMediaPlayer()">✕ {close_txt}</button>'
@@ -336,11 +323,9 @@ def get_media_modal_html(lang: str = "en") -> str:
         '</div></div>'
         '<div class="timeline-wrap" id="timelineWrap">'
         '<div class="scrub-preview" id="scrubPreview">'
-        '<canvas id="scrubCanvas" width="152" height="86"></canvas>'
         '<span class="scrub-time" id="scrubTime">00:00</span>'
         '</div>'
         '<div class="timeline-track"><div class="timeline-fill" id="timelineFill"></div></div>'
-        '<video id="scrubVideo" muted playsinline preload="none" style="display:none;"></video>'
         '</div>'
         '</div></div>'
         '<div class="upload-dock" id="uploadProgressDock">'
@@ -359,7 +344,7 @@ def get_media_modal_html(lang: str = "en") -> str:
 def get_player_script(lang: str = "en") -> str:
     msg_resume_ask = json.dumps(tr("web_resume_ask", lang))
     return f"""
-    let _ambiEnabled = true;
+    let _ambiEnabled = false;
     let _ambiRaf = null;
     let _currentMediaKey = "";
     let _osdTimer = null;
@@ -381,11 +366,23 @@ def get_player_script(lang: str = "en") -> str:
         _osdTimer = setTimeout(function() {{ osd.classList.remove("show"); }}, 650);
     }}
 
+    function _pauseBackgroundThumbVideos() {{
+        const thumbs = document.querySelectorAll("video.file-thumb[src]");
+        for (let i = 0; i < thumbs.length; i++) {{
+            try {{
+                thumbs[i].pause();
+                if (thumbs[i].readyState < 2) {{
+                    thumbs[i].removeAttribute("src");
+                    thumbs[i].load();
+                }}
+            }} catch (e) {{}}
+        }}
+    }}
+
     function openMediaPlayer(url, filename, kind) {{
         const modal = document.getElementById("mediaModal");
         const vid = document.getElementById("mainVideo");
         const img = document.getElementById("mainImage");
-        const scrubVid = document.getElementById("scrubVideo");
         const tlWrap = document.getElementById("timelineWrap");
         const titleEl = document.getElementById("playerTitle");
         const resumeBanner = document.getElementById("resumeBanner");
@@ -406,18 +403,18 @@ def get_player_script(lang: str = "en") -> str:
             img.onload = function() {{ drawAmbilightOnce(img); }};
             img.src = url;
         }} else {{
+            _pauseBackgroundThumbVideos();
             img.style.display = "none";
             img.removeAttribute("src");
             vid.style.display = "block";
             if (tlWrap) tlWrap.style.display = "block";
             vid.src = url;
-            if (scrubVid) {{ scrubVid.removeAttribute("src"); scrubVid.dataset.src = url + (url.indexOf("?") === -1 ? "?scrub=1" : "&scrub=1"); }}
             try {{
                 const savedVol = localStorage.getItem("airshare_vol");
                 if (savedVol !== null) vid.volume = Math.max(0, Math.min(1, parseFloat(savedVol)));
             }} catch (e) {{}}
             vid.play().catch(function(){{}});
-            startAmbilightLoop();
+            if (_ambiEnabled) startAmbilightLoop();
 
             if (resumeBanner) resumeBanner.classList.remove("show");
             vid.onloadedmetadata = function() {{
@@ -450,24 +447,32 @@ def get_player_script(lang: str = "en") -> str:
     function closeMediaPlayer() {{
         const modal = document.getElementById("mediaModal");
         const vid = document.getElementById("mainVideo");
-        const scrubVid = document.getElementById("scrubVideo");
         if (vid) {{
             vid.pause();
             vid.removeAttribute("src");
+            try {{ vid.load(); }} catch (e) {{}}
         }}
-        if (scrubVid) scrubVid.removeAttribute("src");
         if (_ambiRaf) {{ cancelAnimationFrame(_ambiRaf); _ambiRaf = null; }}
         if (modal) {{
             modal.classList.remove("open");
             modal.classList.remove("mini-player");
+        }}
+        if (document.body.classList.contains("show-previews") && typeof _activateVisibleThumbs === "function") {{
+            setTimeout(_activateVisibleThumbs, 150);
         }}
     }}
 
     function toggleAmbilight(btn) {{
         _ambiEnabled = !_ambiEnabled;
         const c = document.getElementById("ambilightCanvas");
-        if (c) c.style.opacity = _ambiEnabled ? "0.85" : "0";
+        if (c) c.style.opacity = _ambiEnabled ? "0.75" : "0";
         if (btn) btn.classList.toggle("active", _ambiEnabled);
+        if (_ambiEnabled) {{
+            startAmbilightLoop();
+        }} else if (_ambiRaf) {{
+            cancelAnimationFrame(_ambiRaf);
+            _ambiRaf = null;
+        }}
     }}
 
     function toggleMiniPlayer() {{
@@ -502,6 +507,7 @@ def get_player_script(lang: str = "en") -> str:
 
     function startAmbilightLoop() {{
         if (_ambiRaf) cancelAnimationFrame(_ambiRaf);
+        if (!_ambiEnabled) return;
         const canvas = document.getElementById("ambilightCanvas");
         const vid = document.getElementById("mainVideo");
         if (!canvas || !vid) return;
@@ -509,10 +515,10 @@ def get_player_script(lang: str = "en") -> str:
         let lastDraw = 0;
         function step(ts) {{
             const modal = document.getElementById("mediaModal");
-            if (!modal || !modal.classList.contains("open")) return;
+            if (!modal || !modal.classList.contains("open") || !_ambiEnabled) return;
             _ambiRaf = requestAnimationFrame(step);
-            if (!_ambiEnabled || vid.paused || vid.ended) return;
-            if (ts - lastDraw < 65) return;
+            if (vid.paused || vid.ended || vid.seeking) return;
+            if (ts - lastDraw < 220) return;
             lastDraw = ts;
             try {{
                 ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
@@ -527,8 +533,6 @@ def get_player_script(lang: str = "en") -> str:
             const tlWrap = document.getElementById("timelineWrap");
             const tlFill = document.getElementById("timelineFill");
             const scrubBox = document.getElementById("scrubPreview");
-            const scrubVid = document.getElementById("scrubVideo");
-            const scrubCanvas = document.getElementById("scrubCanvas");
             const scrubTime = document.getElementById("scrubTime");
             if (!vid) return;
 
@@ -555,12 +559,7 @@ def get_player_script(lang: str = "en") -> str:
                 showPlayerOsd("🔊 " + Math.round(vid.volume * 100) + "%");
             }}, {{ passive: false }});
 
-            if (tlWrap && scrubBox && scrubVid && scrubCanvas) {{
-                const sCtx = scrubCanvas.getContext("2d");
-                scrubVid.addEventListener("seeked", function() {{
-                    try {{ sCtx.drawImage(scrubVid, 0, 0, scrubCanvas.width, scrubCanvas.height); }} catch (e) {{}}
-                }});
-                let _scrubDebounce = null;
+            if (tlWrap && scrubBox) {{
                 tlWrap.addEventListener("mousemove", function(e) {{
                     if (!vid.duration) return;
                     const rect = tlWrap.getBoundingClientRect();
@@ -569,25 +568,12 @@ def get_player_script(lang: str = "en") -> str:
                     scrubBox.style.display = "flex";
                     scrubBox.style.left = (ratio * 100) + "%";
                     if (scrubTime) scrubTime.innerText = formatClock(targetSec);
-                    if (_scrubDebounce) clearTimeout(_scrubDebounce);
-                    _scrubDebounce = setTimeout(function() {{
-                        if (!vid.seeking) {{
-                            if (!scrubVid.getAttribute("src") && scrubVid.dataset.src) {{
-                                scrubVid.src = scrubVid.dataset.src;
-                            }}
-                            if (Math.abs((scrubVid.currentTime || 0) - targetSec) > 1.2 && !scrubVid.seeking) {{
-                                scrubVid.currentTime = targetSec;
-                            }}
-                        }}
-                    }}, 140);
                 }});
                 tlWrap.addEventListener("mouseleave", function() {{
-                    if (_scrubDebounce) clearTimeout(_scrubDebounce);
                     scrubBox.style.display = "none";
                 }});
                 tlWrap.addEventListener("click", function(e) {{
                     if (!vid.duration) return;
-                    if (_scrubDebounce) clearTimeout(_scrubDebounce);
                     const rect = tlWrap.getBoundingClientRect();
                     const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
                     vid.currentTime = ratio * vid.duration;
