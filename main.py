@@ -57,7 +57,6 @@ from utils import (
     get_device_theme,
     get_local_ip,
     get_network_label,
-    get_sslip_domain,
     get_storage_stats,
     has_android_storage_permission,
     is_wifi_connected,
@@ -128,17 +127,16 @@ class AirShareApp(App):
         return path_val
 
     def get_connection_url(self):
-        # При копировании даём красивую доменную ссылку sslip.io с ?pin= для мгновенного входа и установки PWA
+        # При копировании даём прямую локальную ссылку http://<LAN_IP>:<port>/?pin=... (без внешнего DNS sslip.io)
         if not is_wifi_connected():
             return self._t("no_wifi_url")
         ip = get_local_ip()
-        host = get_sslip_domain(ip)
         pwd = (self.saved_password or "").strip()
         if not pwd:
             pwd = load_settings().get("password", "")
             self.saved_password = pwd
         quoted_pwd = urllib.parse.quote(pwd, safe="")
-        return f"http://{host}:{self.server_port}/?pin={quoted_pwd}"
+        return f"http://{ip}:{self.server_port}/?pin={quoted_pwd}"
 
     def get_display_url_text(self):
         # На экране показываем короткий адрес и PIN, чтобы его было легко ввести вручную в браузере

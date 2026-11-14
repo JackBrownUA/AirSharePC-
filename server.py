@@ -447,9 +447,11 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         raw_body = self.rfile.read(max(0, min(length, 4096))).decode("utf-8", errors="ignore") if length > 0 else ""
         form = urllib.parse.parse_qs(raw_body)
         provided_pin = (form.get("pin", [""])[0] or "").strip()
-        next_path = form.get("next", ["/"])[0] or "/"
-        if not next_path.startswith("/") or next_path.startswith("//"):
+        raw_next = form.get("next", ["/"])[0] or "/"
+        if "\r" in raw_next or "\n" in raw_next or not raw_next.startswith("/") or raw_next.startswith("//") or raw_next.startswith("/\\"):
             next_path = "/"
+        else:
+            next_path = raw_next
 
         pwd = self._ensure_password_loaded()
         if hmac.compare_digest(provided_pin.encode("utf-8", "surrogatepass"), pwd.encode("utf-8", "surrogatepass")):
@@ -1129,7 +1131,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             safe_name = html.escape(name)
             safe_data_name = html.escape(name.lower(), quote=True)
             quoted_name = urllib.parse.quote(name, safe="")
-            js_safe_name = html.escape(name.replace("\\", "\\\\").replace("'", "\\'"), quote=True)
+            js_safe_name = html.escape(name.replace("\\", "\\\\").replace("'", "\\'").replace("\r", "").replace("\n", " "), quote=True)
 
             if os.path.isdir(fullname):
                 r.append(

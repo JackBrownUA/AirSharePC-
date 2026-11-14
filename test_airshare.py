@@ -647,5 +647,31 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertNotIn("srvBox.innerHTML = htmlRows", pwa_src)
 
 
+        # 6. Strix: защита от CRLF-инъекции и Open Redirect (/\\evil.com) в POST /login
+        crlf_body = urllib.parse.urlencode({"pin": "918273", "next": "/\r\nX-Injected: 1"}).encode("utf-8")
+        resp_crlf = _run_request(
+            self.storage_dir,
+            (
+                "POST /login HTTP/1.1\r\nHost: localhost\r\n"
+                "Content-Type: application/x-www-form-urlencoded\r\n"
+                f"Content-Length: {len(crlf_body)}\r\n\r\n"
+            ).encode("utf-8") + crlf_body,
+            client_ip="192.168.1.190",
+        )
+        self.assertNotIn(b"X-Injected:", resp_crlf)
+
+        redir_body = urllib.parse.urlencode({"pin": "918273", "next": "/\\evil.com"}).encode("utf-8")
+        resp_redir = _run_request(
+            self.storage_dir,
+            (
+                "POST /login HTTP/1.1\r\nHost: localhost\r\n"
+                "Content-Type: application/x-www-form-urlencoded\r\n"
+                f"Content-Length: {len(redir_body)}\r\n\r\n"
+            ).encode("utf-8") + redir_body,
+            client_ip="192.168.1.191",
+        )
+        self.assertIn(b"Location: /\r\n", resp_redir)
+
+
 if __name__ == "__main__":
     unittest.main()

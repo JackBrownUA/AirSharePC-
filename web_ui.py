@@ -858,6 +858,87 @@ def get_css(theme="dark"):
         stroke-linejoin: round;
         pointer-events: none;
     }}
+
+    @media (max-width: 720px) {{
+        body {{
+            padding: 12px 12px 24px;
+        }}
+        .top-bar {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+            position: relative;
+            z-index: 30;
+        }}
+        .top-controls,
+        .top-right-controls {{
+            position: static;
+            gap: 6px;
+            flex-wrap: wrap;
+        }}
+        #parallaxPill {{
+            display: none !important;
+        }}
+        .ctrl-pill {{
+            padding: 6px 10px;
+            font-size: 12px;
+            gap: 6px;
+        }}
+        .switch {{
+            width: 34px;
+            height: 19px;
+        }}
+        .switch-slider:before {{
+            width: 13px;
+            height: 13px;
+        }}
+        .switch input:checked + .switch-slider:before {{
+            transform: translateX(15px);
+        }}
+        .container {{
+            margin: 0 auto 18px;
+        }}
+        .header {{
+            padding: 12px 14px;
+        }}
+        .header h1 {{
+            font-size: 19px;
+        }}
+        .search-input {{
+            padding: 11px 38px 11px 14px;
+            font-size: 14px;
+        }}
+        .toolbar {{
+            padding: 11px 14px;
+            font-size: 13px;
+        }}
+        .file-item {{
+            padding: 12px 12px;
+            gap: 10px;
+        }}
+        .file-link {{
+            font-size: 15px;
+        }}
+        .download-btn {{
+            width: 38px;
+            height: 38px;
+            border-radius: 12px;
+        }}
+        .download-btn svg {{
+            width: 18px;
+            height: 18px;
+        }}
+        .credit-badge {{
+            position: static;
+            display: block;
+            width: fit-content;
+            margin: 18px auto 4px;
+            font-size: 11.5px;
+        }}
+    }}
     """
     return base_css + get_player_css()
 
@@ -1463,7 +1544,7 @@ def get_top_controls_html(theme="dark", lang="en", show_preview_toggle=False):
         f'{_get_lang_selector_html(cur_lang)}'
         '</div>'
     )
-    return left_html + right_html
+    return '<div class="top-bar">' + left_html + right_html + '</div>'
 
 
 def get_pin_login_page(theme="dark", lang="en", error_msg="", next_path="/"):

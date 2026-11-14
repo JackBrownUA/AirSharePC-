@@ -87,18 +87,23 @@ def search_storage_index(
         cached_ts = search_cache.get("ts", 0.0)
         entries = search_cache.get("entries", [])
 
-    if cached_root != real_storage or (now - cached_ts) > 5.0:
+    if cached_root != real_storage or (now - cached_ts) > 45.0:
         new_entries = []
+        skip_names = {".thumbnails", ".trash", ".Trashes"}
         try:
             for root, dirs, files in os.walk(real_storage, followlinks=False):
-                dirs[:] = [d for d in dirs if not is_temp_part_file(d)]
+                rel_root = os.path.relpath(root, real_storage).replace("\\", "/")
+                if rel_root == "Android":
+                    dirs[:] = [d for d in dirs if d not in ("data", "obb") and not is_temp_part_file(d)]
+                else:
+                    dirs[:] = [d for d in dirs if d not in skip_names and not is_temp_part_file(d)]
                 for d in dirs:
                     full_d = os.path.join(root, d)
                     if not is_within_storage(real_storage, full_d):
                         continue
                     rel_d = os.path.relpath(full_d, real_storage).replace("\\", "/")
                     new_entries.append((d.lower(), d, rel_d, True, tr("web_folder", current_language), "folder"))
-                    if len(new_entries) >= 25000:
+                    if len(new_entries) >= 50000:
                         break
                 for f in files:
                     if is_temp_part_file(f):
@@ -115,9 +120,9 @@ def search_storage_index(
                     ext_low = ext.lower()
                     kind = "image" if ext_low in IMAGE_EXTENSIONS else ("video" if ext_low in VIDEO_EXTENSIONS else "file")
                     new_entries.append((f.lower(), f, rel_f, False, sz, kind))
-                    if len(new_entries) >= 25000:
+                    if len(new_entries) >= 50000:
                         break
-                if len(new_entries) >= 25000:
+                if len(new_entries) >= 50000:
                     break
         except OSError:
             pass
@@ -127,9 +132,10 @@ def search_storage_index(
             search_cache["ts"] = time.monotonic()
             search_cache["entries"] = entries
 
+    tokens = [tok for tok in q.split() if tok]
     matches = []
     for low_name, orig_name, rel_p, is_d, sz_str, kind in entries:
-        if q in low_name:
+        if all(tok in low_name for tok in tokens):
             matches.append(
                 {
                     "name": orig_name,
@@ -139,7 +145,7 @@ def search_storage_index(
                     "kind": kind,
                 }
             )
-            if len(matches) >= 60:
+            if len(matches) >= 250:
                 break
     return matches
 
@@ -152,10 +158,12 @@ def get_search_and_pwa_script() -> str:
         const clearBtn = document.getElementById("searchClearBtn");
         if (clearBtn) clearBtn.style.display = q ? "block" : "none";
 
+        const tokens = q.split(/\\s+/).filter(Boolean);
         const items = document.querySelectorAll("#mainFileList > li.file-item");
         items.forEach(function(li) {
             const name = (li.getAttribute("data-name") || "").toLowerCase();
-            li.style.display = (!q || name.indexOf(q) !== -1) ? "flex" : "none";
+            const matched = tokens.length === 0 || tokens.every(function(tok) { return name.indexOf(tok) !== -1; });
+            li.style.display = matched ? "flex" : "none";
         });
 
         const srvBox = document.getElementById("serverSearchBox");
@@ -225,6 +233,15 @@ def get_search_and_pwa_script() -> str:
             inp.focus();
         }
     }
+
+    window.addEventListener("DOMContentLoaded", function() {
+        const inp = document.getElementById("fileSearchInput");
+        if (inp) {
+            ["input", "keyup", "compositionend", "search"].forEach(function(evtName) {
+                inp.addEventListener(evtName, function() { onSearchInput(inp); });
+            });
+        }
+    });
 
     let _deferredPwaPrompt = null;
     if ("serviceWorker" in navigator) {
