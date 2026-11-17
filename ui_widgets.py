@@ -2,6 +2,7 @@
 
 import math
 import os
+import time
 from kivy.animation import Animation
 from kivy.clock import Clock
 from kivy.core.window import Window
@@ -559,9 +560,9 @@ class RadarCenterButton(RoundedActionButton):
 class DrawerOverlay(Widget):
     scrim_alpha = NumericProperty(0.0)
 
-    def __init__(self, close_callback, **kwargs):
+    def __init__(self, close_callback=None, **kwargs):
         super().__init__(**kwargs)
-        self.close_callback, self.is_open, self.base_rgb = close_callback, False, (0, 0, 0)
+        self.close_callback, self.is_open, self.base_rgb, self.max_alpha = close_callback, False, (0, 0, 0), 0.56
         with self.canvas:
             self.col = Color(0, 0, 0, 0)
             self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[0])
@@ -573,17 +574,26 @@ class DrawerOverlay(Widget):
     def _upd_alpha(self, *_args):
         self.col.rgba = (self.base_rgb[0], self.base_rgb[1], self.base_rgb[2], self.scrim_alpha)
 
+    def set_progress(self, progress, base_rgba=None):
+        if base_rgba is not None:
+            self.base_rgb = base_rgba[:3]
+            self.max_alpha = base_rgba[3]
+        Animation.cancel_all(self, "scrim_alpha")
+        self.scrim_alpha = max(0.0, min(self.max_alpha, self.max_alpha * float(progress)))
+
     def animate_to(self, target_rgba, duration=0.28):
         self.base_rgb = target_rgba[:3]
+        if target_rgba[3] > 0:
+            self.max_alpha = target_rgba[3]
         Animation.cancel_all(self, "scrim_alpha")
-        Animation(scrim_alpha=target_rgba[3], duration=duration, t="out_quad").start(self)
+        Animation(scrim_alpha=target_rgba[3], duration=duration, t="out_cubic").start(self)
 
     def on_touch_down(self, touch):
         if not self.is_open:
             return False
         if self.collide_point(*touch.pos):
-            if self.close_callback:
-                self.close_callback()
+            touch.ud["overlay_tap"] = True
+            touch.ud["overlay_start"] = touch.pos
             return True
         return False
 
@@ -591,25 +601,105 @@ class DrawerOverlay(Widget):
         return self.is_open
 
     def on_touch_up(self, touch):
+        if not self.is_open:
+            return False
+        if touch.ud.get("overlay_tap"):
+            sx, sy = touch.ud.get("overlay_start", touch.pos)
+            if math.hypot(touch.x - sx, touch.y - sy) < dp(12) and self.close_callback:
+                self.close_callback()
+            return True
         return self.is_open
 
 
 class DrawerPanel(RoundedCard):
     is_open = False
+    open_x = dp(16)
+    closed_x = -dp(320)
+    on_gesture_settle = None
+    on_gesture_progress = None
 
     def on_touch_down(self, touch):
-        if not self.is_open or not self.collide_point(*touch.pos):
+        edge_zone = not self.is_open and touch.x <= dp(24)
+        inside_open = self.is_open and self.collide_point(*touch.pos)
+        if not edge_zone and not inside_open:
             return False
+        # Interruptibility mid-animation (ui-gestures-motion Rule 3)
+        Animation.cancel_all(self)
+        touch.ud["drawer_cand"] = True
+        touch.ud["drawer_dragging"] = edge_zone
+        touch.ud["drawer_start_x"] = touch.x
+        touch.ud["drawer_start_y"] = touch.y
+        touch.ud["drawer_orig_x"] = self.x if self.is_open else self.closed_x
+        touch.ud["drawer_last_x"] = touch.x
+        touch.ud["drawer_last_t"] = time.monotonic()
+        touch.ud["drawer_vx"] = 0.0
+        if edge_zone:
+            self.opacity = 1.0
+            self.scale_val = 0.98
+            touch.grab(self)
+            return True
         super().on_touch_down(touch)
         return True
 
     def on_touch_move(self, touch):
-        if not self.is_open or not self.collide_point(*touch.pos):
-            return False
-        super().on_touch_move(touch)
+        if not touch.ud.get("drawer_cand"):
+            if not self.is_open or not self.collide_point(*touch.pos):
+                return False
+            return super().on_touch_move(touch)
+
+        dx = touch.x - touch.ud["drawer_start_x"]
+        dy = touch.y - touch.ud["drawer_start_y"]
+
+        if not touch.ud.get("drawer_dragging"):
+            # Accidental tap slop & direction locking (ui-gestures-motion Rule 5: 8-12dp)
+            if abs(dx) < dp(9) and abs(dy) < dp(9):
+                return True
+            if abs(dy) > abs(dx) * 1.15:
+                touch.ud["drawer_cand"] = False
+                return super().on_touch_move(touch)
+            touch.ud["drawer_dragging"] = True
+            touch.grab(self)
+
+        now = time.monotonic()
+        dt = max(0.001, now - touch.ud["drawer_last_t"])
+        inst_vx = (touch.x - touch.ud["drawer_last_x"]) / dt
+        touch.ud["drawer_vx"] = touch.ud["drawer_vx"] * 0.35 + inst_vx * 0.65
+        touch.ud["drawer_last_x"] = touch.x
+        touch.ud["drawer_last_t"] = now
+
+        # Direct 1:1 pointer tracking + rubber-band damping past open_x (ui-gestures-motion Rules 1 & 4)
+        raw_x = touch.ud["drawer_orig_x"] + dx
+        if raw_x > self.open_x:
+            over = raw_x - self.open_x
+            raw_x = self.open_x + dp(18) * (1.0 - math.exp(-over / dp(42)))
+        else:
+            raw_x = max(self.closed_x, raw_x)
+
+        self.x = raw_x
+        span = max(dp(1), self.open_x - self.closed_x)
+        prog = max(0.0, min(1.0, (self.x - self.closed_x) / span))
+        self.opacity = max(0.25, min(1.0, prog * 1.15))
+        self.scale_val = 0.96 + 0.04 * prog
+        if callable(self.on_gesture_progress):
+            self.on_gesture_progress(prog)
         return True
 
     def on_touch_up(self, touch):
+        if touch.grab_current is self:
+            touch.ungrab(self)
+        if touch.ud.get("drawer_dragging"):
+            touch.ud["drawer_cand"] = False
+            touch.ud["drawer_dragging"] = False
+            vx = touch.ud.get("drawer_vx", 0.0)
+            span = max(dp(1), self.open_x - self.closed_x)
+            prog = (self.x - self.closed_x) / span
+            # Velocity-aware release threshold (ui-gestures-motion Rule 2)
+            should_open = True if vx > dp(240) else (False if vx < -dp(240) else (prog >= 0.5))
+            speed_factor = max(0.14, min(0.28, 0.26 - min(abs(vx) / dp(2200), 0.12)))
+            if callable(self.on_gesture_settle):
+                self.on_gesture_settle(should_open, duration=speed_factor)
+            return True
+        touch.ud["drawer_cand"] = False
         if not self.is_open:
             return False
         return True if super().on_touch_up(touch) else self.collide_point(*touch.pos)
@@ -785,9 +875,7 @@ class NavTabItem(ButtonBehavior, BoxLayout):
 
 
 class ToastBanner(RoundedCard):
-    # Всплывающее сверху уведомление о подключении устройства или неверном PIN
-    on_touch_down = on_touch_move = on_touch_up = lambda self, touch: False
-
+    # Всплывающее сверху уведомление с поддержкой свайпа вверх 1:1 (ui-gestures-motion)
     def __init__(self, **kwargs):
         super().__init__(
             bg_color=(0.16, 0.18, 0.21, 0.96),
@@ -817,13 +905,49 @@ class ToastBanner(RoundedCard):
         self.dot.set_status_color(dot_color)
         self.update_colors(bg_color, (dot_color[0], dot_color[1], dot_color[2], 0.75))
         Animation.cancel_all(self)
+        self.offset_y = 0.0
         self.y = Window.height + dp(10)
         target_y = Window.height - dp(68)
         Animation(y=target_y, opacity=1.0, duration=0.25, t="out_back").start(self)
         self._hide_ev = Clock.schedule_once(self._hide, 2.8)
 
     def _hide(self, *_args):
-        Animation(y=Window.height + dp(20), opacity=0.0, duration=0.22, t="in_quad").start(self)
+        Animation.cancel_all(self)
+        Animation(y=Window.height + dp(24), offset_y=0.0, opacity=0.0, duration=0.20, t="in_quad").start(self)
+
+    def on_touch_down(self, touch):
+        if self.opacity <= 0.05 or not self.collide_point(*touch.pos):
+            return False
+        Animation.cancel_all(self)
+        if self._hide_ev is not None:
+            self._hide_ev.cancel()
+        touch.ud["toast_drag"] = True
+        touch.ud["toast_sy"] = touch.y
+        touch.grab(self)
+        return True
+
+    def on_touch_move(self, touch):
+        if touch.grab_current is not self or not touch.ud.get("toast_drag"):
+            return False
+        dy = touch.y - touch.ud["toast_sy"]
+        if dy >= 0:
+            self.offset_y = dy
+            self.opacity = max(0.0, 1.0 - dy / dp(56))
+        else:
+            self.offset_y = -dp(10) * (1.0 - math.exp(dy / dp(28)))
+        return True
+
+    def on_touch_up(self, touch):
+        if touch.grab_current is not self or not touch.ud.get("toast_drag"):
+            return False
+        touch.ungrab(self)
+        touch.ud["toast_drag"] = False
+        if self.offset_y > dp(14):
+            self._hide()
+        else:
+            Animation(offset_y=0.0, opacity=1.0, duration=0.18, t="out_back").start(self)
+            self._hide_ev = Clock.schedule_once(self._hide, 2.0)
+        return True
 
 
 class AppSplashScreen(FloatLayout):
@@ -991,17 +1115,74 @@ class MacModalContainer(FloatLayout):
         anim.start(self.card)
 
     def on_touch_down(self, touch):
+        if self.is_closing:
+            return True
         if self.card.collide_point(*touch.pos):
+            Animation.cancel_all(self.card, "offset_y", "scale_val")
+            touch.ud["modal_cand"] = True
+            touch.ud["modal_dragging"] = False
+            touch.ud["modal_sx"] = touch.x
+            touch.ud["modal_sy"] = touch.y
+            touch.ud["modal_orig_oy"] = self.card.offset_y
+            touch.ud["modal_last_y"] = touch.y
+            touch.ud["modal_last_t"] = time.monotonic()
+            touch.ud["modal_vy"] = 0.0
             super().on_touch_down(touch)
             return True
         self.dismiss()
         return True
 
     def on_touch_move(self, touch):
+        if self.is_closing:
+            return True
+        if touch.ud.get("modal_cand"):
+            dx = touch.x - touch.ud["modal_sx"]
+            dy = touch.y - touch.ud["modal_sy"]
+            if not touch.ud.get("modal_dragging"):
+                if abs(dx) < dp(9) and abs(dy) < dp(9):
+                    return True
+                if abs(dx) > abs(dy) * 1.1:
+                    touch.ud["modal_cand"] = False
+                    return super().on_touch_move(touch)
+                touch.ud["modal_dragging"] = True
+                touch.grab(self)
+
+            now = time.monotonic()
+            dt = max(0.001, now - touch.ud["modal_last_t"])
+            inst_vx = (touch.y - touch.ud["modal_last_y"]) / dt
+            touch.ud["modal_vy"] = touch.ud["modal_vy"] * 0.35 + inst_vy * 0.65
+            touch.ud["modal_last_y"] = touch.y
+            touch.ud["modal_last_t"] = now
+
+            raw_oy = touch.ud["modal_orig_oy"] + dy
+            if raw_oy > 0:
+                # Rubber-band damping when pulling upward (ui-gestures-motion Rule 4)
+                self.card.offset_y = dp(22) * (1.0 - math.exp(-raw_oy / dp(48)))
+                self.card.scale_val = 1.0
+            else:
+                # 1:1 downward tracking
+                self.card.offset_y = raw_oy
+                pull = min(1.0, abs(raw_oy) / dp(240))
+                self.card.scale_val = 1.0 - 0.06 * pull
+                self.scrim_alpha = self.scrim_rgba[3] * (1.0 - 0.55 * pull)
+            return True
         if self.card.collide_point(*touch.pos):
             super().on_touch_move(touch)
         return True
 
     def on_touch_up(self, touch):
+        if touch.grab_current is self:
+            touch.ungrab(self)
+        if touch.ud.get("modal_dragging"):
+            touch.ud["modal_cand"] = False
+            touch.ud["modal_dragging"] = False
+            vy = touch.ud.get("modal_vy", 0.0)
+            if self.card.offset_y < -dp(68) or vy < -dp(320):
+                self.dismiss()
+            else:
+                Animation(scrim_alpha=self.scrim_rgba[3], duration=0.20, t="out_cubic").start(self)
+                Animation(offset_y=0.0, scale_val=1.0, duration=0.24, t="out_back").start(self.card)
+            return True
+        touch.ud["modal_cand"] = False
         super().on_touch_up(touch)
         return True

@@ -8,46 +8,6 @@ from player_ui import get_player_css, get_player_script
 from pwa_search import get_search_and_pwa_script
 from security import get_sha256_js
 
-SHORTCUT_LABELS = {
-    "ru": (
-        "📲 Ярлык на экран",
-        "Создать ярлык быстрого запуска AirShare PC",
-        "✨ Ярлык «AirShare PC.url» скачан — перетащите его на Рабочий стол!",
-        "📲 Откройте меню браузера (⋮ или «Поделиться») → «Добавить на главный экран»",
-    ),
-    "uk": (
-        "📲 Ярлик на екран",
-        "Створити ярлик швидкого запуску AirShare PC",
-        "✨ Ярлик «AirShare PC.url» завантажено — перетягніть його на Робочий стіл!",
-        "📲 Відкрийте меню браузера (⋮ або «Поділитися») → «Додати на головний екран»",
-    ),
-    "en": (
-        "📲 Add Shortcut",
-        "Create quick-launch shortcut for AirShare PC",
-        "✨ Shortcut 'AirShare PC.url' downloaded — drag it to your Desktop!",
-        "📲 Open browser menu (⋮ or Share) → 'Add to Home screen'",
-    ),
-    "es": (
-        "📲 Crear acceso",
-        "Crear acceso directo de AirShare PC",
-        "✨ Acceso 'AirShare PC.url' descargado — ¡arrástralo a tu Escritorio!",
-        "📲 Abre el menú del navegador (⋮ o Compartir) → 'Añadir a pantalla de inicio'",
-    ),
-    "de": (
-        "📲 Verknüpfung",
-        "Schnellstart-Verknüpfung für AirShare PC erstellen",
-        "✨ Verknüpfung 'AirShare PC.url' geladen — auf den Desktop ziehen!",
-        "📲 Browsermenü öffnen (⋮ oder Teilen) → 'Zum Startbildschirm hinzufügen'",
-    ),
-    "lt": (
-        "📲 Nuoroda ekrane",
-        "Sukurti greito paleidimo nuorodą AirShare PC",
-        "✨ Nuoroda „AirShare PC.url“ atsisiųsta — perkelkite ją į Darbalaukį!",
-        "📲 Atidarykite naršyklės meniu (⋮) → „Pridėti prie pagrindinio ekrano“",
-    ),
-}
-
-
 def get_flag_svg(code: str) -> str:
     code = (code or "en").lower()
     if code == "ru":
@@ -175,6 +135,10 @@ def get_css(theme="dark"):
         align-items: center;
         gap: 10px;
     }}
+    .ctrl-pill, .upload-btn, .download-btn, .checkbox, .p-chip-btn, .lang-item, .file-link {{
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+    }}
     .ctrl-pill {{
         display: inline-flex;
         align-items: center;
@@ -201,45 +165,6 @@ def get_css(theme="dark"):
         border: 1px solid rgba(15, 23, 42, 0.12);
         box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.9);
         color: #1e293b;
-    }}
-    .shortcut-pill-btn {{
-        cursor: pointer;
-        border-color: rgba(56, 217, 169, 0.45);
-    }}
-    .shortcut-pill-btn:hover {{
-        border-color: rgba(56, 217, 169, 0.85);
-        box-shadow: 0 8px 24px rgba(32, 201, 151, 0.32);
-    }}
-    .shortcut-toast {{
-        position: fixed;
-        top: 66px;
-        right: 16px;
-        z-index: 120;
-        max-width: 360px;
-        padding: 12px 16px;
-        border-radius: 16px;
-        background: rgba(15, 23, 42, 0.94);
-        border: 1px solid rgba(56, 217, 169, 0.55);
-        backdrop-filter: blur(16px);
-        -webkit-backdrop-filter: blur(16px);
-        box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
-        color: #f8fafc;
-        font-size: 13.5px;
-        line-height: 1.45;
-        opacity: 0;
-        transform: translateY(-8px);
-        pointer-events: none;
-        transition: opacity 0.25s ease, transform 0.25s ease;
-    }}
-    .shortcut-toast.visible {{
-        opacity: 1;
-        transform: translateY(0);
-    }}
-    body.light .shortcut-toast {{
-        background: rgba(255, 255, 255, 0.96);
-        border-color: rgba(16, 185, 129, 0.55);
-        color: #0f172a;
-        box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
     }}
     .lang-menu-wrap {{
         position: relative;
@@ -937,6 +862,87 @@ def get_css(theme="dark"):
         stroke-linejoin: round;
         pointer-events: none;
     }}
+
+    @media (max-width: 720px) {{
+        body {{
+            padding: 12px 12px 24px;
+        }}
+        .top-bar {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+            position: relative;
+            z-index: 30;
+        }}
+        .top-controls,
+        .top-right-controls {{
+            position: static;
+            gap: 6px;
+            flex-wrap: wrap;
+        }}
+        #parallaxPill {{
+            display: none !important;
+        }}
+        .ctrl-pill {{
+            padding: 6px 10px;
+            font-size: 12px;
+            gap: 6px;
+        }}
+        .switch {{
+            width: 34px;
+            height: 19px;
+        }}
+        .switch-slider:before {{
+            width: 13px;
+            height: 13px;
+        }}
+        .switch input:checked + .switch-slider:before {{
+            transform: translateX(15px);
+        }}
+        .container {{
+            margin: 0 auto 18px;
+        }}
+        .header {{
+            padding: 12px 14px;
+        }}
+        .header h1 {{
+            font-size: 19px;
+        }}
+        .search-input {{
+            padding: 11px 38px 11px 14px;
+            font-size: 14px;
+        }}
+        .toolbar {{
+            padding: 11px 14px;
+            font-size: 13px;
+        }}
+        .file-item {{
+            padding: 12px 12px;
+            gap: 10px;
+        }}
+        .file-link {{
+            font-size: 15px;
+        }}
+        .download-btn {{
+            width: 38px;
+            height: 38px;
+            border-radius: 12px;
+        }}
+        .download-btn svg {{
+            width: 18px;
+            height: 18px;
+        }}
+        .credit-badge {{
+            position: static;
+            display: block;
+            width: fit-content;
+            margin: 18px auto 4px;
+            font-size: 11.5px;
+        }}
+    }}
     """
     return base_css + get_player_css()
 
@@ -1130,6 +1136,7 @@ def get_upload_script(lang="en"):
             const xhr = new XMLHttpRequest();
             xhr.open("POST", url, true);
             xhr.withCredentials = true;
+            xhr.setRequestHeader("Content-Type", "application/octet-stream");
             xhr.setRequestHeader("X-File-Name", encodeURIComponent(file.name));
             if (clientSha) {{
                 xhr.setRequestHeader("X-Content-SHA256", clientSha);
@@ -1143,7 +1150,7 @@ def get_upload_script(lang="en"):
                 if (xhr.status >= 200 && xhr.status < 300) {{
                     resolve(xhr.responseText);
                 }} else {{
-                    reject(new Error(xhr.responseText || ("HTTP " + xhr.status)));
+                    reject(new Error("HTTP " + xhr.status + (xhr.statusText ? " (" + xhr.statusText + ")" : "")));
                 }}
             }};
             xhr.onerror = function() {{
@@ -1272,6 +1279,47 @@ def get_theme_script():
     }
 
     let _thumbObserver = null;
+    let _vidThumbQueue = [];
+    let _activeVidThumbs = 0;
+
+    function _pumpVideoThumbQueue() {
+        const modal = document.getElementById("mediaModal");
+        if (modal && modal.classList.contains("open")) return;
+        if (!document.body.classList.contains("show-previews")) return;
+        while (_activeVidThumbs < 2 && _vidThumbQueue.length > 0) {
+            const vEl = _vidThumbQueue.shift();
+            if (!vEl || vEl.getAttribute("src") || !vEl.dataset.src) continue;
+            _activeVidThumbs++;
+            let finished = false;
+            let timerId = null;
+            const done = function() {
+                if (finished) return;
+                finished = true;
+                if (timerId) clearTimeout(timerId);
+                vEl.removeEventListener("loadeddata", done);
+                vEl.removeEventListener("error", done);
+                _activeVidThumbs = Math.max(0, _activeVidThumbs - 1);
+                _pumpVideoThumbQueue();
+            };
+            vEl.addEventListener("loadeddata", done);
+            vEl.addEventListener("error", done);
+            timerId = setTimeout(done, 1800);
+            vEl.setAttribute("src", vEl.dataset.src);
+        }
+    }
+
+    function _enqueueThumbElement(el) {
+        if (!el || !el.dataset.src || el.getAttribute("src")) return;
+        if (el.tagName === "VIDEO") {
+            if (_vidThumbQueue.indexOf(el) === -1) {
+                _vidThumbQueue.push(el);
+            }
+            _pumpVideoThumbQueue();
+        } else {
+            el.setAttribute("src", el.dataset.src);
+        }
+    }
+
     function _activateVisibleThumbs() {
         const mediaEls = document.querySelectorAll(".file-thumb[data-src]");
         if ("IntersectionObserver" in window) {
@@ -1280,13 +1328,11 @@ def get_theme_script():
                     entries.forEach(function(entry) {
                         if (entry.isIntersecting && document.body.classList.contains("show-previews")) {
                             const el = entry.target;
-                            if (el.dataset.src && !el.getAttribute("src")) {
-                                el.setAttribute("src", el.dataset.src);
-                            }
+                            _enqueueThumbElement(el);
                             _thumbObserver.unobserve(el);
                         }
                     });
-                }, { rootMargin: "160px 0px" });
+                }, { rootMargin: "120px 0px" });
             }
             mediaEls.forEach(function(el) {
                 if (!el.getAttribute("src")) {
@@ -1295,9 +1341,7 @@ def get_theme_script():
             });
         } else {
             mediaEls.forEach(function(el) {
-                if (el.dataset.src && !el.getAttribute("src")) {
-                    el.setAttribute("src", el.dataset.src);
-                }
+                _enqueueThumbElement(el);
             });
         }
     }
@@ -1336,48 +1380,6 @@ def get_theme_script():
         const url = new URL(window.location.href);
         url.searchParams.set("lang", code);
         window.location.href = url.toString();
-    }
-
-    let _toastTimer = null;
-    function showShortcutToast(msg) {
-        const toast = document.getElementById("shortcutToast");
-        if (!toast) return;
-        toast.textContent = msg;
-        toast.classList.add("visible");
-        if (_toastTimer) clearTimeout(_toastTimer);
-        _toastTimer = setTimeout(function() {
-            toast.classList.remove("visible");
-        }, 4800);
-    }
-
-    async function createScreenShortcut(btnEl) {
-        if (typeof _deferredPwaPrompt !== "undefined" && _deferredPwaPrompt) {
-            try {
-                _deferredPwaPrompt.prompt();
-                await _deferredPwaPrompt.userChoice;
-                _deferredPwaPrompt = null;
-                return;
-            } catch (e) {}
-        }
-        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
-        const pcMsg = (btnEl && btnEl.getAttribute("data-pc-msg")) || "";
-        const mobMsg = (btnEl && btnEl.getAttribute("data-mob-msg")) || "";
-        if (isMobile) {
-            showShortcutToast(mobMsg || pcMsg);
-            return;
-        }
-        const dlLink = document.createElement("a");
-        dlLink.href = "/?shortcut=1";
-        dlLink.download = "AirShare PC.url";
-        dlLink.style.display = "none";
-        document.body.appendChild(dlLink);
-        dlLink.click();
-        setTimeout(function() {
-            if (dlLink.parentNode) dlLink.parentNode.removeChild(dlLink);
-        }, 500);
-        if (pcMsg) {
-            showShortcutToast(pcMsg);
-        }
     }
 
     (function initLangMenuAndPinEye() {
@@ -1511,7 +1513,6 @@ def get_top_controls_html(theme="dark", lang="en", show_preview_toggle=False):
     cur_lang = (lang or "en").lower()
     theme_tip = html.escape(tr("web_theme_tip", cur_lang))
     parallax_tip = html.escape(tr("web_parallax_tip", cur_lang))
-    sc_label, sc_tip, sc_pc_msg, sc_mob_msg = SHORTCUT_LABELS.get(cur_lang, SHORTCUT_LABELS["en"])
     left_html = (
         '<div class="top-controls">'
         f'<label class="ctrl-pill" title="{theme_tip}">'
@@ -1542,22 +1543,13 @@ def get_top_controls_html(theme="dark", lang="en", show_preview_toggle=False):
             '</span>'
             '</label>'
         )
-    shortcut_pill = (
-        '<button type="button" class="ctrl-pill shortcut-pill-btn" id="shortcutBtn" '
-        f'title="{html.escape(sc_tip, quote=True)}" '
-        f'data-pc-msg="{html.escape(sc_pc_msg, quote=True)}" '
-        f'data-mob-msg="{html.escape(sc_mob_msg, quote=True)}" '
-        f'onclick="createScreenShortcut(this)">{html.escape(sc_label)}</button>'
-    )
     right_html = (
         '<div class="top-right-controls">'
-        f'{shortcut_pill}'
         f'{preview_pill}'
         f'{_get_lang_selector_html(cur_lang)}'
         '</div>'
-        '<div class="shortcut-toast" id="shortcutToast"></div>'
     )
-    return left_html + right_html
+    return '<div class="top-bar">' + left_html + right_html + '</div>'
 
 
 def get_pin_login_page(theme="dark", lang="en", error_msg="", next_path="/"):

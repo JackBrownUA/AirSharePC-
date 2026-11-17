@@ -270,9 +270,6 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn(b"X-Content-Type-Options: nosniff", hdr)
         self.assertEqual(body, b"56789ABCDE")
 
-        sc_resp = _run_request(self.storage_dir, b"GET /?shortcut=1 HTTP/1.1\r\nHost: 192.168.50.98:8080\r\n\r\n")
-        self.assertIn(b"[InternetShortcut]", sc_resp)
-        self.assertIn(b"URL=http://192.168.50.98:8080/", sc_resp)
 
         server.AirShareHandler.set_ip_disconnected("192.168.1.77", True)
         resp_disc = _run_request(self.storage_dir, range_req, client_ip="192.168.1.77")
@@ -329,7 +326,7 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn(b'action="/login"', resp_login)
         self.assertIn(b'id="pinEyeBtn"', resp_login)
         self.assertIn(b'id="langGlobeBtn"', resp_login)
-        self.assertIn(b'id="shortcutBtn"', resp_login)
+        self.assertNotIn(b'id="shortcutBtn"', resp_login)
         self.assertNotIn(b"httpsSetupBtn", resp_login)
 
         post_body = b"pin=918273&next=%2F"
@@ -356,8 +353,8 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn(b'id="ambilightCanvas"', resp_dir)
         self.assertIn(b'id="uploadProgressDock"', resp_dir)
         self.assertIn(b'id="fileSearchInput"', resp_dir)
-        self.assertIn(b'id="scrubCanvas"', resp_dir)
-        self.assertIn(b'id="shortcutBtn"', resp_dir)
+        self.assertIn(b'id="scrubTime"', resp_dir)
+        self.assertNotIn(b'id="shortcutBtn"', resp_dir)
 
         search_req = f"GET /?q=144102&ajax=1 HTTP/1.1\r\nHost: localhost\r\nCookie: {cookie_kv}\r\n\r\n".encode("utf-8")
         search_resp = _run_request(self.storage_dir, search_req, client_ip="192.168.50.56")
@@ -595,12 +592,85 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn("appearance: none;", css_txt)
         self.assertIn(".checkbox:checked::after", css_txt)
         self.assertIn("#status:empty", css_txt)
+        self.assertNotIn("keep_alive_row", m_src)
+        self.assertNotIn("keep_alive_switch", m_src)
+        self.assertNotIn("scrubVideo", Path("player_ui.py").read_text(encoding="utf-8"))
 
         sessions = {}
         lock = server.threading.Lock()
         for i in range(300):
             security.create_device_session_token("sec", sessions, lock, f"192.168.1.{i % 250}", "918273")
         self.assertLessEqual(len(sessions), 256)
+
+
+    def test_13_claude_audit_regressions(self):
+        # 1. Non-ASCII / кириллический PIN в ?pin= и POST /login не бросает TypeError в hmac.compare_digest
+        resp_non_ascii = _run_request(
+            self.storage_dir,
+            b"GET /?pin=%D0%BF%D0%B0%D1%80%D0%BE%D0%BB%D1%8C HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            client_ip="192.168.1.188",
+        )
+        self.assertIn(b"401", resp_non_ascii.splitlines()[0])
+
+        # 2. Отрицательный Content-Length в POST /login не блокирует чтение
+        resp_neg_cl = _run_request(
+            self.storage_dir,
+            b"POST /login HTTP/1.1\r\nHost: localhost\r\nContent-Length: -50\r\n\r\n",
+            client_ip="192.168.1.189",
+        )
+        self.assertIn(b"401", resp_neg_cl.splitlines()[0])
+
+        # 3. Нулевой байт /%00 в пути не роняет translate_path с ValueError
+        resp_null = _run_request(
+            self.storage_dir,
+            ("GET /%00 HTTP/1.1\r\nHost: localhost\r\n" + _basic_auth_header("airshare", "918273") + "\r\n").encode("utf-8"),
+        )
+        self.assertIn(b"200", resp_null.splitlines()[0])
+
+        # 4. Наличие index.html в папке НЕ подменяет листинг директории
+        idx_path = os.path.join(self.storage_dir, "index.html")
+        with open(idx_path, "w", encoding="utf-8") as f:
+            f.write("<html><body>HIJACKED_INDEX</body></html>")
+        resp_list = _run_request(
+            self.storage_dir,
+            ("GET / HTTP/1.1\r\nHost: localhost\r\n" + _basic_auth_header("airshare", "918273") + "\r\n").encode("utf-8"),
+        )
+        self.assertIn(b"AirShare PC", resp_list)
+        self.assertNotIn(b"HIJACKED_INDEX", resp_list)
+
+        # 5. Проверки p4a_hook (onTimeout для Android 15 dataSync) и pwa_search (DOM-безопасный рендер)
+        hook_src = Path("p4a_hook.py").read_text(encoding="utf-8")
+        self.assertIn("public void onTimeout(int startId, int fgsType)", hook_src)
+        self.assertIn('if (intent == null || "STOP".equals(intent.getAction()))', hook_src)
+        pwa_src = Path("pwa_search.py").read_text(encoding="utf-8")
+        self.assertIn("document.createElement", pwa_src)
+        self.assertNotIn("srvBox.innerHTML = htmlRows", pwa_src)
+
+
+        # 6. Strix: защита от CRLF-инъекции и Open Redirect (/\\evil.com) в POST /login
+        crlf_body = urllib.parse.urlencode({"pin": "918273", "next": "/\r\nX-Injected: 1"}).encode("utf-8")
+        resp_crlf = _run_request(
+            self.storage_dir,
+            (
+                "POST /login HTTP/1.1\r\nHost: localhost\r\n"
+                "Content-Type: application/x-www-form-urlencoded\r\n"
+                f"Content-Length: {len(crlf_body)}\r\n\r\n"
+            ).encode("utf-8") + crlf_body,
+            client_ip="192.168.1.190",
+        )
+        self.assertNotIn(b"X-Injected:", resp_crlf)
+
+        redir_body = urllib.parse.urlencode({"pin": "918273", "next": "/\\evil.com"}).encode("utf-8")
+        resp_redir = _run_request(
+            self.storage_dir,
+            (
+                "POST /login HTTP/1.1\r\nHost: localhost\r\n"
+                "Content-Type: application/x-www-form-urlencoded\r\n"
+                f"Content-Length: {len(redir_body)}\r\n\r\n"
+            ).encode("utf-8") + redir_body,
+            client_ip="192.168.1.191",
+        )
+        self.assertIn(b"Location: /\r\n", resp_redir)
 
 
 if __name__ == "__main__":

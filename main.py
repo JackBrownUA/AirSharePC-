@@ -32,7 +32,6 @@ from android_bridge import (
 from server import AirShareHandler, ReusableThreadingServer
 from themes import THEMES
 from ui_widgets import (
-    AnimatedToggleSwitch,
     AppSplashScreen,
     ClickableCard,
     DrawerMenuRow,
@@ -58,7 +57,6 @@ from utils import (
     get_device_theme,
     get_local_ip,
     get_network_label,
-    get_sslip_domain,
     get_storage_stats,
     has_android_storage_permission,
     is_wifi_connected,
@@ -99,6 +97,7 @@ class AirShareApp(App):
         self.sent_files_count = 0
         self.received_files_count = 0
         self._bg_idle_wrapped = False
+        self._notif_refresh_ev = None
         self.active_modal = None
         self.theme_mode = "dark"
         self.language = "en"
@@ -128,17 +127,16 @@ class AirShareApp(App):
         return path_val
 
     def get_connection_url(self):
-        # При копировании даём красивую доменную ссылку sslip.io с ?pin= для мгновенного входа и установки PWA
+        # При копировании даём прямую локальную ссылку http://<LAN_IP>:<port>/?pin=... (без внешнего DNS sslip.io)
         if not is_wifi_connected():
             return self._t("no_wifi_url")
         ip = get_local_ip()
-        host = get_sslip_domain(ip)
         pwd = (self.saved_password or "").strip()
         if not pwd:
             pwd = load_settings().get("password", "")
             self.saved_password = pwd
         quoted_pwd = urllib.parse.quote(pwd, safe="")
-        return f"http://{host}:{self.server_port}/?pin={quoted_pwd}"
+        return f"http://{ip}:{self.server_port}/?pin={quoted_pwd}"
 
     def get_display_url_text(self):
         # На экране показываем короткий адрес и PIN, чтобы его было легко ввести вручную в браузере
@@ -153,7 +151,16 @@ class AirShareApp(App):
         self.addr_label.text = disp
         self.addr_label.font_size = sp(11.5) if len(disp) > 34 else sp(12.5)
 
-    def _refresh_foreground_notification(self):
+    def _schedule_foreground_notification_refresh(self, delay=0.35):
+        if self._notif_refresh_ev is not None:
+            try:
+                self._notif_refresh_ev.cancel()
+            except Exception:
+                pass
+        self._notif_refresh_ev = Clock.schedule_once(lambda _dt: self._refresh_foreground_notification(), delay)
+
+    def _refresh_foreground_notification(self, *_args):
+        self._notif_refresh_ev = None
         if self.server is not None:
             set_android_foreground_notification(
                 True,
@@ -209,8 +216,6 @@ class AirShareApp(App):
 
     def set_keep_alive(self, enabled):
         self.keep_alive_locked = bool(enabled)
-        if hasattr(self, "keep_alive_switch"):
-            self.keep_alive_switch.set_active(self.keep_alive_locked, animate=True)
         try:
             Window.allow_screensaver = not self.keep_alive_locked
         except Exception as exc:
@@ -344,16 +349,16 @@ class AirShareApp(App):
             orientation="vertical",
             padding=[dp(16), dp(16), dp(16), dp(12)],
             spacing=dp(8),
-            size_hint=(1, 0.55),
+            size_hint=(1, 0.48),
         )
-        icon_holder = AnchorLayout(size_hint=(1, 0.34))
+        icon_holder = AnchorLayout(size_hint=(1, 0.42))
         self.monitor_icon = VectorIcon(
             icon_type="pc", color=p["text"], size_hint=(None, None), size=(dp(56), dp(44))
         )
         icon_holder.add_widget(self.monitor_icon)
         self.radar_card.attach_target(self.monitor_icon)
 
-        btn_anchor = AnchorLayout(size_hint=(1, 0.22))
+        btn_anchor = AnchorLayout(size_hint=(1, 0.26))
         self.connect_btn = RoundedActionButton(
             text=self._t("connect"),
             bg_color=p["green"],
@@ -366,31 +371,7 @@ class AirShareApp(App):
         self.connect_btn.bind(on_press=self.toggle_server)
         btn_anchor.add_widget(self.connect_btn)
 
-        keep_alive_anchor = AnchorLayout(size_hint=(1, 0.18))
-        self.keep_alive_row = ClickableCard(
-            bg_color=p["pill_bg"],
-            border_color=p["card_border"],
-            radius=dp(16),
-            orientation="horizontal",
-            size_hint=(0.94, None),
-            height=dp(38),
-            padding=[dp(14), dp(5), dp(12), dp(5)],
-            spacing=dp(10),
-        )
-        self.keep_alive_label = make_label(self._t("keep_alive"), size=12)
-        self.keep_alive_switch = AnimatedToggleSwitch(
-            active=self.keep_alive_locked,
-            size_hint=(None, None),
-            size=(dp(48), dp(26)),
-            pos_hint={"center_y": 0.5},
-        )
-        self.keep_alive_switch.bind(on_press=lambda *_: self.set_keep_alive(not self.keep_alive_locked))
-        self.keep_alive_row.bind(on_press=lambda *_: self.set_keep_alive(not self.keep_alive_locked))
-        self.keep_alive_row.add_widget(self.keep_alive_label)
-        self.keep_alive_row.add_widget(self.keep_alive_switch)
-        keep_alive_anchor.add_widget(self.keep_alive_row)
-
-        addr_anchor = AnchorLayout(size_hint=(1, 0.18))
+        addr_anchor = AnchorLayout(size_hint=(1, 0.22))
         addr_row = BoxLayout(
             orientation="horizontal",
             size_hint=(0.94, None),
@@ -427,10 +408,10 @@ class AirShareApp(App):
             self._t("http_warn"),
             size=10.5,
             halign="center",
-            size_hint=(1, 0.08),
+            size_hint=(1, 0.10),
         )
 
-        for w in (icon_holder, btn_anchor, keep_alive_anchor, addr_anchor, self.http_warn_label):
+        for w in (icon_holder, btn_anchor, addr_anchor, self.http_warn_label):
             self.radar_card.add_widget(w)
         self.main_content.add_widget(self.radar_card)
 
@@ -446,7 +427,7 @@ class AirShareApp(App):
             orientation="vertical",
             padding=[dp(14), dp(12), dp(14), dp(12)],
             spacing=dp(10),
-            size_hint=(1, 0.27),
+            size_hint=(1, 0.34),
         )
         self.transfers_card.bind(on_press=self.open_transfers_modal)
 
@@ -556,6 +537,10 @@ class AirShareApp(App):
             pos=(-self.drawer_width - dp(40), dp(24)),
         )
         self.drawer.opacity = 0.0
+        self.drawer.open_x = dp(16)
+        self.drawer.closed_x = -self.drawer_width - dp(35)
+        self.drawer.on_gesture_progress = self._on_drawer_gesture_progress
+        self.drawer.on_gesture_settle = self._on_drawer_gesture_settle
         Window.bind(size=self._on_window_resize)
 
         self.drawer_title = make_label(
@@ -687,7 +672,6 @@ class AirShareApp(App):
 
     def apply_language(self):
         self.wifi_label.text = get_network_label(self.language)
-        self.keep_alive_label.text = self._t("keep_alive")
         self.http_warn_label.text = self._t("http_warn")
         self.transfers_header.text = f"[b]{self._t('recent_transfers')}[/b]"
         if not self.transfer_history:
@@ -827,28 +811,39 @@ class AirShareApp(App):
         p = THEMES.get(self._get_effective_theme(), THEMES["dark"])
         self._update_status_indicators(p)
 
-    def open_drawer(self, *_args):
+    def _on_drawer_gesture_progress(self, prog):
+        palette = THEMES.get(self._get_effective_theme(), THEMES["dark"])
+        self.overlay.set_progress(prog, palette["overlay"])
+
+    def _on_drawer_gesture_settle(self, should_open, duration=0.24):
+        if should_open:
+            self.open_drawer(duration=duration, from_gesture=True)
+        else:
+            self.close_drawer(duration=duration, force=True)
+
+    def open_drawer(self, *_args, duration=0.28, from_gesture=False):
         self.drawer.is_open = self.overlay.is_open = True
         self.set_active_nav("settings")
         stats = get_storage_stats(self.language)
         self.drawer_storage_label.text = stats["text"]
         self.drawer_storage_bar.set_percent(stats["percent"])
         palette = THEMES.get(self._get_effective_theme(), THEMES["dark"])
-        self.overlay.animate_to(palette["overlay"], duration=0.30)
+        self.overlay.animate_to(palette["overlay"], duration=duration)
         Animation.cancel_all(self.drawer)
-        self.drawer.scale_val = 0.96
-        Animation(x=dp(16), scale_val=1.0, opacity=1.0, duration=0.30, t="out_cubic").start(self.drawer)
+        if not from_gesture and self.drawer.opacity < 0.05:
+            self.drawer.scale_val = 0.96
+        Animation(x=dp(16), scale_val=1.0, opacity=1.0, duration=duration, t="out_cubic").start(self.drawer)
 
-    def close_drawer(self, *_args):
-        if not self.drawer.is_open:
+    def close_drawer(self, *_args, duration=0.24, force=False):
+        if not self.drawer.is_open and not force:
             return
         self.drawer.is_open = self.overlay.is_open = False
         if self.active_modal is None:
             self.set_active_nav("transfer")
-        self.overlay.animate_to((0, 0, 0, 0), duration=0.24)
+        self.overlay.animate_to((0, 0, 0, 0), duration=duration)
         Animation.cancel_all(self.drawer)
         Animation(
-            x=-self.drawer_width - dp(35), scale_val=0.96, opacity=0.0, duration=0.25, t="out_cubic"
+            x=-self.drawer_width - dp(35), scale_val=0.96, opacity=0.0, duration=duration, t="out_cubic"
         ).start(self.drawer)
 
     def _get_effective_theme(self):
@@ -893,8 +888,6 @@ class AirShareApp(App):
         self.wifi_pill.update_colors(p["pill_bg"], p["card_border"])
         self.radar_card.update_radar_colors(p["radar_bg"], p["card_border"], p["radar_ring"], p["radar_glow"])
         self.monitor_icon.set_color(p["text"])
-        self.keep_alive_row.update_colors(p["pill_bg"], p["card_border"])
-        self.keep_alive_label.color = p["text"]
         self.addr_pill.update_colors(p["pill_bg"], p["card_border"])
         self.addr_label.color = p["text"]
         self.copy_btn.update_colors(p["pill_bg"], p["card_border"])
@@ -974,18 +967,25 @@ class AirShareApp(App):
         Clock.schedule_once(_upd, 0)
 
     def _on_file_transfer(self, filename, size_str, direction):
-        if direction == "upload":
-            self.received_files_count += 1
-        else:
-            self.sent_files_count += 1
-        self._refresh_foreground_notification()
         act = self._t("uploaded") if direction == "upload" else self._t("downloaded")
         entry_str = f"{filename} ({act} • {size_str})"
         if is_android_activity_paused():
-            self.transfer_history.insert(0, entry_str)
-            del self.transfer_history[50:]
+            def _bg_upd(_dt):
+                if direction == "upload":
+                    self.received_files_count += 1
+                else:
+                    self.sent_files_count += 1
+                self.transfer_history.insert(0, entry_str)
+                del self.transfer_history[50:]
+                self._schedule_foreground_notification_refresh(0.35)
+            Clock.schedule_once(_bg_upd, 0)
             return
         def _upd(_dt):
+            if direction == "upload":
+                self.received_files_count += 1
+            else:
+                self.sent_files_count += 1
+            self._schedule_foreground_notification_refresh(0.35)
             if self.transfer_history:
                 prev_entry = self.transfer_history[0]
                 prev_name, _, prev_meta = prev_entry.rpartition(" (")
@@ -1018,7 +1018,7 @@ class AirShareApp(App):
 
         bind_ip = get_local_ip()
         try:
-            self.server = ReusableThreadingServer((bind_ip, self.server_port), DynamicAirShareHandler)
+            self.server = ReusableThreadingServer(("0.0.0.0", self.server_port), DynamicAirShareHandler)
             threading.Thread(target=self.server.serve_forever, daemon=True).start()
             self.has_server_error = False
             self.set_keep_alive(True)

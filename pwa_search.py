@@ -22,7 +22,7 @@ PWA_ICON_SVG = (
 PWA_SW_JS = (
     "self.addEventListener('install', e => self.skipWaiting());\n"
     "self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));\n"
-    "self.addEventListener('fetch', e => {});\n"
+
 )
 
 
