@@ -46,7 +46,7 @@ from security import (
     register_auth_failure,
     verify_sha256_digest,
 )
-from utils import add_recent_ip, format_size, load_settings
+from utils import add_recent_ip, format_size, get_local_ip, load_settings
 from web_ui import (
     get_css,
     get_download_svg,
@@ -59,9 +59,9 @@ from web_ui import (
 
 logger = logging.getLogger("airshare.server")
 
-STREAM_CHUNK_SIZE = 1024 * 1024
-SOCKET_SEND_BUFFER = 4 * 1024 * 1024
-THUMB_MAX_BYTES = 1536 * 1024
+STREAM_CHUNK_SIZE = 2 * 1024 * 1024
+SOCKET_SEND_BUFFER = 8 * 1024 * 1024
+SCRUB_MAX_BYTES = 1024 * 1024
 
 
 class _ZipStream:
@@ -182,12 +182,8 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         return is_within_storage(self.real_storage, target_path)
 
     def translate_path(self, path):
-        clean_path = (path or "/").replace("\x00", "")
-        raw_path = super().translate_path(clean_path)
-        try:
-            resolved = os.path.realpath(raw_path)
-        except (ValueError, OSError):
-            return self.real_storage
+        raw_path = super().translate_path(path)
+        resolved = os.path.realpath(raw_path)
         if not self._is_within_storage(resolved):
             logger.warning("Заблокирована попытка обхода директории: %s -> %s", path, resolved)
             return self.real_storage
@@ -277,7 +273,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 encoded = auth_header.split(" ", 1)[1].strip()
                 decoded = base64.b64decode(encoded).decode("utf-8", errors="ignore")
                 _, _, provided_pwd = decoded.partition(":")
-                if hmac.compare_digest(provided_pwd.encode("utf-8", "surrogatepass"), pwd.encode("utf-8", "surrogatepass")):
+                if hmac.compare_digest(provided_pwd, pwd):
                     self._pending_auth_cookie = self._issue_session_cookie_str()
                     return True
             except Exception as exc:
@@ -371,7 +367,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         if "pin" in params and params["pin"]:
             provided_pin = params["pin"][0].strip()
             pwd = self._ensure_password_loaded()
-            if hmac.compare_digest(provided_pin.encode("utf-8", "surrogatepass"), pwd.encode("utf-8", "surrogatepass")):
+            if hmac.compare_digest(provided_pin, pwd):
                 self._clear_auth_failures()
                 clean_query = urllib.parse.urlencode(
                     {k: v for k, v in params.items() if k != "pin"}, doseq=True
@@ -444,17 +440,15 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", 0))
         except ValueError:
             length = 0
-        raw_body = self.rfile.read(max(0, min(length, 4096))).decode("utf-8", errors="ignore") if length > 0 else ""
+        raw_body = self.rfile.read(min(length, 4096)).decode("utf-8", errors="ignore")
         form = urllib.parse.parse_qs(raw_body)
         provided_pin = (form.get("pin", [""])[0] or "").strip()
-        raw_next = form.get("next", ["/"])[0] or "/"
-        if "\r" in raw_next or "\n" in raw_next or not raw_next.startswith("/") or raw_next.startswith("//") or raw_next.startswith("/\\"):
+        next_path = form.get("next", ["/"])[0] or "/"
+        if not next_path.startswith("/") or next_path.startswith("//"):
             next_path = "/"
-        else:
-            next_path = raw_next
 
         pwd = self._ensure_password_loaded()
-        if hmac.compare_digest(provided_pin.encode("utf-8", "surrogatepass"), pwd.encode("utf-8", "surrogatepass")):
+        if hmac.compare_digest(provided_pin, pwd):
             self._clear_auth_failures()
             self.send_response(303)
             self.send_header("Location", next_path)
@@ -519,14 +513,16 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         if cb:
             try:
                 cb(device_title, os_name, ip, is_first=is_new)
-            except Exception as exc:
-                logger.debug("Ошибка колбэка on_client_connected: %s", exc)
+            except TypeError:
+                cb(ip, device_title)
 
     def _notify_transfer(self, filename: str, size_bytes: int, direction: str):
         cb = getattr(type(self), "on_file_transfer", None)
         if cb:
             try:
                 cb(filename, format_size(size_bytes), direction)
+            except TypeError:
+                cb(filename, size_bytes, direction, self._get_client_ip())
             except Exception as exc:
                 logger.debug("Ошибка колбэка on_file_transfer: %s", exc)
 
@@ -535,13 +531,15 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         if cb:
             try:
                 cb(filename, done_bytes, total_bytes, direction)
+            except TypeError:
+                cb(filename, done_bytes, total_bytes, direction, self._get_client_ip())
             except Exception as exc:
                 logger.debug("Ошибка колбэка on_transfer_progress: %s", exc)
 
     def _serve_file_hash(self, current_url_path: str, target_name: str):
         rel_dir = urllib.parse.unquote(current_url_path).lstrip("/")
         base_dir = os.path.realpath(os.path.join(self.real_storage, rel_dir))
-        clean_target = os.path.basename((target_name or "").replace("\x00", ""))
+        clean_target = os.path.basename(target_name)
         target_file = os.path.realpath(os.path.join(base_dir, clean_target))
         if not self._is_within_storage(target_file) or not os.path.isfile(target_file):
             self.send_error(404, "File not found")
@@ -559,6 +557,27 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         except OSError:
             self.send_error(500, "Hash error")
 
+    def _serve_shortcut_file(self):
+        srv_ip = get_local_ip()
+        srv_port = (
+            self.server.server_address[1]
+            if getattr(self, "server", None) and getattr(self.server, "server_address", None)
+            else 8080
+        )
+        host_hdr = self.headers.get("Host") or f"{srv_ip}:{srv_port}"
+        target_url = f"http://{host_hdr}/"
+        body = (
+            "[InternetShortcut]\r\n"
+            f"URL={target_url}\r\n"
+            "IconIndex=0\r\n"
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/internet-shortcut")
+        self.send_header("Content-Disposition", make_content_disposition("AirShare PC.url", "attachment"))
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_HEAD(self):
         parsed = urllib.parse.urlparse(self.path)
         if serve_pwa_asset(self, parsed.path):
@@ -575,17 +594,17 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             parent_url = os.path.dirname(urllib.parse.unquote(parsed.path))
             self.stream_single_file(parent_url, os.path.basename(target_path), as_attachment=False, head_only=True)
             return
-        if os.path.isdir(target_path):
-            f = self.list_directory(target_path)
-            if f:
-                f.close()
-            return
-        self.send_error(404, "File not found")
+        super().do_HEAD()
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         if serve_pwa_asset(self, parsed.path):
             return
+        pre_params = urllib.parse.parse_qs(parsed.query)
+        if "shortcut" in pre_params:
+            self._serve_shortcut_file()
+            return
+
         if not self.check_auth_or_respond():
             return
 
@@ -637,22 +656,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             return
 
         self._parse_client_device(fast_skip_if_known=False)
-        if os.path.isdir(target_path):
-            if not urllib.parse.unquote(parsed.path).replace("\x00", "").endswith("/"):
-                self.send_response(301)
-                new_loc = parsed.path + "/" + (f"?{parsed.query}" if parsed.query else "")
-                self.send_header("Location", new_loc)
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
-            f = self.list_directory(target_path)
-            if f:
-                try:
-                    self.copyfile(f, self.wfile)
-                finally:
-                    f.close()
-            return
-        self.send_error(404, "File not found")
+        super().do_GET()
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -671,7 +675,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         elif "X-File-Name" in self.headers:
             raw_filename = urllib.parse.unquote(self.headers.get("X-File-Name", ""))
 
-        filename = os.path.basename(raw_filename.replace("\x00", "").strip())
+        filename = os.path.basename(raw_filename.strip())
         if not filename or filename in (".", ".."):
             self.send_error(400, "Invalid filename")
             return
@@ -697,7 +701,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
 
         expected_sha256 = (self.headers.get("X-Content-SHA256") or "").strip().lower()
         dest_path, final_filename = get_unique_filepath(target_dir, filename)
-        tmp_path = os.path.join(target_dir, f".airshare_{threading.get_ident()}_{secrets.token_hex(4)}.part")
+        tmp_path = os.path.join(target_dir, f".{final_filename}.{threading.get_ident()}.part")
 
         hasher = hashlib.sha256()
         try:
@@ -791,24 +795,18 @@ class AirShareHandler(SimpleHTTPRequestHandler):
 
         last_prog_ts = 0.0
         conn = getattr(self, "connection", None)
-        offset = start_offset
-        remaining = total_bytes
         if hasattr(os, "sendfile") and conn is not None and hasattr(conn, "fileno"):
             try:
                 out_fd = conn.fileno()
                 in_fd = file_obj.fileno()
-                idle_wait = 0.0
+                offset = start_offset
+                remaining = total_bytes
                 while remaining > 0:
                     step = min(STREAM_CHUNK_SIZE, remaining)
                     try:
                         sent = os.sendfile(out_fd, in_fd, offset, step)
-                        idle_wait = 0.0
                     except BlockingIOError:
-                        _, wready, _ = select.select([], [out_fd], [], 5.0)
-                        if not wready:
-                            idle_wait += 5.0
-                            if idle_wait >= SOCKET_TIMEOUT_SECONDS:
-                                raise TimeoutError("sendfile write timeout")
+                        select.select([], [out_fd], [], 5.0)
                         continue
                     except InterruptedError:
                         continue
@@ -822,13 +820,12 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                             last_prog_ts = now_ts
                             self._notify_progress(filename, offset, full_size, "download")
                 return
-            except (BrokenPipeError, ConnectionResetError, TimeoutError):
-                raise
             except (OSError, ValueError, AttributeError):
                 pass
 
-        file_obj.seek(offset)
-        sent_total = offset
+        file_obj.seek(start_offset)
+        remaining = total_bytes
+        sent_total = start_offset
         while remaining > 0:
             buf = file_obj.read(min(STREAM_CHUNK_SIZE, remaining))
             if not buf:
@@ -845,7 +842,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
     def stream_single_file(self, current_url_path, target_name, as_attachment=True, head_only=False):
         rel_dir = urllib.parse.unquote(current_url_path).lstrip("/")
         base_dir = os.path.realpath(os.path.join(self.real_storage, rel_dir))
-        clean_target = os.path.basename((target_name or "").replace("\x00", ""))
+        clean_target = os.path.basename(target_name)
         target_file = os.path.realpath(os.path.join(base_dir, clean_target))
 
         if not self._is_within_storage(target_file) or not os.path.isfile(target_file):
@@ -874,11 +871,11 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 return
 
-            is_thumb = "thumb=1" in urllib.parse.urlparse(self.path).query
+            is_scrub = "scrub=1" in urllib.parse.urlparse(self.path).query
             if byte_range is not None:
                 start, end = byte_range
-                if is_thumb and (end - start + 1) > THUMB_MAX_BYTES:
-                    end = min(file_size - 1, start + THUMB_MAX_BYTES - 1)
+                if is_scrub and (end - start + 1) > SCRUB_MAX_BYTES:
+                    end = min(file_size - 1, start + SCRUB_MAX_BYTES - 1)
                 chunk_len = end - start + 1
                 self.send_response(206, "Partial Content")
                 self.send_header("Content-Type", ctype)
@@ -933,7 +930,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
     def stream_folder_zip(self, current_url_path, target_name):
         rel_dir = urllib.parse.unquote(current_url_path).lstrip("/")
         base_dir = os.path.realpath(os.path.join(self.real_storage, rel_dir))
-        clean_target = os.path.basename((target_name or "").replace("\x00", ""))
+        clean_target = os.path.basename(target_name)
         target_dir = os.path.realpath(os.path.join(base_dir, clean_target))
 
         if not self._is_within_storage(target_dir) or not os.path.isdir(target_dir):
@@ -968,13 +965,11 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                         rel_path = os.path.relpath(full_path, parent_dir)
                         try:
                             zf.write(full_path, arcname=rel_path)
-                        except (BrokenPipeError, ConnectionResetError, TimeoutError):
-                            raise
                         except OSError as exc:
                             logger.warning("Не удалось добавить файл %s в ZIP: %s", full_path, exc)
                             continue
             self._notify_transfer(f"{folder_basename}.zip", stream.tell(), "download")
-        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+        except (BrokenPipeError, ConnectionResetError):
             logger.debug("Клиент прервал скачивание ZIP-архива %s", folder_basename)
 
     def download_selected_files(self, files):
@@ -1037,13 +1032,11 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 for full_path, arcname in valid_entries:
                     try:
                         zf.write(full_path, arcname=arcname)
-                    except (BrokenPipeError, ConnectionResetError, TimeoutError):
-                        raise
                     except OSError as exc:
                         logger.warning("Не удалось упаковать файл %s: %s", full_path, exc)
                         continue
             self._notify_transfer("selected_files.zip", stream.tell(), "download")
-        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+        except (BrokenPipeError, ConnectionResetError):
             logger.debug("Клиент прервал скачивание выбранных файлов")
 
     def list_directory(self, path):
@@ -1131,7 +1124,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             safe_name = html.escape(name)
             safe_data_name = html.escape(name.lower(), quote=True)
             quoted_name = urllib.parse.quote(name, safe="")
-            js_safe_name = html.escape(name.replace("\\", "\\\\").replace("'", "\\'").replace("\r", "").replace("\n", " "), quote=True)
+            js_safe_name = html.escape(name.replace("\\", "\\\\").replace("'", "\\'"), quote=True)
 
             if os.path.isdir(fullname):
                 r.append(
@@ -1179,7 +1172,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                         f'<input type="checkbox" class="checkbox" name="files" value="{safe_val}">'
                         '<div class="file-info">'
                         f'<a class="thumb-box" href="{quoted_name}" onclick="{play_onclick}" tabindex="-1">'
-                        f'<video class="file-thumb" data-src="{quoted_name}?thumb=1#t=0.5" preload="metadata" muted playsinline></video>'
+                        f'<video class="file-thumb" data-src="{quoted_name}#t=0.5" preload="metadata" muted playsinline></video>'
                         '<span class="vid-badge">▶</span>'
                         '</a>'
                         '<div class="file-text-col">'
