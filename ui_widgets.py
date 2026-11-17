@@ -1149,7 +1149,7 @@ class MacModalContainer(FloatLayout):
 
             now = time.monotonic()
             dt = max(0.001, now - touch.ud["modal_last_t"])
-            inst_vx = (touch.y - touch.ud["modal_last_y"]) / dt
+            inst_vy = (touch.y - touch.ud["modal_last_y"]) / dt
             touch.ud["modal_vy"] = touch.ud["modal_vy"] * 0.35 + inst_vy * 0.65
             touch.ud["modal_last_y"] = touch.y
             touch.ud["modal_last_t"] = now

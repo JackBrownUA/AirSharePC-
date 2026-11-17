@@ -1,6 +1,8 @@
 # Автоматические тесты безопасности (security.py), плеера (player_ui.py), PWA и поиска (pwa_search.py), Android-моста (android_bridge.py), графа импортов (main.py), POST /login, SHA-256 и p4a_hook (v1.3.5)
 
 import ast
+import builtins
+import symtable
 import base64
 import hashlib
 import io
@@ -456,6 +458,40 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
                         prefix += ch.lower()
                     if "f" in prefix and "{" not in s:
                         self.fail(f"F541 f-string without placeholders in {p}:{tok.start[0]}")
+
+            # Проверка F821 (неопределённые имена) и F841 (неиспользуемые локальные переменные) через symtable Python
+            builtin_names = set(dir(builtins)) | {"__file__", "__name__", "__doc__", "__package__", "__annotations__", "__class__"}
+
+            def _has_child_ref(tbl_node, target_name):
+                for ch in tbl_node.get_children():
+                    for cs in ch.get_symbols():
+                        if cs.get_name() == target_name and cs.is_referenced():
+                            return True
+                    if _has_child_ref(ch, target_name):
+                        return True
+                return False
+
+            def _check_symtable(tbl, parent_names):
+                local_defs = {
+                    s.get_name()
+                    for s in tbl.get_symbols()
+                    if s.is_imported() or s.is_assigned() or s.is_parameter() or s.is_declared_global()
+                }
+                visible = parent_names | local_defs | builtin_names
+                if tbl.get_type() == "function":
+                    for s in tbl.get_symbols():
+                        name = s.get_name()
+                        if s.is_referenced() and not (s.is_local() or s.is_parameter() or s.is_free() or s.is_declared_global()):
+                            if name not in visible:
+                                self.fail(f"F821 undefined name '{name}' in {p}:{tbl.get_lineno()} ({tbl.get_name()})")
+                        if s.is_assigned() and not s.is_parameter() and not s.is_imported() and not name.startswith("_"):
+                            if not s.is_referenced() and not _has_child_ref(tbl, name):
+                                self.fail(f"F841 unused variable '{name}' in {p}:{tbl.get_lineno()} ({tbl.get_name()})")
+                next_parent = visible if tbl.get_type() != "class" else parent_names
+                for child in tbl.get_children():
+                    _check_symtable(child, next_parent)
+
+            _check_symtable(symtable.symtable(src, str(p), "exec"), set())
 
             # Проверка существования всех импортируемых локальных модулей и символов
             for node in ast.walk(tree):
