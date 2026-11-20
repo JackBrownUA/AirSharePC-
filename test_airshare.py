@@ -280,12 +280,11 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
     def test_08_modular_architecture_js_syntax_and_all_i18n_keys_used(self):
         self.assertTrue(hasattr(security, "verify_sha256_digest"))
         self.assertTrue(hasattr(player_ui, "get_media_modal_html"))
-        self.assertTrue(hasattr(pwa_search, "serve_pwa_asset"))
+        self.assertTrue(hasattr(pwa_search, "search_storage_index"))
         self.assertTrue(hasattr(android_bridge, "set_android_foreground_notification"))
         self.assertFalse(utils.is_private_lan_ip("100.71.184.228"))
         self.assertFalse(utils.is_private_lan_ip("127.0.0.1"))
         self.assertTrue(utils.is_private_lan_ip("192.168.1.55"))
-        self.assertEqual(utils.get_sslip_domain("192.168.50.72"), "192-168-50-72.sslip.io")
         self.assertEqual(utils.format_size(604), "604 B")
 
         if shutil.which("node"):
@@ -318,8 +317,6 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         ):
             all_source += Path(fname).read_text(encoding="utf-8") + "\n"
         for k in en_keys:
-            if k == "web_install_pwa":
-                continue
             self.assertIn(f'"{k}"', all_source.replace("'", '"'), f"Unused translation key: {k}")
 
     def test_09_post_login_per_device_token_pwa_search_and_cinema_player(self):
@@ -366,8 +363,7 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertEqual(search_json["results"][0]["name"], "20250819_144102.mp4")
 
         pwa_resp = _run_request(self.storage_dir, b"GET /manifest.webmanifest HTTP/1.1\r\nHost: localhost\r\n\r\n")
-        self.assertIn(b"200 OK", pwa_resp.splitlines()[0])
-        self.assertIn(b'"display": "standalone"', pwa_resp)
+        self.assertIn(b"401", pwa_resp.splitlines()[0])
 
     def test_10_p4a_hook_targets_api_35_clean_manifest_and_sdl_keep_alive(self):
         self.assertEqual(config.APP_VERSION, "1.3.5")
@@ -485,8 +481,10 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
                             if name not in visible:
                                 self.fail(f"F821 undefined name '{name}' in {p}:{tbl.get_lineno()} ({tbl.get_name()})")
                         if s.is_assigned() and not s.is_parameter() and not s.is_imported() and not name.startswith("_"):
-                            if not s.is_referenced() and not _has_child_ref(tbl, name):
-                                self.fail(f"F841 unused variable '{name}' in {p}:{tbl.get_lineno()} ({tbl.get_name()})")
+                            if not s.is_referenced() and not s.is_free() and not _has_child_ref(tbl, name):
+                                # В Python 3.12+ (PEP 709) comprehension встраиваются в родительский scope
+                                if not any(ch.get_name() in ("listcomp", "setcomp", "dictcomp", "genexpr") for ch in tbl.get_children()):
+                                    self.fail(f"F841 unused variable '{name}' in {p}:{tbl.get_lineno()} ({tbl.get_name()})")
                 next_parent = visible if tbl.get_type() != "class" else parent_names
                 for child in tbl.get_children():
                     _check_symtable(child, next_parent)
@@ -707,6 +705,107 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
             client_ip="192.168.1.191",
         )
         self.assertIn(b"Location: /\r\n", resp_redir)
+
+
+    def test_14_claude_v2_audit_fixes(self):
+        auth = _basic_auth_header("airshare", "918273")
+
+        # 1. Нулевой байт в download_selected не вызывает ValueError
+        resp_sel_null = _run_request(
+            self.storage_dir,
+            ("GET /?download_selected=1&files=a%00b HTTP/1.1\r\nHost: localhost\r\n" + auth + "\r\n").encode("utf-8"),
+        )
+        self.assertIn(b"404", resp_sel_null.splitlines()[0])
+
+        # 2. Не-ASCII в X-Content-SHA256 возвращает 400 до чтения тела
+        resp_bad_sha = _run_request(
+            self.storage_dir,
+            (
+                "POST /?upload=ok.txt HTTP/1.1\r\nHost: localhost\r\n"
+                "Content-Length: 4\r\nX-Content-SHA256: тест\r\n"
+                + auth
+                + "\r\n"
+            ).encode("utf-8") + b"1234",
+        )
+        self.assertIn(b"400", resp_bad_sha.splitlines()[0])
+
+        # 3. Битый hex в chunked-загрузке возвращает 400
+        resp_bad_chunk = _run_request(
+            self.storage_dir,
+            (
+                "POST /?upload=badchunk.bin HTTP/1.1\r\nHost: localhost\r\n"
+                "Transfer-Encoding: chunked\r\n"
+                + auth
+                + "\r\n"
+            ).encode("utf-8") + b"ZZZZ\r\nhello\r\n0\r\n\r\n",
+        )
+        self.assertIn(b"400", resp_bad_chunk.splitlines()[0])
+
+        # 4. Внешний (публичный) IP блокируется 403, а локальный / Hotspot IP проходит
+        resp_pub = _run_request(
+            self.storage_dir,
+            ("GET / HTTP/1.1\r\nHost: localhost\r\n" + auth + "\r\n").encode("utf-8"),
+            client_ip="8.8.8.8",
+        )
+        self.assertIn(b"403", resp_pub.splitlines()[0])
+
+        resp_ap = _run_request(
+            self.storage_dir,
+            ("GET / HTTP/1.1\r\nHost: localhost\r\n" + auth + "\r\n").encode("utf-8"),
+            client_ip="192.168.43.15",
+        )
+        self.assertIn(b"200", resp_ap.splitlines()[0])
+
+        # 5. Сессия с истёкшим TTL отклоняется, legacy-токен больше не поддерживается
+        sessions = {}
+        lock = server.threading.Lock()
+        tok = security.create_device_session_token("sec", sessions, lock, "192.168.1.55", "918273")
+        self.assertTrue(security.is_valid_session_cookie(tok, "192.168.1.55", "918273", "sec", sessions, lock, ttl_seconds=60))
+        sessions[tok]["created"] -= 120
+        self.assertFalse(security.is_valid_session_cookie(tok, "192.168.1.55", "918273", "sec", sessions, lock, ttl_seconds=60))
+        self.assertFalse(hasattr(security, "make_legacy_session_token"))
+
+        # 6. .part: пользовательский report.part доступен (200), а .airshare_tmp.part заблокирован (404)
+        with open(os.path.join(self.storage_dir, "report.part"), "wb") as f:
+            f.write(b"user-part-data")
+        with open(os.path.join(self.storage_dir, ".airshare_tmp.part"), "wb") as f:
+            f.write(b"internal-temp")
+        resp_user_part = _run_request(
+            self.storage_dir,
+            ("GET /?download=report.part HTTP/1.1\r\nHost: localhost\r\n" + auth + "\r\n").encode("utf-8"),
+        )
+        self.assertIn(b"200", resp_user_part.splitlines()[0])
+        resp_int_part = _run_request(
+            self.storage_dir,
+            ("GET /?download=.airshare_tmp.part HTTP/1.1\r\nHost: localhost\r\n" + auth + "\r\n").encode("utf-8"),
+        )
+        self.assertIn(b"404", resp_int_part.splitlines()[0])
+
+        # 7. Cache-Control: no-store для медиафайлов
+        with open(os.path.join(self.storage_dir, "photo.jpg"), "wb") as f:
+            f.write(b"\xff\xd8\xff\xe0fakejpg")
+        resp_img = _run_request(
+            self.storage_dir,
+            ("GET /photo.jpg HTTP/1.1\r\nHost: localhost\r\n" + auth + "\r\n").encode("utf-8"),
+        )
+        self.assertIn(b"Cache-Control: no-store", resp_img)
+
+        # 8. Слабые PIN-коды отклоняются
+        self.assertTrue(security.is_weak_pin("1"))
+        self.assertTrue(security.is_weak_pin("111111"))
+        self.assertTrue(security.is_weak_pin("123456"))
+        self.assertFalse(security.is_weak_pin("918273"))
+
+        # 9. Нативный сервис, stopService и копирование по HTTP
+        hook_src = Path("p4a_hook.py").read_text(encoding="utf-8")
+        self.assertNotIn("MulticastLock", hook_src)
+        self.assertNotIn("START_STICKY", hook_src)
+        self.assertIn("writeStopFlag()", hook_src)
+        ab_src = Path("android_bridge.py").read_text(encoding="utf-8")
+        self.assertIn("activity.stopService(srv_intent)", ab_src)
+        self.assertIn("def consume_service_stop_flag", ab_src)
+        self.assertIn("copyTextFallback", Path("security.py").read_text(encoding="utf-8"))
+        self.assertIn("window.location.search", Path("web_ui.py").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

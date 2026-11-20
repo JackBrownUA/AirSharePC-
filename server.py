@@ -10,6 +10,7 @@ import math
 import mimetypes
 import os
 import secrets
+import shutil
 import select
 import socket
 import threading
@@ -30,7 +31,7 @@ from config import (
 )
 from i18n import SUPPORTED_CODES, tr
 from player_ui import get_media_modal_html
-from pwa_search import search_storage_index, serve_pwa_asset
+from pwa_search import search_storage_index
 from security import (
     IMAGE_EXTENSIONS,
     SANDBOX_EXTENSIONS,
@@ -39,6 +40,8 @@ from security import (
     compute_cached_file_sha256,
     create_device_session_token,
     get_unique_filepath,
+    is_valid_sha256_hex,
+    reserve_unique_filepath,
     is_temp_part_file,
     is_valid_session_cookie,
     is_within_storage,
@@ -46,7 +49,7 @@ from security import (
     register_auth_failure,
     verify_sha256_digest,
 )
-from utils import add_recent_ip, format_size, load_settings
+from utils import add_recent_ip, format_size, is_private_lan_ip, load_settings
 from web_ui import (
     get_css,
     get_download_svg,
@@ -256,7 +259,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             try:
                 jar = cookies.SimpleCookie()
                 jar.load(cookie_hdr)
-                for cname in ("airshare_auth", "airshare_session"):
+                for cname in ("airshare_auth",):
                     if cname in jar:
                         tok = jar[cname].value
                         if is_valid_session_cookie(
@@ -348,6 +351,9 @@ class AirShareHandler(SimpleHTTPRequestHandler):
 
     def check_auth_or_respond(self) -> bool:
         ip = self._get_client_ip()
+        if not (is_private_lan_ip(ip) or ip in ("127.0.0.1", "::1")):
+            self.send_error(403, "Local network only")
+            return False
         theme = self._get_request_theme()
         lang = self._get_request_lang()
 
@@ -422,6 +428,9 @@ class AirShareHandler(SimpleHTTPRequestHandler):
 
     def _handle_login_post(self):
         ip = self._get_client_ip()
+        if not (is_private_lan_ip(ip) or ip in ("127.0.0.1", "::1")):
+            self.send_error(403, "Local network only")
+            return
         theme = self._get_request_theme()
         lang = self._get_request_lang()
 
@@ -543,7 +552,12 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         base_dir = os.path.realpath(os.path.join(self.real_storage, rel_dir))
         clean_target = os.path.basename((target_name or "").replace("\x00", ""))
         target_file = os.path.realpath(os.path.join(base_dir, clean_target))
-        if not self._is_within_storage(target_file) or not os.path.isfile(target_file):
+        if (
+            is_temp_part_file(clean_target)
+            or is_temp_part_file(os.path.basename(target_file))
+            or not self._is_within_storage(target_file)
+            or not os.path.isfile(target_file)
+        ):
             self.send_error(404, "File not found")
             return
         try:
@@ -561,8 +575,6 @@ class AirShareHandler(SimpleHTTPRequestHandler):
 
     def do_HEAD(self):
         parsed = urllib.parse.urlparse(self.path)
-        if serve_pwa_asset(self, parsed.path):
-            return
         if not self.check_auth_or_respond():
             return
         self._parse_client_device(fast_skip_if_known=True)
@@ -584,8 +596,6 @@ class AirShareHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
-        if serve_pwa_asset(self, parsed.path):
-            return
         if not self.check_auth_or_respond():
             return
 
@@ -702,6 +712,16 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             return
 
         expected_sha256 = (self.headers.get("X-Content-SHA256") or "").strip().lower()
+        if expected_sha256 and not is_valid_sha256_hex(expected_sha256):
+            self.send_error(400, "Invalid X-Content-SHA256")
+            return
+        if length > 0:
+            try:
+                if shutil.disk_usage(target_dir).free < length + (1024 * 1024):
+                    self.send_error(507, "Insufficient Storage")
+                    return
+            except OSError:
+                pass
         dest_path, final_filename = get_unique_filepath(target_dir, filename)
         tmp_path = os.path.join(target_dir, f".airshare_{threading.get_ident()}_{secrets.token_hex(4)}.part")
         if target_dir == self.real_storage and not rel_dir:
@@ -729,7 +749,14 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                         chunk_len_str = line.strip().split(b";")[0]
                         if not chunk_len_str:
                             continue
-                        chunk_len = int(chunk_len_str, 16)
+                        try:
+                            chunk_len = int(chunk_len_str, 16)
+                        except ValueError:
+                            self.send_error(400, "Invalid chunk size")
+                            return
+                        if chunk_len < 0:
+                            self.send_error(400, "Invalid chunk size")
+                            return
                         if chunk_len == 0:
                             self.rfile.readline(65536)
                             remaining = 0
@@ -785,7 +812,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 self.send_error(422, "SHA-256 mismatch")
                 return
 
-            dest_path, final_filename = get_unique_filepath(target_dir, filename)
+            dest_path, final_filename = reserve_unique_filepath(target_dir, filename)
             os.replace(tmp_path, dest_path)
 
             self._notify_transfer(final_filename, received, "upload")
@@ -894,7 +921,12 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         clean_target = os.path.basename((target_name or "").replace("\x00", ""))
         target_file = os.path.realpath(os.path.join(base_dir, clean_target))
 
-        if not self._is_within_storage(target_file) or not os.path.isfile(target_file):
+        if (
+            is_temp_part_file(clean_target)
+            or is_temp_part_file(os.path.basename(target_file))
+            or not self._is_within_storage(target_file)
+            or not os.path.isfile(target_file)
+        ):
             self.send_error(404, "File not found")
             return
 
@@ -940,8 +972,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
 
             self.send_header("Last-Modified", mtime_http)
             self.send_header("ETag", etag_val)
-            if not force_attachment:
-                self.send_header("Cache-Control", "private, max-age=3600")
+            self.send_header("Cache-Control", "no-store")
 
             if ext.lower() in SANDBOX_EXTENSIONS:
                 self.send_header("Content-Security-Policy", "sandbox")
@@ -1028,14 +1059,19 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         seen_arcnames = set()
 
         for item_rel_path in files:
-            clean_rel = str(item_rel_path).replace("\\", "/").lstrip("/")
-            candidate_path = os.path.join(self.real_storage, clean_rel)
-            if os.path.islink(candidate_path):
-                real_cand = os.path.realpath(candidate_path)
-                if not self._is_within_storage(real_cand):
-                    logger.warning("Пропущен внешний симлинк: %s", item_rel_path)
-                    continue
-            full_path = os.path.realpath(candidate_path)
+            clean_rel = str(item_rel_path).replace("\x00", "").replace("\\", "/").lstrip("/")
+            if not clean_rel:
+                continue
+            try:
+                candidate_path = os.path.join(self.real_storage, clean_rel)
+                if os.path.islink(candidate_path):
+                    real_cand = os.path.realpath(candidate_path)
+                    if not self._is_within_storage(real_cand):
+                        logger.warning("Пропущен внешний симлинк: %s", item_rel_path)
+                        continue
+                full_path = os.path.realpath(candidate_path)
+            except ValueError:
+                continue
             if not self._is_within_storage(full_path):
                 logger.warning("Пропущен путь вне хранилища при скачивании выбранного: %s", item_rel_path)
                 continue
@@ -1128,7 +1164,6 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         r = []
         r.append('<!DOCTYPE html><html><head><meta charset="utf-8">')
         r.append('<meta name="viewport" content="width=device-width, initial-scale=1.0">')
-        r.append('<link rel="manifest" href="/manifest.webmanifest">')
         r.append('<title>AirShare PC</title>')
         r.append(f'<style>{get_css(theme)}</style>')
         r.append(f'</head><body class="{theme}">')
@@ -1284,11 +1319,3 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         return BytesIO(encoded)
 
 
-def run_server(port=8080, password="", theme="dark", lang="en"):
-    os.makedirs(STORAGE_PATH, exist_ok=True)
-    AirShareHandler.default_theme = theme if theme in ("light", "dark") else "dark"
-    AirShareHandler.current_language = lang if lang in SUPPORTED_CODES else "en"
-    AirShareHandler.reset_auth_sessions(password)
-    server = ReusableThreadingServer(("0.0.0.0", port), AirShareHandler)
-    logger.info("Сервер AirShare запущен на порту %d (папка: %s)", port, STORAGE_PATH)
-    return server

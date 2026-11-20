@@ -1,6 +1,7 @@
 # Модуль интеграции с Android / Pyjnius для AirShare PC (v1.3.5): Wi-Fi IP, имя устройства, системная тема, права памяти, фоновый Foreground Service и уведомление со счётчиками передач
 
 import logging
+import os
 import socket
 import struct
 
@@ -87,16 +88,6 @@ def get_android_device_name() -> str:
         from jnius import autoclass
         Build = autoclass("android.os.Build")
         model = str(Build.MODEL or "").strip()
-        known_models = {
-            "SM-S928B": "Galaxy S24 Ultra",
-            "SM-S928U": "Galaxy S24 Ultra",
-            "SM-S928N": "Galaxy S24 Ultra",
-            "SM-S926B": "Galaxy S24+",
-            "SM-S921B": "Galaxy S24",
-            "SM-S918B": "Galaxy S23 Ultra",
-        }
-        if model in known_models:
-            return known_models[model]
         manufacturer = str(Build.MANUFACTURER or "").capitalize()
         if model.startswith(manufacturer):
             return model
@@ -250,13 +241,14 @@ def set_android_foreground_notification(
             Intent = autoclass("android.content.Intent")
             ServiceClass = autoclass("org.kivy.android.AirShareKeepAliveService")
             srv_intent = Intent(activity, ServiceClass)
+            stop_label = tr("disconnect", lang)
             if not active:
                 _fg_service_running = False
-                srv_intent.setAction("STOP")
-                activity.startService(srv_intent)
+                activity.stopService(srv_intent)
             elif not _fg_service_running:
                 srv_intent.putExtra("title", title_str)
                 srv_intent.putExtra("body", body_str)
+                srv_intent.putExtra("stop_label", stop_label)
                 BuildVersion = autoclass("android.os.Build$VERSION")
                 if BuildVersion.SDK_INT >= 26:
                     activity.startForegroundService(srv_intent)
@@ -314,6 +306,14 @@ def set_android_foreground_notification(
         builder.setOngoing(True)
         builder.setOnlyAlertOnce(True)
         builder.setContentIntent(pending_intent)
+        try:
+            ServiceClass = autoclass("org.kivy.android.AirShareKeepAliveService")
+            stop_intent = Intent(activity, ServiceClass)
+            stop_intent.setAction("STOP")
+            stop_pi = PendingIntent.getService(activity, 1, stop_intent, pi_flags)
+            builder.addAction(17301560, tr("disconnect", lang), stop_pi)
+        except Exception:
+            pass
         notif = builder.build()
         nm.notify(NOTIFICATION_ID, notif)
     except Exception as exc:
@@ -338,3 +338,30 @@ def is_android_activity_paused() -> bool:
         return bool(getattr(_sdl_activity_cls, "sIsActivityPaused", False))
     except Exception:
         return False
+
+
+def consume_service_stop_flag() -> bool:
+    try:
+        from kivy.utils import platform
+        if platform != "android":
+            return False
+        from jnius import autoclass
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        activity = getattr(PythonActivity, "mActivity", None)
+        if activity is None:
+            return False
+        files_dir = activity.getFilesDir()
+        if files_dir is None:
+            return False
+        flag_path = os.path.join(str(files_dir.getAbsolutePath()), "airshare_service_stopped.flag")
+        if os.path.exists(flag_path):
+            try:
+                os.remove(flag_path)
+            except OSError:
+                pass
+            global _fg_service_running
+            _fg_service_running = False
+            return True
+    except Exception as exc:
+        logger.debug("Ошибка проверки флага остановки сервиса: %s", exc)
+    return False

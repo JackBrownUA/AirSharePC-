@@ -1172,6 +1172,7 @@ def get_upload_script(lang="en"):
         const cleanOrigin = window.location.protocol + "//" + window.location.host;
         const basePath = window.location.pathname || "/";
         let uploadedCount = 0;
+        let verifiedCount = 0;
 
         if (dock) dock.classList.add("visible");
 
@@ -1208,6 +1209,7 @@ def get_upload_script(lang="en"):
                     if (dockEta) dockEta.innerText = {msg_eta} + ": " + formatClock(remSec);
                 }});
                 uploadedCount++;
+                if (clientSha) verifiedCount++;
             }} catch (err) {{
                 if (st) {{
                     st.style.color = "#ff453a";
@@ -1219,9 +1221,10 @@ def get_upload_script(lang="en"):
         }}
         if (st && uploadedCount > 0) {{
             st.style.color = "#20c997";
-            st.innerText = {msg_done} + uploadedCount + " (" + {msg_hash_ok} + ")";
+            const hashNote = verifiedCount === uploadedCount ? " (" + {msg_hash_ok} + ")" : "";
+            st.innerText = {msg_done} + uploadedCount + hashNote;
         }}
-        window.location.href = cleanOrigin + basePath;
+        window.location.href = cleanOrigin + basePath + (window.location.search || "");
     }}
 
     function toggleSelectAll(masterCheckbox) {{
@@ -1575,7 +1578,6 @@ def get_pin_login_page(theme="dark", lang="en", error_msg="", next_path="/"):
     return (
         '<!DOCTYPE html><html><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
-        '<link rel="manifest" href="/manifest.webmanifest">'
         '<title>AirShare PC — PIN</title>'
         f'<style>{get_css(theme)}</style>'
         f'</head><body class="{theme}">'

@@ -29,6 +29,7 @@ from android_bridge import (
     move_android_task_to_back,
     request_android_notification_permission,
 )
+from security import is_weak_pin
 from server import AirShareHandler, ReusableThreadingServer
 from themes import THEMES
 from ui_widgets import (
@@ -63,6 +64,7 @@ from utils import (
     load_settings,
     request_android_full_storage,
     save_settings,
+    consume_service_stop_flag,
     set_android_foreground_notification,
 )
 
@@ -90,8 +92,7 @@ class AirShareApp(App):
         self.active_folder_key = "Downloads"
         self.active_nav_tab = "transfer"
         self.keep_alive_locked = True
-        self._wake_lock = None
-        self._wifi_lock = None
+        self._svc_poll_ev = None
         self._pending_all_storage_path = None
         self.transfer_history = []
         self.sent_files_count = 0
@@ -220,41 +221,6 @@ class AirShareApp(App):
             Window.allow_screensaver = not self.keep_alive_locked
         except Exception as exc:
             logger.debug("Не удалось изменить Window.allow_screensaver: %s", exc)
-        try:
-            from kivy.utils import platform
-            if platform == "android":
-                from jnius import autoclass
-                PythonActivity = autoclass("org.kivy.android.PythonActivity")
-                activity = getattr(PythonActivity, "mActivity", None)
-                if activity is not None:
-                    Context = autoclass("android.content.Context")
-                    PowerManager = autoclass("android.os.PowerManager")
-                    WifiManager = autoclass("android.net.wifi.WifiManager")
-                    if self.keep_alive_locked:
-                        if self._wake_lock is None:
-                            pm = activity.getSystemService(Context.POWER_SERVICE)
-                            if pm is not None:
-                                self._wake_lock = pm.newWakeLock(
-                                    PowerManager.PARTIAL_WAKE_LOCK, "AirSharePC::WakeLock"
-                                )
-                        if self._wake_lock is not None and not self._wake_lock.isHeld():
-                            self._wake_lock.acquire()
-
-                        if self._wifi_lock is None:
-                            wm = activity.getApplicationContext().getSystemService(Context.WIFI_SERVICE)
-                            if wm is not None:
-                                wifi_mode = getattr(WifiManager, "WIFI_MODE_FULL_LOW_LATENCY", WifiManager.WIFI_MODE_FULL_HIGH_PERF)
-                                self._wifi_lock = wm.createWifiLock(wifi_mode, "AirSharePC::WifiLock")
-                                self._wifi_lock.setReferenceCounted(False)
-                        if self._wifi_lock is not None and not self._wifi_lock.isHeld():
-                            self._wifi_lock.acquire()
-                    else:
-                        if self._wake_lock is not None and self._wake_lock.isHeld():
-                            self._wake_lock.release()
-                        if self._wifi_lock is not None and self._wifi_lock.isHeld():
-                            self._wifi_lock.release()
-        except Exception as exc:
-            logger.warning("Не удалось переключить WakeLock/WifiLock: %s", exc)
 
     def _apply_android_system_insets(self, *_args):
         # На Android 15–17 (targetSdkVersion 35/36) учитываем системные отступы статус-бара и нижней панели навигации
@@ -759,6 +725,7 @@ class AirShareApp(App):
 
     def on_stop(self):
         self.radar_card.set_wave_active(False)
+        DynamicAirShareHandler.reset_auth_sessions()
         self.set_keep_alive(False)
         set_android_foreground_notification(False)
         if self.server is not None:
@@ -1016,15 +983,16 @@ class AirShareApp(App):
         if not has_android_storage_permission():
             request_android_full_storage()
 
-        bind_ip = get_local_ip()
         try:
             self.server = ReusableThreadingServer(("0.0.0.0", self.server_port), DynamicAirShareHandler)
             threading.Thread(target=self.server.serve_forever, daemon=True).start()
             self.has_server_error = False
             self.set_keep_alive(True)
             self._refresh_foreground_notification()
+            if self._svc_poll_ev is None:
+                self._svc_poll_ev = Clock.schedule_interval(self._poll_service_stop_flag, 3.0)
         except OSError as exc:
-            logger.error("Не удалось запустить HTTP-сервер на %s:%s: %s", bind_ip, self.server_port, exc)
+            logger.error("Не удалось запустить HTTP-сервер на 0.0.0.0:%s: %s", self.server_port, exc)
             self.server = None
             self.has_server_error = True
         self.apply_theme()
@@ -1074,8 +1042,21 @@ class AirShareApp(App):
 
             threading.Thread(target=_stop, daemon=True).start()
 
+    def _poll_service_stop_flag(self, _dt):
+        if self.server is None:
+            if self._svc_poll_ev is not None:
+                self._svc_poll_ev.cancel()
+                self._svc_poll_ev = None
+            return
+        if consume_service_stop_flag():
+            self.toggle_server()
+
     def _on_server_stopped(self, _dt):
         self.is_stopping = self.has_server_error = False
+        if self._svc_poll_ev is not None:
+            self._svc_poll_ev.cancel()
+            self._svc_poll_ev = None
+        DynamicAirShareHandler.reset_auth_sessions()
         self.set_keep_alive(False)
         set_android_foreground_notification(False)
         self.apply_theme()
@@ -1383,6 +1364,9 @@ class AirShareApp(App):
         )
 
         def _save(val):
+            if is_weak_pin(val):
+                self.show_toast("PIN: min 6 chars (no 111111 / 123456)", kind="error")
+                return
             saved = save_settings(password=val)
             final_pwd = saved["password"]
             self.saved_password = DynamicAirShareHandler.current_password = final_pwd

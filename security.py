@@ -1,15 +1,16 @@
-# Модуль безопасности AirShare PC (v1.3.5): уникальные сессионные токены устройств, защита от перебора PIN, Path Traversal, фильтрация .part и проверка целостности SHA-256
+# Модуль безопасности AirShare PC (v1.3.6): уникальные сессионные токены устройств с TTL, защита от перебора PIN, Path Traversal, фильтрация .airshare_*.part и проверка целостности SHA-256
 
 import hashlib
 import hmac
 import logging
 import os
+import re
 import secrets
 import threading
 import time
 import urllib.parse
 
-from config import RATE_LIMIT_BLOCK_SECONDS, RATE_LIMIT_MAX_ATTEMPTS
+from config import COMPROMISED_PASSWORDS, RATE_LIMIT_BLOCK_SECONDS, RATE_LIMIT_MAX_ATTEMPTS
 
 logger = logging.getLogger("airshare.security")
 
@@ -18,10 +19,30 @@ IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", 
 VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v", ".3gp"})
 
 HASH_CHUNK_SIZE = 1024 * 1024
+SESSION_TTL_SECONDS = 12 * 3600
+_SHA256_HEX_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+_WEAK_SEQUENCES = "01234567890123456789 98765432109876543210"
 
 
 def is_temp_part_file(name: str) -> bool:
-    return name.startswith(".airshare_upload_") or name.endswith(".part")
+    return bool(name) and name.startswith(".airshare_") and name.endswith(".part")
+
+
+def is_valid_sha256_hex(val: str) -> bool:
+    return bool(val) and bool(_SHA256_HEX_RE.match(val))
+
+
+def is_weak_pin(pin: str) -> bool:
+    val = str(pin or "").strip()
+    if len(val) < 6:
+        return True
+    if val in COMPROMISED_PASSWORDS:
+        return True
+    if len(set(val)) <= 1:
+        return True
+    if val.isdigit() and val in _WEAK_SEQUENCES:
+        return True
+    return False
 
 
 def is_within_storage(real_storage: str, candidate_path: str) -> bool:
@@ -33,13 +54,13 @@ def is_within_storage(real_storage: str, candidate_path: str) -> bool:
 
 
 def make_content_disposition(filename: str, disposition: str = "attachment") -> str:
-    clean_name = os.path.basename(filename).replace('"', "_").replace("\r", "").replace("\n", "")
+    clean_name = os.path.basename(filename).replace("\"", "_").replace("\r", "").replace("\n", "")
     ascii_fallback = clean_name.encode("ascii", "ignore").decode("ascii").strip()
     if not ascii_fallback or ascii_fallback.startswith("."):
         _, ext = os.path.splitext(clean_name)
         ascii_fallback = f"download{ext}"
     utf8_quoted = urllib.parse.quote(clean_name, safe="")
-    return f'{disposition}; filename="{ascii_fallback}"; filename*=UTF-8\'\'{utf8_quoted}'
+    return f"{disposition}; filename=\"{ascii_fallback}\"; filename*=UTF-8''{utf8_quoted}"
 
 
 def get_unique_filepath(target_dir: str, filename: str):
@@ -56,9 +77,26 @@ def get_unique_filepath(target_dir: str, filename: str):
         counter += 1
 
 
+def reserve_unique_filepath(target_dir: str, filename: str):
+    # Атомарное резервирование имени файла через O_CREAT | O_EXCL для защиты от гонки параллельных загрузок
+    stem, ext = os.path.splitext(filename)
+    counter = 0
+    while True:
+        new_name = filename if counter == 0 else f"{stem} ({counter}){ext}"
+        candidate = os.path.realpath(os.path.join(target_dir, new_name))
+        try:
+            fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            os.close(fd)
+            return candidate, new_name
+        except FileExistsError:
+            counter += 1
+
+
 def verify_sha256_digest(actual_hex: str, expected_hex: str) -> bool:
     if not expected_hex:
         return True
+    if not is_valid_sha256_hex(expected_hex) or not is_valid_sha256_hex(actual_hex):
+        return False
     return hmac.compare_digest(
         actual_hex.strip().lower().encode("ascii"),
         expected_hex.strip().lower().encode("ascii"),
@@ -97,6 +135,7 @@ def create_device_session_token(
     nonce = secrets.token_hex(16)
     msg = f"{client_ip}:{expected_pwd}:{nonce}".encode("utf-8")
     tok = hmac.new(session_secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
+    now = time.monotonic()
     with lock:
         if len(device_sessions) >= 256:
             oldest_key = next(iter(device_sessions))
@@ -104,14 +143,9 @@ def create_device_session_token(
         device_sessions[tok] = {
             "ip": str(client_ip).strip(),
             "pwd": expected_pwd,
-            "created": time.monotonic(),
+            "created": now,
         }
     return tok
-
-
-def make_legacy_session_token(session_secret: str, expected_pwd: str) -> str:
-    msg = f"airshare_session:{expected_pwd}".encode("utf-8")
-    return hmac.new(session_secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
 
 
 def is_valid_session_cookie(
@@ -121,20 +155,26 @@ def is_valid_session_cookie(
     session_secret: str,
     device_sessions: dict,
     lock: threading.Lock,
+    ttl_seconds: float = SESSION_TTL_SECONDS,
 ) -> bool:
     if not tok:
         return False
+    _ = session_secret
+    now = time.monotonic()
     with lock:
         meta = device_sessions.get(tok)
-        if meta is not None:
-            if meta.get("ip") == client_ip and hmac.compare_digest(
-                str(meta.get("pwd", "")).encode("utf-8"),
-                expected_pwd.encode("utf-8"),
-            ):
-                return True
+        if meta is None:
             return False
-    legacy_tok = make_legacy_session_token(session_secret, expected_pwd)
-    return hmac.compare_digest(tok.encode("utf-8"), legacy_tok.encode("utf-8"))
+        created = float(meta.get("created", 0.0))
+        if (now - created) > ttl_seconds:
+            device_sessions.pop(tok, None)
+            return False
+        if meta.get("ip") == client_ip and hmac.compare_digest(
+            str(meta.get("pwd", "")).encode("utf-8"),
+            expected_pwd.encode("utf-8"),
+        ):
+            return True
+    return False
 
 
 def check_ip_rate_limit(client_ip: str, failed_attempts: dict, lock: threading.Lock):
@@ -223,6 +263,30 @@ def get_sha256_js() -> str:
         return [h0, h1, h2, h3, h4, h5, h6, h7].map(v => v.toString(16).padStart(8, "0")).join("");
     }
 
+    function copyTextFallback(text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).catch(function() {
+                _execCopyFallback(text);
+            });
+            return;
+        }
+        _execCopyFallback(text);
+    }
+
+    function _execCopyFallback(text) {
+        try {
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            ta.style.position = "fixed";
+            ta.style.opacity = "0";
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            document.execCommand("copy");
+            document.body.removeChild(ta);
+        } catch (e) {}
+    }
+
     async function computeFileSha256(file) {
         if (file.size > 64 * 1024 * 1024) return "";
         const ab = await file.arrayBuffer();
@@ -239,7 +303,7 @@ def get_sha256_js() -> str:
             if (data && data.sha256) {
                 pillEl.innerText = "✓ " + data.sha256.slice(0, 10) + "…";
                 pillEl.title = "SHA-256: " + data.sha256;
-                try { navigator.clipboard.writeText(data.sha256); } catch (e) {}
+                copyTextFallback(data.sha256);
             }
         } catch (e) {
             pillEl.innerText = "⚠️ SHA-256";

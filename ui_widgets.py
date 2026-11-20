@@ -192,52 +192,6 @@ class RadioCircle(Widget):
                 Ellipse(pos=(cx - hl_r * 0.8, cy + fill_r * 0.18 - hl_r * 0.5), size=(hl_r * 1.6, hl_r))
 
 
-class AnimatedToggleSwitch(ButtonBehavior, Widget):
-    thumb_pos = NumericProperty(0.0)
-
-    def __init__(self, active=False, **kwargs):
-        super().__init__(**kwargs)
-        self.always_release = True
-        self.is_active = bool(active)
-        self.thumb_pos = 1.0 if self.is_active else 0.0
-        with self.canvas:
-            self.border_col = Color(0.40, 0.44, 0.50, 0.65)
-            self.border_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(13)])
-            self.track_col = Color(0.24, 0.26, 0.30, 1)
-            self.track_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(12)])
-            self.thumb_col = Color(0.96, 0.97, 0.98, 1)
-            self.thumb_ellipse = Ellipse(pos=(0, 0), size=(dp(20), dp(20)))
-        self.bind(pos=self._upd, size=self._upd, thumb_pos=self._upd)
-        Clock.schedule_once(self._upd, 0)
-
-    def _upd(self, *_args):
-        w, h = self.width, self.height
-        if w <= 2 or h <= 2:
-            return
-        r = max(1.0, min(w, h) * 0.48)
-        bd = dp(1.0)
-        self.border_rect.pos, self.border_rect.size, self.border_rect.radius = self.pos, self.size, [r]
-        self.track_rect.pos = (self.x + bd, self.y + bd)
-        self.track_rect.size = (max(1.0, w - bd * 2.0), max(1.0, h - bd * 2.0))
-        self.track_rect.radius = [max(1.0, r - bd)]
-        t = max(0.0, min(1.0, self.thumb_pos))
-        self.track_col.rgba = (0.22 - 0.04 * t, 0.24 + 0.12 * t, 0.28 + 0.26 * t, 1.0)
-        self.border_col.rgba = (0.38, 0.72, 0.98, 0.75) if t > 0.5 else (0.40, 0.44, 0.50, 0.55)
-        self.thumb_col.rgba = (0.97 - 0.55 * t, 0.98 - 0.22 * t, 0.99 + 0.01 * t, 1.0)
-        pad, d = dp(3.5), h - dp(7.0)
-        self.thumb_ellipse.pos = (self.x + pad + (w - pad * 2 - d) * t, self.y + pad)
-        self.thumb_ellipse.size = (d, d)
-
-    def set_active(self, active, animate=True):
-        self.is_active = bool(active)
-        target = 1.0 if self.is_active else 0.0
-        Animation.cancel_all(self, "thumb_pos")
-        if animate:
-            Animation(thumb_pos=target, duration=0.22, t="out_cubic").start(self)
-        else:
-            self.thumb_pos = target
-
-
 class VectorIcon(Widget):
     on_touch_down = on_touch_move = on_touch_up = lambda self, touch: False
 
@@ -447,12 +401,6 @@ class VectorIcon(Widget):
                 Line(points=[cx - d, cy, cx - d * 0.25, cy - d * 0.75, cx + d, cy + d * 0.65], width=dp(2.0))
 
 
-class VectorIconButton(ButtonBehavior, VectorIcon):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.always_release = True
-
-
 class RoundedCard(BoxLayout):
     scale_val = NumericProperty(1.0)
     offset_x = NumericProperty(0.0)
@@ -551,10 +499,6 @@ class RoundedActionButton(ClickableCard):
 
     def set_text(self, text):
         self.lbl.text = f"[b]{text}[/b]"
-
-
-class RadarCenterButton(RoundedActionButton):
-    pass
 
 
 class DrawerOverlay(Widget):

@@ -1,74 +1,54 @@
-# Модуль PWA (Progressive Web App) и мгновенного поиска по хранилищу для AirShare PC (v1.3.5)
+# Модуль мгновенного поиска по хранилищу для AirShare PC (v1.3.6)
 
-import json
 import os
 import threading
 import time
 
-from config import APP_NAME, APP_VERSION
 from i18n import tr
 from security import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, is_temp_part_file, is_within_storage
 from utils import format_size
 
-PWA_ICON_SVG = (
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">'
-    '<rect width="128" height="128" rx="28" fill="#090c15"/>'
-    '<rect x="20" y="28" width="88" height="58" rx="10" fill="none" stroke="#3b82f6" stroke-width="6"/>'
-    '<path d="M36 74 A28 28 0 0 1 92 74" fill="none" stroke="#20c997" stroke-width="6" stroke-linecap="round"/>'
-    '<line x1="46" y1="100" x2="82" y2="100" stroke="#94a3b8" stroke-width="6" stroke-linecap="round"/>'
-    '</svg>'
-)
 
-PWA_SW_JS = (
-    "self.addEventListener('install', e => self.skipWaiting());\n"
-    "self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));\n"
-
-)
-
-
-def serve_pwa_asset(handler, path_only: str) -> bool:
-    if path_only == "/manifest.webmanifest":
-        manifest = {
-            "name": f"{APP_NAME} v{APP_VERSION}",
-            "short_name": APP_NAME,
-            "start_url": "/",
-            "display": "standalone",
-            "background_color": "#040508",
-            "theme_color": "#090c15",
-            "icons": [
-                {
-                    "src": "/icon.svg",
-                    "sizes": "any",
-                    "type": "image/svg+xml",
-                    "purpose": "any maskable",
-                }
-            ],
-        }
-        body = json.dumps(manifest, ensure_ascii=False).encode("utf-8")
-        handler.send_response(200)
-        handler.send_header("Content-Type", "application/manifest+json; charset=utf-8")
-        handler.send_header("Content-Length", str(len(body)))
-        handler.end_headers()
-        handler.wfile.write(body)
-        return True
-    if path_only == "/sw.js":
-        body = PWA_SW_JS.encode("utf-8")
-        handler.send_response(200)
-        handler.send_header("Content-Type", "application/javascript; charset=utf-8")
-        handler.send_header("Content-Length", str(len(body)))
-        handler.end_headers()
-        handler.wfile.write(body)
-        return True
-    if path_only == "/icon.svg":
-        body = PWA_ICON_SVG.encode("utf-8")
-        handler.send_response(200)
-        handler.send_header("Content-Type", "image/svg+xml; charset=utf-8")
-        handler.send_header("Cache-Control", "public, max-age=86400")
-        handler.send_header("Content-Length", str(len(body)))
-        handler.end_headers()
-        handler.wfile.write(body)
-        return True
-    return False
+def _build_storage_entries(real_storage: str, current_language: str) -> list:
+    new_entries = []
+    skip_names = {".thumbnails", ".trash", ".Trashes"}
+    try:
+        for root, dirs, files in os.walk(real_storage, followlinks=False):
+            rel_root = os.path.relpath(root, real_storage).replace("\\", "/")
+            if rel_root == "Android":
+                dirs[:] = [d for d in dirs if d not in ("data", "obb") and not is_temp_part_file(d)]
+            else:
+                dirs[:] = [d for d in dirs if d not in skip_names and not is_temp_part_file(d)]
+            for d in dirs:
+                full_d = os.path.join(root, d)
+                if os.path.islink(full_d) and not is_within_storage(real_storage, full_d):
+                    continue
+                rel_d = os.path.relpath(full_d, real_storage).replace("\\", "/")
+                new_entries.append((d.lower(), d, rel_d, True, tr("web_folder", current_language), "folder"))
+                if len(new_entries) >= 50000:
+                    break
+            for f in files:
+                if is_temp_part_file(f):
+                    continue
+                full_f = os.path.join(root, f)
+                if os.path.islink(full_f) and not is_within_storage(real_storage, full_f):
+                    continue
+                rel_f = os.path.relpath(full_f, real_storage).replace("\\", "/")
+                try:
+                    sz = format_size(os.path.getsize(full_f))
+                except OSError:
+                    sz = "—"
+                _, ext = os.path.splitext(f)
+                ext_low = ext.lower()
+                kind = "image" if ext_low in IMAGE_EXTENSIONS else ("video" if ext_low in VIDEO_EXTENSIONS else "file")
+                new_entries.append((f.lower(), f, rel_f, False, sz, kind))
+                if len(new_entries) >= 50000:
+                    break
+            if len(new_entries) >= 50000:
+                break
+    except OSError:
+        pass
+    return new_entries
 
 
 def search_storage_index(
@@ -82,55 +62,42 @@ def search_storage_index(
     if not q:
         return []
     now = time.monotonic()
+    need_sync_build = False
+    need_bg_refresh = False
     with lock:
         cached_root = search_cache.get("root")
         cached_ts = search_cache.get("ts", 0.0)
-        entries = search_cache.get("entries", [])
+        entries = list(search_cache.get("entries", []))
+        is_building = bool(search_cache.get("building", False))
+        if cached_root != real_storage or not entries:
+            need_sync_build = True
+            search_cache["building"] = True
+        elif (now - cached_ts) > 45.0 and not is_building:
+            need_bg_refresh = True
+            search_cache["building"] = True
 
-    if cached_root != real_storage or (now - cached_ts) > 45.0:
-        new_entries = []
-        skip_names = {".thumbnails", ".trash", ".Trashes"}
+    if need_sync_build:
         try:
-            for root, dirs, files in os.walk(real_storage, followlinks=False):
-                rel_root = os.path.relpath(root, real_storage).replace("\\", "/")
-                if rel_root == "Android":
-                    dirs[:] = [d for d in dirs if d not in ("data", "obb") and not is_temp_part_file(d)]
-                else:
-                    dirs[:] = [d for d in dirs if d not in skip_names and not is_temp_part_file(d)]
-                for d in dirs:
-                    full_d = os.path.join(root, d)
-                    if not is_within_storage(real_storage, full_d):
-                        continue
-                    rel_d = os.path.relpath(full_d, real_storage).replace("\\", "/")
-                    new_entries.append((d.lower(), d, rel_d, True, tr("web_folder", current_language), "folder"))
-                    if len(new_entries) >= 50000:
-                        break
-                for f in files:
-                    if is_temp_part_file(f):
-                        continue
-                    full_f = os.path.join(root, f)
-                    if not is_within_storage(real_storage, full_f):
-                        continue
-                    rel_f = os.path.relpath(full_f, real_storage).replace("\\", "/")
-                    try:
-                        sz = format_size(os.path.getsize(full_f))
-                    except OSError:
-                        sz = "—"
-                    _, ext = os.path.splitext(f)
-                    ext_low = ext.lower()
-                    kind = "image" if ext_low in IMAGE_EXTENSIONS else ("video" if ext_low in VIDEO_EXTENSIONS else "file")
-                    new_entries.append((f.lower(), f, rel_f, False, sz, kind))
-                    if len(new_entries) >= 50000:
-                        break
-                if len(new_entries) >= 50000:
-                    break
-        except OSError:
-            pass
-        entries = new_entries
-        with lock:
-            search_cache["root"] = real_storage
-            search_cache["ts"] = time.monotonic()
-            search_cache["entries"] = entries
+            entries = _build_storage_entries(real_storage, current_language)
+        finally:
+            with lock:
+                search_cache["root"] = real_storage
+                search_cache["ts"] = time.monotonic()
+                search_cache["entries"] = entries
+                search_cache["building"] = False
+    elif need_bg_refresh:
+        def _bg_job():
+            new_entries = []
+            try:
+                new_entries = _build_storage_entries(real_storage, current_language)
+            finally:
+                with lock:
+                    if new_entries:
+                        search_cache["root"] = real_storage
+                        search_cache["ts"] = time.monotonic()
+                        search_cache["entries"] = new_entries
+                    search_cache["building"] = False
+        threading.Thread(target=_bg_job, daemon=True).start()
 
     tokens = [tok for tok in q.split() if tok]
     matches = []
@@ -242,25 +209,4 @@ def get_search_and_pwa_script() -> str:
             });
         }
     });
-
-    let _deferredPwaPrompt = null;
-    if ("serviceWorker" in navigator) {
-        window.addEventListener("load", function() {
-            navigator.serviceWorker.register("/sw.js").catch(function(){});
-        });
-    }
-    window.addEventListener("beforeinstallprompt", function(e) {
-        e.preventDefault();
-        _deferredPwaPrompt = e;
-        const btn = document.getElementById("pwaInstallBtn");
-        if (btn) btn.style.display = "inline-flex";
-    });
-    async function installPwaApp() {
-        if (!_deferredPwaPrompt) return;
-        _deferredPwaPrompt.prompt();
-        await _deferredPwaPrompt.userChoice;
-        _deferredPwaPrompt = null;
-        const btn = document.getElementById("pwaInstallBtn");
-        if (btn) btn.style.display = "none";
-    }
     """

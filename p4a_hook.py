@@ -1,6 +1,6 @@
 # Хук сборки python-for-android (p4a.hook) для AirShare PC (v1.3.5):
 # 1. Выставляет TARGET_API = "35" (targetSdkVersion=35, compileSdkVersion=35 и target=android-35).
-# 2. Генерирует нативный Java Foreground Service (AirShareKeepAliveService.java) с WakeLock, WifiLock, MulticastLock и живым уведомлением в шторке (передано/получено файлов) и регистрирует его в AndroidManifest.xml и AndroidManifest.tmpl.xml.
+# 2. Генерирует нативный Java Foreground Service (AirShareKeepAliveService.java) с WakeLock и WifiLock и живым уведомлением в шторке (передано/получено файлов) и регистрирует его в AndroidManifest.xml и AndroidManifest.tmpl.xml.
 # 3. Патчит SDLActivity.java (отключает блокировку Python GIL внутри SDLActivity.nativePause() при выходе из приложения и блокировке экрана, чтобы фоновый HTTP-сервер работал без остановок).
 # 4. Патчит HIDDeviceManager.java (SDL2) флагом RECEIVER_EXPORTED (2) для Android 14+.
 # 5. Восстанавливает стандартный сертификат CN=Android Debug, O=Android, C=US и отключает pip install -U pip в p4a.
@@ -27,13 +27,14 @@ import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
+import java.io.File;
 
 public class AirShareKeepAliveService extends Service {
     private static final String CHANNEL_ID = "airshare_fg_service";
     private static final int NOTIF_ID = 1001;
+    private static final String STOP_FLAG_FILE = "airshare_service_stopped.flag";
     private PowerManager.WakeLock wakeLock;
     private WifiManager.WifiLock wifiLock;
-    private WifiManager.MulticastLock multicastLock;
 
     @Override
     public void onCreate() {
@@ -50,25 +51,33 @@ public class AirShareKeepAliveService extends Service {
                 wakeLock.acquire();
             }
             WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-            if (wm != null) {
-                if (wifiLock == null || !wifiLock.isHeld()) {
-                    int mode = (Build.VERSION.SDK_INT >= 29) ? 4 : WifiManager.WIFI_MODE_FULL_HIGH_PERF;
-                    wifiLock = wm.createWifiLock(mode, "AirSharePC::ServiceWifiLock");
-                    wifiLock.setReferenceCounted(false);
-                    wifiLock.acquire();
-                }
-                if (multicastLock == null || !multicastLock.isHeld()) {
-                    multicastLock = wm.createMulticastLock("AirSharePC::ServiceMulticastLock");
-                    multicastLock.setReferenceCounted(false);
-                    multicastLock.acquire();
-                }
+            if (wm != null && (wifiLock == null || !wifiLock.isHeld())) {
+                int mode = (Build.VERSION.SDK_INT >= 29) ? 4 : WifiManager.WIFI_MODE_FULL_HIGH_PERF;
+                wifiLock = wm.createWifiLock(mode, "AirSharePC::ServiceWifiLock");
+                wifiLock.setReferenceCounted(false);
+                wifiLock.acquire();
             }
+        } catch (Throwable ignored) {}
+    }
+
+    private void writeStopFlag() {
+        try {
+            File f = new File(getFilesDir(), STOP_FLAG_FILE);
+            f.createNewFile();
+        } catch (Throwable ignored) {}
+    }
+
+    private void clearStopFlag() {
+        try {
+            File f = new File(getFilesDir(), STOP_FLAG_FILE);
+            if (f.exists()) f.delete();
         } catch (Throwable ignored) {}
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null || "STOP".equals(intent.getAction())) {
+            writeStopFlag();
             releaseLocks();
             try {
                 stopForeground(true);
@@ -76,11 +85,14 @@ public class AirShareKeepAliveService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
+        clearStopFlag();
         acquireLocks();
-        String title = (intent != null && intent.getStringExtra("title") != null)
+        String title = (intent.getStringExtra("title") != null)
                 ? intent.getStringExtra("title") : "AirShare PC — Server Active";
-        String body = (intent != null && intent.getStringExtra("body") != null)
+        String body = (intent.getStringExtra("body") != null)
                 ? intent.getStringExtra("body") : "Sent: 0 • Received: 0";
+        String stopLabel = (intent.getStringExtra("stop_label") != null)
+                ? intent.getStringExtra("stop_label") : "Stop";
         try {
             NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             if (Build.VERSION.SDK_INT >= 26 && nm != null) {
@@ -99,13 +111,19 @@ public class AirShareKeepAliveService extends Service {
             int piFlags = PendingIntent.FLAG_UPDATE_CURRENT;
             if (Build.VERSION.SDK_INT >= 23) piFlags |= PendingIntent.FLAG_IMMUTABLE;
             PendingIntent pi = PendingIntent.getActivity(this, 0, openIntent, piFlags);
+
+            Intent stopIntent = new Intent(this, AirShareKeepAliveService.class);
+            stopIntent.setAction("STOP");
+            PendingIntent stopPi = PendingIntent.getService(this, 1, stopIntent, piFlags);
+
             builder.setContentTitle(title)
                    .setContentText(body)
                    .setStyle(new Notification.BigTextStyle().bigText(body))
                    .setSmallIcon(iconId)
                    .setOngoing(true)
                    .setOnlyAlertOnce(true)
-                   .setContentIntent(pi);
+                   .setContentIntent(pi)
+                   .addAction(android.R.drawable.ic_menu_close_clear_cancel, stopLabel, stopPi);
             Notification notif = builder.build();
             if (Build.VERSION.SDK_INT >= 29) {
                 startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
@@ -113,7 +131,7 @@ public class AirShareKeepAliveService extends Service {
                 startForeground(NOTIF_ID, notif);
             }
         } catch (Throwable ignored) {}
-        return START_STICKY;
+        return START_NOT_STICKY;
     }
 
     private void releaseLocks() {
@@ -123,12 +141,10 @@ public class AirShareKeepAliveService extends Service {
         try {
             if (wifiLock != null && wifiLock.isHeld()) wifiLock.release();
         } catch (Throwable ignored) {}
-        try {
-            if (multicastLock != null && multicastLock.isHeld()) multicastLock.release();
-        } catch (Throwable ignored) {}
     }
 
     public void onTimeout(int startId) {
+        writeStopFlag();
         releaseLocks();
         try {
             stopForeground(true);
@@ -152,7 +168,6 @@ public class AirShareKeepAliveService extends Service {
     }
 }
 """
-
 
 def _patch_project_properties(path_obj: Path, compile_api: str = TARGET_API) -> bool:
     try:

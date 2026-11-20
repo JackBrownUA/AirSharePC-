@@ -17,16 +17,17 @@ from android_bridge import (
     move_android_task_to_back,
     request_android_full_storage,
     request_android_notification_permission,
+    consume_service_stop_flag,
     set_android_foreground_notification,
 )
 from config import (
-    COMPROMISED_PASSWORDS,
     MAX_RECENT_IPS,
     SERVER_PORT,
     SETTINGS_FILE,
     STORAGE_PATH,
 )
 from i18n import SUPPORTED_CODES, detect_system_language, tr
+from security import is_weak_pin
 
 logger = logging.getLogger("airshare.utils")
 
@@ -41,7 +42,6 @@ __all__ = [
     "get_device_theme",
     "get_local_ip",
     "get_network_label",
-    "get_sslip_domain",
     "get_storage_stats",
     "has_android_storage_permission",
     "is_private_lan_ip",
@@ -52,18 +52,23 @@ __all__ = [
     "is_android_activity_paused",
     "move_android_task_to_back",
     "request_android_notification_permission",
+    "consume_service_stop_flag",
     "set_android_foreground_notification",
 ]
 
 
 def generate_pin():
-    # Генерируем криптографически стойкий 6-значный PIN-код (от 000000 до 999999)
-    return f"{secrets.randbelow(10**6):06d}"
+    # Генерируем криптографически стойкий 6-значный PIN-код без слабых комбинаций
+    for _ in range(32):
+        pin = f"{secrets.randbelow(10**6):06d}"
+        if not is_weak_pin(pin):
+            return pin
+    return f"{secrets.randbelow(900000) + 100000:06d}"
 
 
 def _sanitize_pin(candidate):
     val = str(candidate or "").strip()
-    if val in COMPROMISED_PASSWORDS:
+    if is_weak_pin(val):
         return generate_pin(), True
     return val, False
 
@@ -89,11 +94,6 @@ def is_private_lan_ip(ip_str):
     return False
 
 
-def get_sslip_domain(ip_str):
-    # Преобразует локальный IP (например, 192.168.50.72) в wildcard-домен 192-168-50-72.sslip.io
-    if is_private_lan_ip(ip_str):
-        return f"{ip_str.strip().replace('.', '-')}.sslip.io"
-    return str(ip_str or "127.0.0.1").strip()
 
 
 def get_local_ip():
@@ -271,7 +271,7 @@ def load_settings():
             defaults["password"] = generate_pin()
             needs_persist = True
 
-        if not defaults["password"] or defaults["password"] in COMPROMISED_PASSWORDS:
+        if not defaults["password"] or is_weak_pin(defaults["password"]):
             defaults["password"] = generate_pin()
             needs_persist = True
 
