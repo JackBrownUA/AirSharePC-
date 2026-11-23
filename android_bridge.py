@@ -283,8 +283,16 @@ def set_android_foreground_notification(
             NotificationBuilder = autoclass("android.app.Notification$Builder")
             builder = NotificationBuilder(activity)
 
-        app_info = activity.getApplicationInfo()
-        icon_id = app_info.icon if app_info is not None and app_info.icon else 17301659
+        icon_id = 0
+        try:
+            res = activity.getResources()
+            if res is not None:
+                icon_id = int(res.getIdentifier("ic_airshare_stat", "drawable", activity.getPackageName()))
+        except Exception:
+            icon_id = 0
+        if not icon_id:
+            app_info = activity.getApplicationInfo()
+            icon_id = app_info.icon if app_info is not None and app_info.icon else 17301659
 
         Intent = autoclass("android.content.Intent")
         PendingIntent = autoclass("android.app.PendingIntent")
@@ -364,4 +372,74 @@ def consume_service_stop_flag() -> bool:
             return True
     except Exception as exc:
         logger.debug("Ошибка проверки флага остановки сервиса: %s", exc)
+    return False
+
+
+def get_android_top_inset_dp() -> float:
+    try:
+        from kivy.utils import platform
+        if platform != "android":
+            return 0.0
+        from jnius import autoclass
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        activity = getattr(PythonActivity, "mActivity", None)
+        if activity is None:
+            return 28.0
+        res = activity.getResources()
+        density = float(res.getDisplayMetrics().density or 1.0)
+        BuildVersion = autoclass("android.os.Build$VERSION")
+        if BuildVersion.SDK_INT >= 28:
+            win = activity.getWindow()
+            if win is not None:
+                decor = win.getDecorView()
+                insets = decor.getRootWindowInsets() if decor is not None else None
+                cutout = insets.getDisplayCutout() if insets is not None else None
+                if cutout is not None:
+                    safe_top = int(cutout.getSafeInsetTop())
+                    if safe_top > 0:
+                        return max(24.0, safe_top / density + 4.0)
+        res_id = int(res.getIdentifier("status_bar_height", "dimen", "android"))
+        if res_id > 0:
+            px = int(res.getDimensionPixelSize(res_id))
+            if px > 0:
+                return max(24.0, px / density + 4.0)
+    except Exception as exc:
+        logger.debug("Не удалось определить верхний вырез камеры: %s", exc)
+    return 28.0
+
+
+def launch_android_qr_scanner(on_result_cb) -> bool:
+    try:
+        from kivy.utils import platform
+        if platform != "android":
+            return False
+        from android import activity as android_act
+        from jnius import autoclass
+        Intent = autoclass("android.content.Intent")
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        act = getattr(PythonActivity, "mActivity", None)
+        if act is None:
+            return False
+        scan_intent = Intent("com.google.zxing.client.android.SCAN")
+        scan_intent.putExtra("SCAN_MODE", "QR_CODE_MODE")
+        pm = act.getPackageManager()
+        if scan_intent.resolveActivity(pm) is None:
+            return False
+
+        def _on_res(req_code, res_code, intent_data):
+            if req_code == 4109:
+                try:
+                    android_act.unbind(on_activity_result=_on_res)
+                except Exception:
+                    pass
+                if res_code == -1 and intent_data is not None:
+                    raw = intent_data.getStringExtra("SCAN_RESULT")
+                    if raw and callable(on_result_cb):
+                        on_result_cb(str(raw))
+
+        android_act.bind(on_activity_result=_on_res)
+        act.startActivityForResult(scan_intent, 4109)
+        return True
+    except Exception as exc:
+        logger.debug("Сканер QR недоступен: %s", exc)
     return False

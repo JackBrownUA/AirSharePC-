@@ -131,6 +131,7 @@ def create_device_session_token(
     lock: threading.Lock,
     client_ip: str,
     expected_pwd: str,
+    trusted: bool = False,
 ) -> str:
     nonce = secrets.token_hex(16)
     msg = f"{client_ip}:{expected_pwd}:{nonce}".encode("utf-8")
@@ -143,9 +144,107 @@ def create_device_session_token(
         device_sessions[tok] = {
             "ip": str(client_ip).strip(),
             "pwd": expected_pwd,
+            "trusted": bool(trusted),
             "created": now,
         }
     return tok
+
+
+def get_session_meta(
+    tok: str,
+    client_ip: str,
+    expected_pwd: str,
+    device_sessions: dict,
+    lock: threading.Lock,
+    ttl_seconds: float = SESSION_TTL_SECONDS,
+):
+    if not tok:
+        return None
+    now = time.monotonic()
+    with lock:
+        meta = device_sessions.get(tok)
+        if meta is None:
+            return None
+        created = float(meta.get("created", 0.0))
+        if (now - created) > ttl_seconds:
+            device_sessions.pop(tok, None)
+            return None
+        if meta.get("ip") == client_ip and hmac.compare_digest(
+            str(meta.get("pwd", "")).encode("utf-8"),
+            expected_pwd.encode("utf-8"),
+        ):
+            return dict(meta)
+    return None
+
+
+def set_ip_trust_in_sessions(device_sessions: dict, lock: threading.Lock, client_ip: str, trusted: bool):
+    with lock:
+        for meta in device_sessions.values():
+            if meta.get("ip") == client_ip:
+                meta["trusted"] = bool(trusted)
+
+
+def create_auth_challenge(challenges: dict, lock: threading.Lock, client_ip: str, device_label: str = "Browser") -> dict:
+    # Генерируем 3 уникальные пары цифр (10..99) и выбираем целевую
+    pool = []
+    while len(pool) < 3:
+        pair = f"{10 + secrets.randbelow(90)}"
+        if pair not in pool:
+            pool.append(pair)
+    target = pool[secrets.randbelow(3)]
+    cid = secrets.token_hex(12)
+    qr_secret = secrets.token_hex(16)
+    now = time.monotonic()
+    entry = {
+        "id": cid,
+        "ip": str(client_ip).strip(),
+        "device": str(device_label or "Browser")[:64],
+        "pairs": pool,
+        "target": target,
+        "qr_secret": qr_secret,
+        "status": "pending",
+        "trusted": False,
+        "created": now,
+    }
+    with lock:
+        # Чистим просроченные (> 180 сек)
+        for k in [k for k, v in challenges.items() if (now - float(v.get("created", 0.0))) > 180.0]:
+            challenges.pop(k, None)
+        if len(challenges) >= 32:
+            oldest = next(iter(challenges))
+            challenges.pop(oldest, None)
+        challenges[cid] = entry
+    return dict(entry)
+
+
+def resolve_auth_challenge(
+    challenges: dict,
+    lock: threading.Lock,
+    cid: str,
+    selected_pair: str = "",
+    qr_secret: str = "",
+    approve: bool = True,
+    trusted: bool = False,
+):
+    now = time.monotonic()
+    with lock:
+        entry = challenges.get(cid)
+        if not entry or (now - float(entry.get("created", 0.0))) > 180.0:
+            challenges.pop(cid, None)
+            return False, "expired"
+        if entry.get("status") != "pending":
+            return False, entry.get("status")
+        if not approve:
+            entry["status"] = "denied"
+            return True, "denied"
+        qr_ok = bool(qr_secret) and hmac.compare_digest(qr_secret.encode("utf-8"), entry["qr_secret"].encode("utf-8"))
+        pair_ok = bool(selected_pair) and hmac.compare_digest(str(selected_pair).strip().encode("utf-8"), entry["target"].encode("utf-8"))
+        if qr_ok or pair_ok:
+            entry["status"] = "approved"
+            entry["trusted"] = bool(trusted)
+            return True, "approved"
+        entry["status"] = "denied"
+        return False, "mismatch"
 
 
 def is_valid_session_cookie(

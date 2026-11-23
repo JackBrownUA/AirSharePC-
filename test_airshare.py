@@ -314,6 +314,8 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
             "android_bridge.py",
             "ui_widgets.py",
             "utils.py",
+            "file_ops.py",
+            "qr_gen.py",
         ):
             all_source += Path(fname).read_text(encoding="utf-8") + "\n"
         for k in en_keys:
@@ -323,6 +325,7 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         resp_login = _run_request(self.storage_dir, b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n", client_ip="192.168.50.56")
         self.assertIn(b"401", resp_login.splitlines()[0])
         self.assertIn(b'action="/login"', resp_login)
+        self.assertIn(b'id="connectChallengeBtn"', resp_login)
         self.assertIn(b'id="pinEyeBtn"', resp_login)
         self.assertIn(b'id="langGlobeBtn"', resp_login)
         self.assertNotIn(b'id="shortcutBtn"', resp_login)
@@ -366,7 +369,7 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn(b"401", pwa_resp.splitlines()[0])
 
     def test_10_p4a_hook_targets_api_35_clean_manifest_and_sdl_keep_alive(self):
-        self.assertEqual(config.APP_VERSION, "1.3.5")
+        self.assertEqual(config.APP_VERSION, "1.3.6")
         self.assertEqual(p4a_hook.TARGET_API, "35")
 
         main_code = Path("main.py").read_text(encoding="utf-8")
@@ -806,6 +809,122 @@ class AirShareSecurityAndQualityTests(unittest.TestCase):
         self.assertIn("def consume_service_stop_flag", ab_src)
         self.assertIn("copyTextFallback", Path("security.py").read_text(encoding="utf-8"))
         self.assertIn("window.location.search", Path("web_ui.py").read_text(encoding="utf-8"))
+
+
+    def test_15_v136_friend_feedback_features(self):
+        import file_ops
+        import qr_gen
+
+        # 1. Автономный QR-генератор SVG
+        svg = qr_gen.make_qr_svg("airshare://auth?cid=abc123&secret=xyz789")
+        self.assertIn("<svg", svg)
+        self.assertIn("<rect", svg)
+
+        # 2. 3-парная + QR авторизация с уровнем доверия (Гость vs Доверенное)
+        start_resp = _run_request(
+            self.storage_dir,
+            b"POST /auth/start HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n",
+            client_ip="192.168.1.201",
+        )
+        self.assertIn(b"200", start_resp.splitlines()[0])
+        ch_data = json.loads(start_resp.partition(b"\r\n\r\n")[2].decode("utf-8"))
+        self.assertEqual(len(ch_data["pairs"]), 3)
+        self.assertIn(ch_data["target"], ch_data["pairs"])
+        self.assertIn("<svg", ch_data["qr_svg"])
+
+        # Подтверждаем как Гость (trusted=False)
+        ok, st = server.AirShareHandler.resolve_challenge(
+            ch_data["cid"], selected_pair=ch_data["target"], approve=True, trusted=False
+        )
+        self.assertTrue(ok)
+        self.assertEqual(st, "approved")
+
+        claim_body = json.dumps({"cid": ch_data["cid"]}).encode("utf-8")
+        claim_resp = _run_request(
+            self.storage_dir,
+            (
+                "POST /auth/claim HTTP/1.1\r\nHost: localhost\r\n"
+                f"Content-Length: {len(claim_body)}\r\n\r\n"
+            ).encode("utf-8") + claim_body,
+            client_ip="192.168.1.201",
+        )
+        self.assertIn(b"200", claim_resp.splitlines()[0])
+        hdr_lines = claim_resp.partition(b"\r\n\r\n")[0].decode("utf-8").splitlines()
+        guest_cookie = [l for l in hdr_lines if l.lower().startswith("set-cookie: airshare_auth=")][0].split(":", 1)[1].strip().split(";")[0]
+
+        # Гость не может загружать файлы и создавать папки (403)
+        guest_mkdir = json.dumps({"dir": "", "name": "HackDir"}).encode("utf-8")
+        resp_guest_op = _run_request(
+            self.storage_dir,
+            (
+                "POST /?op=mkdir HTTP/1.1\r\nHost: localhost\r\n"
+                f"Cookie: {guest_cookie}\r\nContent-Length: {len(guest_mkdir)}\r\n\r\n"
+            ).encode("utf-8") + guest_mkdir,
+            client_ip="192.168.1.201",
+        )
+        self.assertIn(b"403", resp_guest_op.splitlines()[0])
+
+        # Переключаем устройство в Доверенные с телефона -> теперь операции работают
+        server.AirShareHandler.set_ip_trusted("192.168.1.201", True)
+        resp_trusted_op = _run_request(
+            self.storage_dir,
+            (
+                "POST /?op=mkdir HTTP/1.1\r\nHost: localhost\r\n"
+                f"Cookie: {guest_cookie}\r\nContent-Length: {len(guest_mkdir)}\r\n\r\n"
+            ).encode("utf-8") + guest_mkdir,
+            client_ip="192.168.1.201",
+        )
+        self.assertIn(b"200", resp_trusted_op.splitlines()[0])
+        self.assertTrue(os.path.isdir(os.path.join(self.storage_dir, "HackDir")))
+
+        # 3. Серверные операции: rename, move, delete -> 30-дневная корзина -> restore
+        sample_p = os.path.join(self.storage_dir, "doc.pdf")
+        with open(sample_p, "wb") as f:
+            f.write(b"%PDF-1.4 sample")
+        auth = _basic_auth_header("airshare", "918273")
+
+        ren_body = json.dumps({"path": "doc.pdf", "new_name": "manual.pdf"}).encode("utf-8")
+        r_ren = _run_request(
+            self.storage_dir,
+            ("POST /?op=rename HTTP/1.1\r\nHost: localhost\r\n" + auth + f"Content-Length: {len(ren_body)}\r\n\r\n").encode("utf-8") + ren_body,
+        )
+        self.assertIn(b"200", r_ren.splitlines()[0])
+        self.assertTrue(os.path.isfile(os.path.join(self.storage_dir, "manual.pdf")))
+
+        del_body = json.dumps({"paths": ["manual.pdf"]}).encode("utf-8")
+        r_del = _run_request(
+            self.storage_dir,
+            ("POST /?op=delete HTTP/1.1\r\nHost: localhost\r\n" + auth + f"Content-Length: {len(del_body)}\r\n\r\n").encode("utf-8") + del_body,
+        )
+        self.assertIn(b"200", r_del.splitlines()[0])
+        self.assertFalse(os.path.exists(os.path.join(self.storage_dir, "manual.pdf")))
+
+        trash_items = file_ops.list_trash_items(self.storage_dir)
+        self.assertEqual(len(trash_items), 1)
+        file_ops.restore_from_trash(self.storage_dir, [trash_items[0]["id"]])
+        self.assertTrue(os.path.isfile(os.path.join(self.storage_dir, "manual.pdf")))
+
+        # 4. Галерея и Последние файлы
+        with open(os.path.join(self.storage_dir, "pic1.jpg"), "wb") as f:
+            f.write(b"\xff\xd8\xff\xe0jpg")
+        r_gal = _run_request(
+            self.storage_dir,
+            ("GET /?gallery=1&ajax=1 HTTP/1.1\r\nHost: localhost\r\n" + auth + "\r\n").encode("utf-8"),
+        )
+        self.assertIn(b"200", r_gal.splitlines()[0])
+        gal_json = json.loads(r_gal.partition(b"\r\n\r\n")[2].decode("utf-8"))
+        self.assertTrue(len(gal_json["groups"]) >= 1)
+
+        # 5. Листинг: облака в светлой теме, 2 столбика, иконка PDF, скрыт SHA-256 pill из строк
+        r_html = _run_request(
+            self.storage_dir,
+            ("GET / HTTP/1.1\r\nHost: localhost\r\n" + auth + "\r\n").encode("utf-8"),
+        )
+        self.assertIn(b"drawCloud", r_html)
+        self.assertIn(b"toggleWideView", r_html)
+        self.assertIn(b"invertSelection", r_html)
+        self.assertIn(b">PDF</text>", r_html)
+        self.assertNotIn(b'class="hash-pill"', r_html)
 
 
 if __name__ == "__main__":

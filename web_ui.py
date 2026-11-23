@@ -71,6 +71,70 @@ def get_globe_svg() -> str:
     )
 
 
+
+def get_file_icon_svg(name: str, is_dir: bool = False) -> str:
+    if is_dir:
+        return (
+            '<svg class="ftype-svg" viewBox="0 0 24 24" fill="none">'
+            '<path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z" '
+            'fill="rgba(59,130,246,0.22)" stroke="#60a5fa" stroke-width="1.8"/>'
+            '</svg>'
+        )
+    ext = ("." + name.rsplit(".", 1)[-1]).lower() if "." in name else ""
+    if ext == ".pdf":
+        return (
+            '<svg class="ftype-svg" viewBox="0 0 24 24" fill="none">'
+            '<rect x="4" y="2.5" width="16" height="19" rx="3" fill="rgba(239,68,68,0.16)" stroke="#ef4444" stroke-width="1.8"/>'
+            '<text x="12" y="15" text-anchor="middle" fill="#ef4444" font-size="6.4" font-weight="800" font-family="sans-serif">PDF</text>'
+            '</svg>'
+        )
+    if ext in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif", ".heic"}:
+        return (
+            '<svg class="ftype-svg" viewBox="0 0 24 24" fill="none">'
+            '<rect x="3" y="4" width="18" height="16" rx="3" fill="rgba(56,189,248,0.16)" stroke="#38bdf8" stroke-width="1.8"/>'
+            '<circle cx="8.5" cy="9.5" r="1.6" fill="#38bdf8"/>'
+            '<path d="M4.5 17l5-5 3.5 3.5 2.5-2.5 4 4" stroke="#38bdf8" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>'
+            '</svg>'
+        )
+    if ext in {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v", ".3gp"}:
+        return (
+            '<svg class="ftype-svg" viewBox="0 0 24 24" fill="none">'
+            '<rect x="3" y="4" width="18" height="16" rx="3" fill="rgba(168,85,247,0.18)" stroke="#a855f7" stroke-width="1.8"/>'
+            '<polygon points="10,8.5 16.5,12 10,15.5" fill="#c084fc"/>'
+            '</svg>'
+        )
+    if ext in {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac"}:
+        return (
+            '<svg class="ftype-svg" viewBox="0 0 24 24" fill="none">'
+            '<rect x="4" y="3" width="16" height="18" rx="3" fill="rgba(245,158,11,0.16)" stroke="#f59e0b" stroke-width="1.8"/>'
+            '<path d="M10 15V8.5l5-1.2V14" stroke="#fbbf24" stroke-width="1.7" stroke-linecap="round"/>'
+            '<circle cx="8.5" cy="15.5" r="1.6" fill="#fbbf24"/>'
+            '<circle cx="13.5" cy="14.5" r="1.6" fill="#fbbf24"/>'
+            '</svg>'
+        )
+    if ext in {".zip", ".rar", ".7z", ".tar", ".gz", ".xz"}:
+        return (
+            '<svg class="ftype-svg" viewBox="0 0 24 24" fill="none">'
+            '<rect x="4" y="3" width="16" height="18" rx="3" fill="rgba(249,115,22,0.16)" stroke="#f97316" stroke-width="1.8"/>'
+            '<path d="M12 4v10M10 7h4M10 10h4M10 13h4" stroke="#fb923c" stroke-width="1.7" stroke-linecap="round"/>'
+            '</svg>'
+        )
+    if ext in {".txt", ".md", ".json", ".py", ".js", ".html", ".css", ".xml", ".csv", ".log"}:
+        return (
+            '<svg class="ftype-svg" viewBox="0 0 24 24" fill="none">'
+            '<rect x="4" y="3" width="16" height="18" rx="3" fill="rgba(20,184,166,0.15)" stroke="#2dd4bf" stroke-width="1.8"/>'
+            '<path d="M8 9h8M8 13h8M8 17h5" stroke="#2dd4bf" stroke-width="1.7" stroke-linecap="round"/>'
+            '</svg>'
+        )
+    return (
+        '<svg class="ftype-svg" viewBox="0 0 24 24" fill="none">'
+        '<path d="M6 3h8l4 4v14a1.5 1.5 0 0 1-1.5 1.5h-10.5A1.5 1.5 0 0 1 4.5 21V4.5A1.5 1.5 0 0 1 6 3z" '
+        'fill="rgba(255,255,255,0.9)" stroke="#94a3b8" stroke-width="1.6"/>'
+        '<path d="M14 3v4h4" stroke="#94a3b8" stroke-width="1.5"/>'
+        '</svg>'
+    )
+
+
 def get_css(theme="dark"):
     is_light = theme == "light"
     bg_init = "#f0f4fa" if is_light else "#040508"
@@ -111,7 +175,7 @@ def get_css(theme="dark"):
         transition: opacity 0.45s ease;
     }}
     body.light #skyCanvas {{
-        opacity: 0;
+        opacity: 1;
     }}
     body.dark #skyCanvas {{
         opacity: 1;
@@ -943,6 +1007,263 @@ def get_css(theme="dark"):
             font-size: 11.5px;
         }}
     }}
+
+    body.light {{
+        background: linear-gradient(180deg, #bae6fd 0%, #e0f2fe 50%, #f0f9ff 100%) !important;
+        color: #0f172a;
+    }}
+    body.wide-view .container {{
+        max-width: 96vw;
+    }}
+    body.wide-view #mainFileList {{
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }}
+    .file-item {{
+        padding: 7px 12px !important;
+        min-height: 44px;
+    }}
+    .file-link {{
+        font-size: 14px !important;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+    }}
+    .ftype-svg {{
+        width: 22px;
+        height: 22px;
+        flex-shrink: 0;
+    }}
+    .breadcrumbs {{
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        margin: 6px 0 10px;
+        font-size: 13px;
+        color: #94a3b8;
+    }}
+    .crumb-link {{
+        color: #60a5fa;
+        text-decoration: none;
+        padding: 3px 8px;
+        border-radius: 8px;
+        background: rgba(59, 130, 246, 0.12);
+        font-weight: 600;
+    }}
+    body.light .crumb-link {{
+        color: #0369a1;
+        background: rgba(14, 165, 233, 0.15);
+    }}
+    .nav-tabs {{
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+    }}
+    .nav-tab {{
+        padding: 7px 14px;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,0.14);
+        background: rgba(15,23,42,0.55);
+        color: #cbd5e1;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+    }}
+    .nav-tab.active {{
+        background: #3b82f6;
+        color: #ffffff;
+        border-color: #60a5fa;
+    }}
+    body.light .nav-tab {{
+        background: rgba(255,255,255,0.75);
+        color: #1e293b;
+        border-color: rgba(15,23,42,0.12);
+    }}
+    body.light .nav-tab.active {{
+        background: #0284c7;
+        color: #ffffff;
+    }}
+    .fav-strip {{
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+    }}
+    .fav-chip {{
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 12px;
+        border-radius: 999px;
+        background: rgba(250, 204, 21, 0.14);
+        border: 1px solid rgba(250, 204, 21, 0.35);
+        color: #fde047;
+        text-decoration: none;
+        font-size: 12.5px;
+        font-weight: 600;
+    }}
+    body.light .fav-chip {{
+        background: rgba(234, 179, 8, 0.18);
+        color: #854d0e;
+        border-color: rgba(202, 138, 4, 0.4);
+    }}
+    .upload-dest-hint {{
+        font-size: 12.5px;
+        color: #94a3b8;
+        margin-top: 6px;
+    }}
+    body.light .upload-dest-hint {{ color: #334155; }}
+    .toolbar-actions {{
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+    }}
+    .mini-btn {{
+        padding: 5px 10px;
+        border-radius: 8px;
+        border: 1px solid rgba(255,255,255,0.16);
+        background: rgba(255,255,255,0.08);
+        color: inherit;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+    }}
+    body.light .mini-btn {{
+        background: rgba(255,255,255,0.85);
+        border-color: rgba(15,23,42,0.16);
+    }}
+    .role-badge {{
+        display: inline-block;
+        padding: 3px 9px;
+        border-radius: 999px;
+        font-size: 11.5px;
+        font-weight: 700;
+        margin-left: 8px;
+        background: rgba(32, 201, 151, 0.16);
+        color: #20c997;
+    }}
+    .role-badge.guest {{
+        background: rgba(245, 158, 11, 0.18);
+        color: #fbbf24;
+    }}
+    .gallery-date {{
+        font-size: 14px;
+        font-weight: 700;
+        margin: 14px 0 8px;
+        opacity: 0.9;
+    }}
+    .gallery-grid {{
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 8px;
+    }}
+    .gallery-card {{
+        position: relative;
+        aspect-ratio: 1 / 1;
+        border-radius: 12px;
+        overflow: hidden;
+        background: rgba(15,23,42,0.6);
+        cursor: pointer;
+        border: 1px solid rgba(255,255,255,0.1);
+    }}
+    .gallery-card img, .gallery-card video {{
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transition: transform 0.25s ease;
+    }}
+    .gallery-card:hover img {{ transform: scale(1.06); }}
+    .ctx-menu {{
+        position: fixed;
+        z-index: 9999;
+        min-width: 200px;
+        background: rgba(15, 23, 42, 0.95);
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+        border: 1px solid rgba(255,255,255,0.16);
+        border-radius: 14px;
+        padding: 6px;
+        box-shadow: 0 16px 40px rgba(0,0,0,0.45);
+        display: none;
+    }}
+    body.light .ctx-menu {{
+        background: rgba(255,255,255,0.96);
+        border-color: rgba(15,23,42,0.14);
+        color: #0f172a;
+    }}
+    .ctx-item {{
+        display: block;
+        width: 100%;
+        text-align: left;
+        padding: 8px 12px;
+        border: none;
+        background: transparent;
+        color: inherit;
+        font-size: 13.5px;
+        border-radius: 8px;
+        cursor: pointer;
+    }}
+    .ctx-item:hover {{ background: rgba(59,130,246,0.22); }}
+    .ctx-item.danger {{ color: #f87171; }}
+    .drop-overlay {{
+        position: fixed;
+        inset: 0;
+        z-index: 9000;
+        background: rgba(37, 99, 235, 0.26);
+        backdrop-filter: blur(6px);
+        border: 3px dashed #60a5fa;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        font-size: 22px;
+        font-weight: 700;
+        color: #ffffff;
+        pointer-events: none;
+    }}
+    .drop-overlay.active {{ display: flex; }}
+    .file-item.drop-hover {{
+        outline: 2px dashed #3b82f6;
+        background: rgba(59,130,246,0.18) !important;
+    }}
+    .marquee-box {{
+        position: fixed;
+        border: 1.5px solid #60a5fa;
+        background: rgba(59,130,246,0.18);
+        pointer-events: none;
+        z-index: 8000;
+        display: none;
+    }}
+    .challenge-box {{
+        margin: 16px 0;
+        padding: 16px;
+        border-radius: 16px;
+        background: rgba(59,130,246,0.12);
+        border: 1px solid rgba(96,165,250,0.3);
+        text-align: center;
+    }}
+    .challenge-number {{
+        font-size: 46px;
+        font-weight: 800;
+        letter-spacing: 4px;
+        color: #60a5fa;
+        margin: 6px 0;
+    }}
+    .qr-wrap {{
+        margin: 12px auto 0;
+        display: none;
+        justify-content: center;
+    }}
+    .qr-wrap.visible {{ display: flex; }}
+    @media (max-width: 720px) {{
+        body.wide-view #mainFileList {{
+            grid-template-columns: 1fr;
+        }}
+    }}
+
     """
     return base_css + get_player_css()
 
@@ -1027,9 +1348,53 @@ def get_star_script():
             });
         }
 
+        const clouds = [];
+        for (let i = 0; i < 11; i++) {
+            const depth = Math.random() * 0.7 + 0.3;
+            clouds.push({
+                x: Math.random() * (w + 300) - 150,
+                y: Math.random() * h * 0.72 + 20,
+                scale: (Math.random() * 0.7 + 0.65) * depth,
+                speed: (Math.random() * 0.35 + 0.18) * depth,
+                depth: depth,
+                alpha: 0.45 + depth * 0.35
+            });
+        }
+        function drawCloud(cx, cy, sc, alpha) {
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = "#ffffff";
+            ctx.beginPath();
+            ctx.arc(cx, cy, 26 * sc, 0, Math.PI * 2);
+            ctx.arc(cx + 24 * sc, cy - 10 * sc, 32 * sc, 0, Math.PI * 2);
+            ctx.arc(cx + 56 * sc, cy - 4 * sc, 27 * sc, 0, Math.PI * 2);
+            ctx.arc(cx + 76 * sc, cy + 6 * sc, 20 * sc, 0, Math.PI * 2);
+            ctx.arc(cx - 22 * sc, cy + 7 * sc, 19 * sc, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
         function animate() {
             requestAnimationFrame(animate);
-            if (document.body.classList.contains("light")) return;
+            if (document.body.classList.contains("light")) {
+                ctx.clearRect(0, 0, w, h);
+                if (parallaxEnabled) {
+                    curX += (targetX - curX) * 0.06;
+                    curY += (targetY - curY) * 0.06;
+                } else {
+                    curX *= 0.92;
+                    curY *= 0.92;
+                }
+                for (let i = 0; i < clouds.length; i++) {
+                    const c = clouds[i];
+                    c.x += c.speed;
+                    if (c.x > w + 160) c.x = -180;
+                    const px = c.x + curX * c.depth * 1.5;
+                    const py = c.y + curY * c.depth * 1.1;
+                    drawCloud(px, py, c.scale, c.alpha);
+                }
+                return;
+            }
 
             ctx.clearRect(0, 0, w, h);
             if (parallaxEnabled) {
@@ -1115,6 +1480,8 @@ def get_upload_script(lang="en"):
     msg_hash_ok = json.dumps(tr("web_hash_ok", lang))
     msg_hash_err = json.dumps(tr("web_hash_err", lang))
     msg_eta = json.dumps(tr("web_eta", lang))
+    msg_restore = json.dumps(tr("web_trash_restore", lang))
+    msg_purge = json.dumps(tr("web_trash_purge", lang))
     sha_js = get_sha256_js()
     player_js = get_player_script(lang)
     search_pwa_js = get_search_and_pwa_script()
@@ -1226,6 +1593,320 @@ def get_upload_script(lang="en"):
         }}
         window.location.href = cleanOrigin + basePath + (window.location.search || "");
     }}
+
+
+    function toggleWideView() {{
+        document.body.classList.toggle("wide-view");
+        try {{
+            localStorage.setItem("airshare_wide", document.body.classList.contains("wide-view") ? "1" : "0");
+        }} catch (e) {{}}
+    }}
+
+    function invertSelection() {{
+        const boxes = document.querySelectorAll('input[name="files"]');
+        for (let i = 0; i < boxes.length; i++) {{
+            if (boxes[i].closest("li") && boxes[i].closest("li").style.display !== "none") {{
+                boxes[i].checked = !boxes[i].checked;
+            }}
+        }}
+    }}
+
+    function clearSelection() {{
+        const boxes = document.querySelectorAll('input[name="files"]');
+        for (let i = 0; i < boxes.length; i++) boxes[i].checked = false;
+        const master = document.getElementById("masterSelectAll");
+        if (master) master.checked = false;
+    }}
+
+    async function runServerOp(op, payload) {{
+        const res = await fetch("?op=" + encodeURIComponent(op), {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            credentials: "same-origin",
+            body: JSON.stringify(payload || {{}})
+        }});
+        if (!res.ok) {{
+            const txt = await res.text();
+            alert("Error (" + res.status + "): " + txt);
+            return false;
+        }}
+        window.location.reload();
+        return true;
+    }}
+
+    let _ctxTarget = null;
+    function hideCtxMenu() {{
+        const m = document.getElementById("ctxMenu");
+        if (m) m.style.display = "none";
+    }}
+
+    function openCtxMenu(ev, el) {{
+        ev.preventDefault();
+        const m = document.getElementById("ctxMenu");
+        if (!m || !el) return;
+        _ctxTarget = {{
+            rel: el.getAttribute("data-rel") || "",
+            name: el.getAttribute("data-orig") || "",
+            quoted: el.getAttribute("data-quoted") || "",
+            isDir: el.getAttribute("data-dir") === "1",
+            size: el.getAttribute("data-size") || "—"
+        }};
+        const isTrusted = document.body.getAttribute("data-trusted") === "1";
+        m.querySelectorAll(".trusted-only").forEach(function(b) {{
+            b.style.display = isTrusted ? "block" : "none";
+        }});
+        const x = Math.min(ev.clientX, window.innerWidth - 215);
+        const y = Math.min(ev.clientY, window.innerHeight - 280);
+        m.style.left = Math.max(8, x) + "px";
+        m.style.top = Math.max(8, y) + "px";
+        m.style.display = "block";
+    }}
+
+    async function ctxAction(act) {{
+        hideCtxMenu();
+        if (!_ctxTarget) return;
+        const t = _ctxTarget;
+        if (act === "open") {{
+            window.location.href = t.isDir ? (t.quoted + "/") : t.quoted;
+        }} else if (act === "download") {{
+            window.location.href = t.isDir ? ("?zip=" + t.quoted) : ("?download=" + t.quoted);
+        }} else if (act === "rename") {{
+            const nn = prompt("New name:", t.name);
+            if (nn && nn !== t.name) await runServerOp("rename", {{ path: t.rel, new_name: nn }});
+        }} else if (act === "move" || act === "copy") {{
+            const dest = prompt("Target folder (relative path, empty = root):", "");
+            if (dest !== null) await runServerOp(act, {{ paths: [t.rel], dest_dir: dest }});
+        }} else if (act === "fav") {{
+            await runServerOp("fav", {{ rel_path: t.rel }});
+        }} else if (act === "hide") {{
+            await runServerOp("hide", {{ rel_path: t.rel }});
+        }} else if (act === "trash") {{
+            if (confirm("Move to Trash (30 days)? " + t.name)) {{
+                await runServerOp("delete", {{ paths: [t.rel] }});
+            }}
+        }} else if (act === "props") {{
+            const modal = document.getElementById("propsModal");
+            const body = document.getElementById("propsBody");
+            if (modal && body) {{
+                body.innerText = "Name: " + t.name + " | Path: /" + t.rel + " | Size: " + t.size + (t.isDir ? "" : " | SHA-256: ...");
+                modal.style.display = "flex";
+                if (!t.isDir) {{
+                    try {{
+                        const res = await fetch("?hash=" + encodeURIComponent(t.rel), {{ credentials: "same-origin" }});
+                        if (res.ok) {{
+                            const data = await res.json();
+                            if (data && data.sha256) {{
+                                body.innerText = "Name: " + t.name + " | Path: /" + t.rel + " | Size: " + t.size + " | SHA-256: " + data.sha256;
+                                copyTextFallback(data.sha256);
+                            }}
+                        }}
+                    }} catch (e) {{}}
+                }}
+            }}
+        }}
+    }}
+
+    async function createNewFolder() {{
+        const name = prompt("Folder name:");
+        if (!name) return;
+        const curDir = decodeURIComponent(window.location.pathname || "/").replace(/^[/]+|[/]+$/g, "");
+        await runServerOp("mkdir", {{ dir: curDir, name: name }});
+    }}
+
+    async function switchTab(tabName) {{
+        document.querySelectorAll(".nav-tab").forEach(function(b) {{
+            b.classList.toggle("active", b.getAttribute("data-tab") === tabName);
+        }});
+        const filesView = document.getElementById("filesTabPanel");
+        const dynView = document.getElementById("dynamicTabPanel");
+        if (!filesView || !dynView) return;
+        if (tabName === "files") {{
+            filesView.style.display = "block";
+            dynView.style.display = "none";
+            dynView.innerHTML = "";
+            return;
+        }}
+        filesView.style.display = "none";
+        dynView.style.display = "block";
+        dynView.innerHTML = "<p>Loading...</p>";
+        try {{
+            const res = await fetch("?" + tabName + "=1&ajax=1", {{ credentials: "same-origin" }});
+            const data = await res.json();
+            dynView.innerHTML = "";
+            if (tabName === "gallery") {{
+                const groups = data.groups || [];
+                if (!groups.length) {{ dynView.innerHTML = "<p>Empty</p>"; return; }}
+                groups.forEach(function(g) {{
+                    const h = document.createElement("div");
+                    h.className = "gallery-date";
+                    h.textContent = g.date;
+                    dynView.appendChild(h);
+                    const grid = document.createElement("div");
+                    grid.className = "gallery-grid";
+                    g.items.forEach(function(it) {{
+                        const card = document.createElement("div");
+                        card.className = "gallery-card";
+                        const href = "/" + String(it.rel_path).split("/").map(encodeURIComponent).join("/");
+                        if (it.kind === "image") {{
+                            const img = document.createElement("img");
+                            img.src = href + "?thumb=1";
+                            img.loading = "lazy";
+                            card.appendChild(img);
+                        }} else {{
+                            const vid = document.createElement("video");
+                            vid.src = href + "?thumb=1#t=0.5";
+                            vid.muted = true;
+                            vid.preload = "metadata";
+                            card.appendChild(vid);
+                        }}
+                        card.addEventListener("click", function() {{
+                            openMediaPlayer(href, it.name, it.kind);
+                        }});
+                        grid.appendChild(card);
+                    }});
+                    dynView.appendChild(grid);
+                }});
+            }} else if (tabName === "recent") {{
+                const items = data.results || [];
+                const ul = document.createElement("ul");
+                ul.className = "file-list";
+                items.forEach(function(it) {{
+                    const li = document.createElement("li");
+                    li.className = "file-item";
+                    const href = "/" + String(it.rel_path).split("/").map(encodeURIComponent).join("/");
+                    const a = document.createElement("a");
+                    a.className = "file-link";
+                    a.href = href;
+                    a.textContent = it.name;
+                    if (it.kind === "image" || it.kind === "video") {{
+                        a.addEventListener("click", function(e) {{ e.preventDefault(); openMediaPlayer(href, it.name, it.kind); }});
+                    }}
+                    const meta = document.createElement("span");
+                    meta.style.fontSize = "12px";
+                    meta.style.opacity = "0.7";
+                    meta.textContent = it.rel_path + " • " + it.size_str;
+                    li.appendChild(a);
+                    li.appendChild(meta);
+                    ul.appendChild(li);
+                }});
+                dynView.appendChild(ul);
+            }} else if (tabName === "trash") {{
+                const items = data.items || [];
+                if (!items.length) {{ dynView.innerHTML = "<p>Trash is empty</p>"; return; }}
+                const ul = document.createElement("ul");
+                ul.className = "file-list";
+                items.forEach(function(it) {{
+                    const li = document.createElement("li");
+                    li.className = "file-item";
+                    const info = document.createElement("div");
+                    info.innerText = it.name + " (" + it.orig_rel + ", " + it.days_left + "d left)";
+                    const btns = document.createElement("div");
+                    btns.className = "toolbar-actions";
+                    const rBtn = document.createElement("button");
+                    rBtn.type = "button";
+                    rBtn.className = "mini-btn";
+                    rBtn.textContent = {msg_restore};
+                    rBtn.onclick = function() {{ runServerOp("restore", {{ ids: [it.id] }}); }};
+                    const pBtn = document.createElement("button");
+                    pBtn.type = "button";
+                    pBtn.className = "mini-btn";
+                    pBtn.style.color = "#f87171";
+                    pBtn.textContent = {msg_purge};
+                    pBtn.onclick = function() {{ runServerOp("purge", {{ ids: [it.id] }}); }};
+                    btns.appendChild(rBtn);
+                    btns.appendChild(pBtn);
+                    li.appendChild(info);
+                    li.appendChild(btns);
+                    ul.appendChild(li);
+                }});
+                dynView.appendChild(ul);
+            }}
+        }} catch (e) {{
+            dynView.innerHTML = "<p>Failed to load</p>";
+        }}
+    }}
+
+    window.addEventListener("DOMContentLoaded", function() {{
+        try {{
+            if (localStorage.getItem("airshare_wide") === "1") document.body.classList.add("wide-view");
+        }} catch (e) {{}}
+
+        document.addEventListener("click", hideCtxMenu);
+
+        // Drag & Drop файлов в окно или на папку
+        const overlay = document.getElementById("dropOverlay");
+        let dragCounter = 0;
+        if (document.body.getAttribute("data-trusted") === "1") {{
+            window.addEventListener("dragenter", function(e) {{
+                if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files")) {{
+                    dragCounter++;
+                    if (overlay) overlay.classList.add("active");
+                }}
+            }});
+            window.addEventListener("dragleave", function() {{
+                dragCounter = Math.max(0, dragCounter - 1);
+                if (dragCounter === 0 && overlay) overlay.classList.remove("active");
+            }});
+            window.addEventListener("dragover", function(e) {{ e.preventDefault(); }});
+            window.addEventListener("drop", function(e) {{
+                e.preventDefault();
+                dragCounter = 0;
+                if (overlay) overlay.classList.remove("active");
+                if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {{
+                    uploadFiles(e.dataTransfer.files);
+                }}
+            }});
+        }}
+
+        // Выделение рамкой (marquee) на ПК и свайпом на телефоне
+        const listEl = document.getElementById("mainFileList");
+        const mBox = document.getElementById("marqueeBox");
+        if (listEl && mBox) {{
+            let dragging = false, sx = 0, sy = 0;
+            listEl.addEventListener("mousedown", function(e) {{
+                if (e.button !== 0 || e.target.closest("a,button,input,label")) return;
+                dragging = true;
+                sx = e.clientX;
+                sy = e.clientY;
+                mBox.style.left = sx + "px";
+                mBox.style.top = sy + "px";
+                mBox.style.width = "0px";
+                mBox.style.height = "0px";
+                mBox.style.display = "block";
+            }});
+            window.addEventListener("mousemove", function(e) {{
+                if (!dragging) return;
+                const x1 = Math.min(sx, e.clientX), y1 = Math.min(sy, e.clientY);
+                const x2 = Math.max(sx, e.clientX), y2 = Math.max(sy, e.clientY);
+                mBox.style.left = x1 + "px";
+                mBox.style.top = y1 + "px";
+                mBox.style.width = (x2 - x1) + "px";
+                mBox.style.height = (y2 - y1) + "px";
+                listEl.querySelectorAll("li.file-item").forEach(function(li) {{
+                    const r = li.getBoundingClientRect();
+                    const hit = !(r.right < x1 || r.left > x2 || r.bottom < y1 || r.top > y2);
+                    const cb = li.querySelector('input[name="files"]');
+                    if (cb && hit) cb.checked = true;
+                }});
+            }});
+            window.addEventListener("mouseup", function() {{
+                if (dragging) {{
+                    dragging = false;
+                    mBox.style.display = "none";
+                }}
+            }});
+        }}
+
+        // Автообновление списка при изменениях на телефоне (SSE)
+        if (window.EventSource) {{
+            try {{
+                const es = new EventSource("/events");
+                es.addEventListener("reload", function() {{
+                    window.location.reload();
+                }});
+            }} catch (e) {{}}
+        }}
+    }});
 
     function toggleSelectAll(masterCheckbox) {{
         const boxes = document.querySelectorAll('input[name="files"]');
@@ -1556,7 +2237,12 @@ def get_top_controls_html(theme="dark", lang="en", show_preview_toggle=False):
 
 
 def get_pin_login_page(theme="dark", lang="en", error_msg="", next_path="/"):
-    title_txt = html.escape(tr("web_auth_req", lang))
+    title_txt = html.escape(tr("web_auth_prompt_title", lang))
+    sub_txt = html.escape(tr("web_auth_prompt_sub", lang))
+    connect_txt = html.escape(tr("web_auth_connect_btn", lang))
+    qr_btn_txt = html.escape(tr("web_auth_qr_btn", lang))
+    waiting_txt = html.escape(tr("web_auth_waiting", lang))
+    denied_txt = html.escape(tr("web_auth_denied", lang))
     hint_txt = html.escape(tr("pin_hint", lang))
     show_pin_txt = html.escape(tr("web_show_pin", lang))
     btn_txt = html.escape(tr("connect", lang))
@@ -1575,10 +2261,65 @@ def get_pin_login_page(theme="dark", lang="en", error_msg="", next_path="/"):
         '<circle cx="12" cy="12" r="3"/>'
         '</svg>'
     )
+    challenge_js = f"""
+    <script>
+    let _cid = "";
+    let _pollTimer = null;
+    async function startChallengeLogin() {{
+        const box = document.getElementById("challengeBox");
+        const numEl = document.getElementById("challengeTarget");
+        const stEl = document.getElementById("challengeStatus");
+        const qrEl = document.getElementById("qrWrap");
+        if (stEl) stEl.textContent = {json.dumps(waiting_txt)};
+        try {{
+            const res = await fetch("/auth/start", {{ method: "POST", credentials: "same-origin" }});
+            const data = await res.json();
+            _cid = data.cid || "";
+            if (numEl) numEl.textContent = data.target || "--";
+            if (qrEl && data.qr_svg) qrEl.innerHTML = data.qr_svg;
+            if (box) box.style.display = "block";
+            if (_pollTimer) clearInterval(_pollTimer);
+            _pollTimer = setInterval(pollChallengeStatus, 1200);
+        }} catch (e) {{}}
+    }}
+    function toggleQrLogin() {{
+        const qrEl = document.getElementById("qrWrap");
+        if (!qrEl) return;
+        if (!_cid) {{
+            startChallengeLogin().then(function() {{ qrEl.classList.add("visible"); }});
+            return;
+        }}
+        qrEl.classList.toggle("visible");
+    }}
+    async function pollChallengeStatus() {{
+        if (!_cid) return;
+        try {{
+            const res = await fetch("/auth/status?cid=" + encodeURIComponent(_cid), {{ credentials: "same-origin" }});
+            const data = await res.json();
+            if (data.status === "approved") {{
+                clearInterval(_pollTimer);
+                const claim = await fetch("/auth/claim", {{
+                    method: "POST",
+                    headers: {{ "Content-Type": "application/json" }},
+                    credentials: "same-origin",
+                    body: JSON.stringify({{ cid: _cid }})
+                }});
+                if (claim.ok) {{
+                    window.location.replace({json.dumps(next_path or "/")});
+                }}
+            }} else if (data.status === "denied" || data.status === "expired") {{
+                clearInterval(_pollTimer);
+                const stEl = document.getElementById("challengeStatus");
+                if (stEl) stEl.textContent = {json.dumps(denied_txt)};
+            }}
+        }} catch (e) {{}}
+    }}
+    </script>
+    """
     return (
         '<!DOCTYPE html><html><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
-        '<title>AirShare PC — PIN</title>'
+        '<title>AirShare PC</title>'
         f'<style>{get_css(theme)}</style>'
         f'</head><body class="{theme}">'
         '<canvas id="skyCanvas"></canvas>'
@@ -1586,21 +2327,32 @@ def get_pin_login_page(theme="dark", lang="en", error_msg="", next_path="/"):
         '<div class="container">'
         '<div class="pin-card">'
         '<h1 style="font-size:30px;margin-bottom:8px;">AirShare PC</h1>'
-        f'<p style="opacity:0.75;font-size:14px;">{title_txt}</p>'
+        f'<p style="opacity:0.8;font-size:14px;">{title_txt}</p>'
+        f'<p style="opacity:0.68;font-size:12.5px;margin-bottom:14px;">{sub_txt}</p>'
+        f'<button type="button" id="connectChallengeBtn" class="upload-btn" style="width:100%;margin-bottom:10px;" onclick="startChallengeLogin()">{connect_txt}</button>'
+        '<div id="challengeBox" class="challenge-box" style="display:none;">'
+        '<div id="challengeTarget" class="challenge-number">--</div>'
+        f'<div id="challengeStatus" style="font-size:13px;opacity:0.8;">{waiting_txt}</div>'
+        '<div id="qrWrap" class="qr-wrap"></div>'
+        '</div>'
+        f'<button type="button" class="mini-btn" style="width:100%;padding:9px 12px;margin-bottom:14px;" onclick="toggleQrLogin()">📷 {qr_btn_txt}</button>'
+        '<details style="text-align:left;opacity:0.75;font-size:12px;">'
+        '<summary style="cursor:pointer;margin-bottom:8px;">PIN</summary>'
         '<form method="POST" action="/login" autocomplete="off" onsubmit="return submitPinForm(event)">'
         f'<input type="hidden" name="next" value="{safe_next}">'
         '<div class="pin-input-wrap">'
-        f'<input type="text" id="pinInput" name="pin" class="pin-input masked" inputmode="numeric" placeholder="••••••" title="{hint_txt}" autocomplete="off" data-lpignore="true" data-1p-ignore="true" autofocus required>'
+        f'<input type="text" id="pinInput" name="pin" class="pin-input masked" inputmode="numeric" placeholder="••••••" title="{hint_txt}" autocomplete="off" data-lpignore="true" data-1p-ignore="true" required>'
         f'<button type="button" class="pin-eye-btn" id="pinEyeBtn" title="{show_pin_txt}" aria-label="{show_pin_txt}">'
         f'{eye_closed_svg}{eye_open_svg}'
         '</button>'
         '</div>'
         f'<button type="submit" class="upload-btn" style="width:100%;">{btn_txt}</button>'
-        '</form>'
+        '</form></details>'
         f'{err_html}'
         '</div></div>'
         '<div class="credit-badge">Crafted by JackBrownUA • Powered by Gemini</div>'
         f'<script>{get_star_script()}</script>'
         f'<script>{get_theme_script()}</script>'
+        f'{challenge_js}'
         '</body></html>'
     )

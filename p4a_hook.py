@@ -104,7 +104,8 @@ public class AirShareKeepAliveService extends Service {
             Notification.Builder builder = (Build.VERSION.SDK_INT >= 26)
                     ? new Notification.Builder(this, CHANNEL_ID)
                     : new Notification.Builder(this);
-            int iconId = getApplicationInfo().icon;
+            int iconId = getResources().getIdentifier("ic_airshare_stat", "drawable", getPackageName());
+            if (iconId == 0) iconId = getApplicationInfo().icon;
             if (iconId == 0) iconId = android.R.drawable.stat_sys_upload_done;
             Intent openIntent = new Intent(this, PythonActivity.class);
             openIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -168,6 +169,51 @@ public class AirShareKeepAliveService extends Service {
     }
 }
 """
+
+
+def _write_monochrome_stat_icon(res_dir: Path) -> bool:
+    import struct
+    import zlib
+    try:
+        drawable_dir = res_dir / "drawable"
+        drawable_dir.mkdir(parents=True, exist_ok=True)
+        out_png = drawable_dir / "ic_airshare_stat.png"
+        w, h = 48, 48
+        rows = []
+        cx = 24.0
+        for y in range(h):
+            row = bytearray([0])
+            for x in range(w):
+                alpha = 0
+                # Основа монитора/волн AirShare (белый монохром с альфой)
+                if 10 <= x <= 38 and 18 <= y <= 36:
+                    on_border = (x in (10, 11, 12, 36, 37, 38) or y in (18, 19, 20, 34, 35, 36))
+                    if on_border:
+                        alpha = 255
+                if 16 <= x <= 32 and 39 <= y <= 41:
+                    alpha = 255
+                dist = ((x - cx) ** 2 + (y - 16.0) ** 2) ** 0.5
+                if y <= 15 and (4.5 <= dist <= 7.0 or 10.5 <= dist <= 13.0):
+                    alpha = 255
+                row.extend((255, 255, 255, alpha))
+            rows.append(bytes(row))
+        raw = b"".join(rows)
+
+        def _chunk(tag, data):
+            return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+        png_bytes = (
+            b"\x89PNG\r\n\x1a\n"
+            + _chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+            + _chunk(b"IDAT", zlib.compress(raw, 9))
+            + _chunk(b"IEND", b"")
+        )
+        if not out_png.exists() or out_png.read_bytes() != png_bytes:
+            out_png.write_bytes(png_bytes)
+            return True
+    except Exception:
+        pass
+    return False
 
 def _patch_project_properties(path_obj: Path, compile_api: str = TARGET_API) -> bool:
     try:
@@ -441,6 +487,9 @@ def patch_build_tree(root_dir=None) -> dict:
                 elif fname.startswith("AndroidManifest") and fname.endswith(".xml"):
                     if _patch_manifest_file(fpath):
                         counts["manifest"] += 1
+                    res_candidate = fpath.parent / "res"
+                    if res_candidate.is_dir():
+                        _write_monochrome_stat_icon(res_candidate)
                 elif fname == "HIDDeviceManager.java":
                     if _patch_hid_device_manager(fpath):
                         counts["hid"] += 1

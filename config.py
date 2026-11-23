@@ -20,9 +20,10 @@ MAX_DIR_ITEMS_PER_PAGE = 300
 SOCKET_TIMEOUT_SECONDS = 30
 MAX_CONCURRENT_CONNECTIONS = 32
 
-# Защита от перебора PIN-кода: максимум 5 неудачных попыток, блокировка IP на 5 минут (300 сек)
+# Защита от перебора: максимум 5 неудачных попыток, блокировка IP на 5 минут (300 сек)
 RATE_LIMIT_MAX_ATTEMPTS = 5
 RATE_LIMIT_BLOCK_SECONDS = 300
+
 # Срок хранения удалённых файлов в корзине (30 дней)
 TRASH_RETENTION_DAYS = 30
 TRASH_DIR_NAME = ".airshare_trash"

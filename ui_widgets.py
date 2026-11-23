@@ -472,11 +472,12 @@ class ClickableCard(ButtonBehavior, RoundedCard):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.always_release = False
-        
+
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
             touch.ud["card_down_pos"] = (touch.x, touch.y)
         return super().on_touch_down(touch)
+
     def on_touch_move(self, touch):
         down_pos = touch.ud.get("card_down_pos")
         if down_pos and (abs(touch.x - down_pos[0]) > dp(10) or abs(touch.y - down_pos[1]) > dp(10)):
@@ -487,7 +488,7 @@ class ClickableCard(ButtonBehavior, RoundedCard):
                 Animation(scale_val=1.0, duration=0.14, t="out_quad").start(self)
                 return False
         return super().on_touch_move(touch)
-        
+
     def on_press(self):
         Animation.cancel_all(self, "scale_val")
         Animation(scale_val=0.95, duration=0.07, t="out_quad").start(self)

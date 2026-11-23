@@ -21,6 +21,7 @@ from android_bridge import (
     set_android_foreground_notification,
 )
 from config import (
+    DEFAULT_AUTO_OFF_MINUTES,
     MAX_RECENT_IPS,
     SERVER_PORT,
     SETTINGS_FILE,
@@ -226,6 +227,11 @@ def load_settings():
             "theme_mode": "dark",
             "port": SERVER_PORT,
             "language": detect_system_language(),
+            "favorites": ["Download", "DCIM"],
+            "hidden_items": ["Android", "Alarms", "Audiobooks", "Backups"],
+            "auto_off_minutes": DEFAULT_AUTO_OFF_MINUTES,
+            "onboarding_done": False,
+            "show_hidden": False,
         }
         needs_persist = False
 
@@ -258,6 +264,20 @@ def load_settings():
                             defaults["port"] = port_val
                     except (ValueError, TypeError):
                         pass
+                    if isinstance(data.get("favorites"), list):
+                        defaults["favorites"] = [str(x).strip() for x in data["favorites"] if str(x).strip()][:50]
+                    if isinstance(data.get("hidden_items"), list):
+                        defaults["hidden_items"] = [str(x).strip() for x in data["hidden_items"] if str(x).strip()][:100]
+                    try:
+                        ao_val = int(data.get("auto_off_minutes", DEFAULT_AUTO_OFF_MINUTES))
+                        if ao_val in (0, 15, 30, 60):
+                            defaults["auto_off_minutes"] = ao_val
+                    except (ValueError, TypeError):
+                        pass
+                    if "onboarding_done" in data:
+                        defaults["onboarding_done"] = bool(data.get("onboarding_done"))
+                    if "show_hidden" in data:
+                        defaults["show_hidden"] = bool(data.get("show_hidden"))
             except (json.JSONDecodeError, OSError) as exc:
                 logger.warning("Файл настроек повреждён (%s), создаём резервную копию .bak", exc)
                 try:
@@ -284,7 +304,7 @@ def load_settings():
         return defaults
 
 
-def save_settings(password=None, recent_ips=None, theme_mode=None, port=None, language=None):
+def save_settings(password=None, recent_ips=None, theme_mode=None, port=None, language=None, favorites=None, hidden_items=None, auto_off_minutes=None, onboarding_done=None, show_hidden=None):
     with _settings_lock:
         current = load_settings()
         if password is not None:
@@ -305,6 +325,21 @@ def save_settings(password=None, recent_ips=None, theme_mode=None, port=None, la
                     current["port"] = port_val
             except (ValueError, TypeError):
                 pass
+        if favorites is not None:
+            current["favorites"] = [str(x).strip() for x in favorites if str(x).strip()][:50]
+        if hidden_items is not None:
+            current["hidden_items"] = [str(x).strip() for x in hidden_items if str(x).strip()][:100]
+        if auto_off_minutes is not None:
+            try:
+                ao_val = int(auto_off_minutes)
+                if ao_val in (0, 15, 30, 60):
+                    current["auto_off_minutes"] = ao_val
+            except (ValueError, TypeError):
+                pass
+        if onboarding_done is not None:
+            current["onboarding_done"] = bool(onboarding_done)
+        if show_hidden is not None:
+            current["show_hidden"] = bool(show_hidden)
         try:
             _atomic_write_json(SETTINGS_FILE, current)
         except OSError as exc:

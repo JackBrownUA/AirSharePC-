@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import html
+import io
 import json
 import logging
 import math
@@ -30,18 +31,36 @@ from config import (
     STORAGE_PATH,
 )
 from i18n import SUPPORTED_CODES, tr
+from file_ops import (
+    cleanup_expired_trash,
+    create_folder,
+    get_or_create_cached_thumbnail,
+    is_internal_hidden_name,
+    list_trash_items,
+    move_or_copy_items,
+    move_to_trash,
+    purge_from_trash,
+    rename_item,
+    restore_from_trash,
+    scan_recent_and_gallery,
+)
 from player_ui import get_media_modal_html
-from pwa_search import search_storage_index
+from qr_gen import make_qr_svg
+from pwa_search import get_search_and_pwa_script, search_storage_index
 from security import (
     IMAGE_EXTENSIONS,
     SANDBOX_EXTENSIONS,
     VIDEO_EXTENSIONS,
     check_ip_rate_limit,
     compute_cached_file_sha256,
+    create_auth_challenge,
     create_device_session_token,
+    get_session_meta,
     get_unique_filepath,
     is_valid_sha256_hex,
     reserve_unique_filepath,
+    resolve_auth_challenge,
+    set_ip_trust_in_sessions,
     is_temp_part_file,
     is_valid_session_cookie,
     is_within_storage,
@@ -49,9 +68,10 @@ from security import (
     register_auth_failure,
     verify_sha256_digest,
 )
-from utils import add_recent_ip, format_size, is_private_lan_ip, load_settings
+from utils import add_recent_ip, format_size, is_private_lan_ip, load_settings, save_settings
 from web_ui import (
     get_css,
+    get_file_icon_svg,
     get_download_svg,
     get_pin_login_page,
     get_star_script,
@@ -136,12 +156,15 @@ class AirShareHandler(SimpleHTTPRequestHandler):
     _disconnected_ips = set()
     _notified_ips = set()
     _device_sessions = {}
+    _pending_challenges = {}
+    _last_activity_ts = time.monotonic()
     _session_secret = secrets.token_hex(16)
     _hash_cache = {}
     _search_cache = {"root": "", "ts": 0.0, "entries": []}
 
     def __init__(self, *args, **kwargs):
         self._pending_auth_cookie = None
+        self._current_session_trusted = False
         self.real_storage = os.path.realpath(STORAGE_PATH)
         super().__init__(*args, directory=self.real_storage, **kwargs)
 
@@ -150,6 +173,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         with cls._auth_lock:
             cls._failed_attempts.clear()
             cls._device_sessions.clear()
+            cls._pending_challenges.clear()
             cls._session_secret = secrets.token_hex(16)
 
     @classmethod
@@ -161,6 +185,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             cls._disconnected_ips.clear()
             cls._notified_ips.clear()
             cls._device_sessions.clear()
+            cls._pending_challenges.clear()
 
     @classmethod
     def set_ip_disconnected(cls, ip, disconnected=True):
@@ -180,6 +205,50 @@ class AirShareHandler(SimpleHTTPRequestHandler):
     def is_ip_disconnected(cls, ip) -> bool:
         with cls._auth_lock:
             return ip in cls._disconnected_ips
+
+
+    @classmethod
+    def touch_activity(cls):
+        cls._last_activity_ts = time.monotonic()
+
+    @classmethod
+    def get_idle_seconds(cls) -> float:
+        return max(0.0, time.monotonic() - float(cls._last_activity_ts))
+
+    @classmethod
+    def get_pending_challenge(cls):
+        now = time.monotonic()
+        with cls._auth_lock:
+            for cid in list(cls._pending_challenges.keys()):
+                entry = cls._pending_challenges[cid]
+                if (now - float(entry.get("created", 0.0))) > 180.0 or entry.get("status") != "pending":
+                    continue
+                return dict(entry)
+        return None
+
+    @classmethod
+    def resolve_challenge(cls, cid: str, selected_pair: str = "", qr_secret: str = "", approve: bool = True, trusted: bool = False):
+        return resolve_auth_challenge(
+            cls._pending_challenges,
+            cls._auth_lock,
+            cid,
+            selected_pair=selected_pair,
+            qr_secret=qr_secret,
+            approve=approve,
+            trusted=trusted,
+        )
+
+    @classmethod
+    def set_ip_trusted(cls, ip: str, trusted: bool):
+        set_ip_trust_in_sessions(cls._device_sessions, cls._auth_lock, ip, trusted)
+
+    @classmethod
+    def is_ip_trusted(cls, ip: str) -> bool:
+        with cls._auth_lock:
+            for meta in cls._device_sessions.values():
+                if meta.get("ip") == ip:
+                    return bool(meta.get("trusted", False))
+        return False
 
     def _is_within_storage(self, target_path: str) -> bool:
         return is_within_storage(self.real_storage, target_path)
@@ -239,7 +308,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                     self.__class__.current_password = pwd
         return pwd
 
-    def _issue_session_cookie_str(self) -> str:
+    def _issue_session_cookie_str(self, trusted: bool = True) -> str:
         pwd = self._ensure_password_loaded()
         ip = self._get_client_ip()
         token = create_device_session_token(
@@ -248,6 +317,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             self._auth_lock,
             ip,
             pwd,
+            trusted=trusted,
         )
         return f"airshare_auth={token}; HttpOnly; Path=/; SameSite=Lax"
 
@@ -262,14 +332,9 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 for cname in ("airshare_auth",):
                     if cname in jar:
                         tok = jar[cname].value
-                        if is_valid_session_cookie(
-                            tok,
-                            ip,
-                            pwd,
-                            self._session_secret,
-                            self._device_sessions,
-                            self._auth_lock,
-                        ):
+                        meta = get_session_meta(tok, ip, pwd, self._device_sessions, self._auth_lock)
+                        if meta is not None:
+                            self._current_session_trusted = bool(meta.get("trusted", False))
                             return True
             except cookies.CookieError:
                 pass
@@ -281,7 +346,8 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 decoded = base64.b64decode(encoded).decode("utf-8", errors="ignore")
                 _, _, provided_pwd = decoded.partition(":")
                 if hmac.compare_digest(provided_pwd.encode("utf-8", "surrogatepass"), pwd.encode("utf-8", "surrogatepass")):
-                    self._pending_auth_cookie = self._issue_session_cookie_str()
+                    self._current_session_trusted = True
+                    self._pending_auth_cookie = self._issue_session_cookie_str(trusted=True)
                     return True
             except Exception as exc:
                 logger.debug("Ошибка разбора Basic-авторизации: %s", exc)
@@ -333,6 +399,25 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 if code in SUPPORTED_CODES:
                     return code
         return self.current_language if self.current_language in SUPPORTED_CODES else "en"
+
+
+    def _is_trusted_session(self) -> bool:
+        return bool(getattr(self, "_current_session_trusted", False))
+
+    def _send_json(self, code: int, data: dict, extra_headers=None):
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        if extra_headers:
+            for k, v in extra_headers.items():
+                self.send_header(k, v)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
 
     def _send_html_page(self, status_code: int, html_str: str, extra_headers=None):
         body = html_str.encode("utf-8")
@@ -573,6 +658,34 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         except OSError:
             self.send_error(500, "Hash error")
 
+
+    def _serve_sse_events(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+        try:
+            last_mtime = os.stat(self.real_storage).st_mtime_ns
+        except OSError:
+            last_mtime = 0
+        try:
+            for _ in range(18):
+                time.sleep(2.5)
+                try:
+                    cur_mtime = os.stat(self.real_storage).st_mtime_ns
+                except OSError:
+                    cur_mtime = last_mtime
+                if cur_mtime != last_mtime:
+                    last_mtime = cur_mtime
+                    self.wfile.write(b"event: reload\ndata: 1\n\n")
+                else:
+                    self.wfile.write(b": keepalive\n\n")
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
+            pass
+
     def do_HEAD(self):
         parsed = urllib.parse.urlparse(self.path)
         if not self.check_auth_or_respond():
@@ -595,8 +708,26 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         self.send_error(404, "File not found")
 
     def do_GET(self):
+        self.touch_activity()
         parsed = urllib.parse.urlparse(self.path)
+        params = urllib.parse.parse_qs(parsed.query)
+        if parsed.path == "/auth/status":
+            ip = self._get_client_ip()
+            if not (is_private_lan_ip(ip) or ip in ("127.0.0.1", "::1")):
+                self.send_error(403, "Local network only")
+                return
+            cid = (params.get("cid") or [""])[0]
+            with self._auth_lock:
+                entry = self._pending_challenges.get(cid)
+                st = entry.get("status", "expired") if entry and entry.get("ip") == ip else "expired"
+            self._send_json(200, {"status": st})
+            return
+
         if not self.check_auth_or_respond():
+            return
+
+        if parsed.path == "/events":
+            self._serve_sse_events()
             return
 
         params = urllib.parse.parse_qs(parsed.query)
@@ -604,6 +735,25 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         if "hash" in params and params["hash"]:
             self._parse_client_device(fast_skip_if_known=True)
             self._serve_file_hash(parsed.path, params["hash"][0])
+            return
+
+        if "recent" in params and params.get("ajax") == ["1"]:
+            hidden_items = load_settings().get("hidden_items", [])
+            recent_items, _ = scan_recent_and_gallery(self.real_storage, hidden_items)
+            self._send_json(200, {"results": recent_items})
+            return
+
+        if "gallery" in params and params.get("ajax") == ["1"]:
+            hidden_items = load_settings().get("hidden_items", [])
+            _, gallery_groups = scan_recent_and_gallery(self.real_storage, hidden_items)
+            self._send_json(200, {"groups": gallery_groups})
+            return
+
+        if "trash" in params and params.get("ajax") == ["1"]:
+            if not self._is_trusted_session():
+                self._send_json(403, {"error": "Trusted device required"})
+                return
+            self._send_json(200, {"items": list_trash_items(self.real_storage)})
             return
 
         if "q" in params and params.get("ajax") == ["1"]:
@@ -664,17 +814,145 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             return
         self.send_error(404, "File not found")
 
+
+    def _handle_file_op_post(self, op: str):
+        try:
+            cl = min(1024 * 1024, max(0, int(self.headers.get("Content-Length", "0"))))
+        except ValueError:
+            cl = 0
+        raw = self.rfile.read(cl) if cl > 0 else b"{}"
+        try:
+            data = json.loads(raw.decode("utf-8", errors="replace"))
+        except ValueError:
+            self._send_json(400, {"error": "Invalid JSON"})
+            return
+
+        if op == "rename":
+            ok, msg = rename_item(self.real_storage, data.get("path", ""), data.get("new_name", ""))
+            self._send_json(200 if ok else 400, {"ok": ok, "msg": msg})
+            return
+        if op in ("move", "copy"):
+            ok, msg, done = move_or_copy_items(
+                self.real_storage, data.get("paths", []), data.get("dest_dir", ""), copy_mode=(op == "copy")
+            )
+            self._send_json(200 if ok else 400, {"ok": ok, "msg": msg, "done": done})
+            return
+        if op == "mkdir":
+            ok, msg = create_folder(self.real_storage, data.get("dir", ""), data.get("name", ""))
+            self._send_json(200 if ok else 400, {"ok": ok, "msg": msg})
+            return
+        if op == "delete":
+            moved = move_to_trash(self.real_storage, data.get("paths", []))
+            self._send_json(200 if moved else 400, {"ok": bool(moved), "moved": moved})
+            return
+        if op == "restore":
+            restored = restore_from_trash(self.real_storage, data.get("ids", []))
+            self._send_json(200 if restored else 400, {"ok": bool(restored), "restored": restored})
+            return
+        if op == "purge":
+            cnt = purge_from_trash(self.real_storage, data.get("ids", []))
+            self._send_json(200, {"ok": True, "purged": cnt})
+            return
+        if op == "fav":
+            rel_p = str(data.get("rel_path", "")).strip("/")
+            st_cfg = load_settings()
+            favs = list(st_cfg.get("favorites", []))
+            if rel_p in favs:
+                favs.remove(rel_p)
+            elif rel_p:
+                favs.append(rel_p)
+            save_settings(favorites=favs)
+            self._send_json(200, {"ok": True, "favorites": favs})
+            return
+        if op == "hide":
+            rel_p = str(data.get("rel_path", "")).strip("/")
+            st_cfg = load_settings()
+            hids = list(st_cfg.get("hidden_items", []))
+            if rel_p in hids:
+                hids.remove(rel_p)
+            elif rel_p:
+                hids.append(rel_p)
+            save_settings(hidden_items=hids)
+            self._send_json(200, {"ok": True, "hidden_items": hids})
+            return
+        if op == "show_hidden":
+            st_cfg = load_settings()
+            new_val = not bool(st_cfg.get("show_hidden", False))
+            save_settings(show_hidden=new_val)
+            self._send_json(200, {"ok": True, "show_hidden": new_val})
+            return
+        self._send_json(400, {"error": "Unknown op"})
+
     def do_POST(self):
+        self.touch_activity()
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/login":
             self._handle_login_post()
             return
 
+        if parsed.path == "/auth/start":
+            ip = self._get_client_ip()
+            if not (is_private_lan_ip(ip) or ip in ("127.0.0.1", "::1")):
+                self.send_error(403, "Local network only")
+                return
+            allowed, retry_after = self._check_rate_limit()
+            if not allowed:
+                self._send_json(429, {"error": "Rate limited", "retry_after": retry_after})
+                return
+            ua = self.headers.get("User-Agent", "Browser")
+            ch = create_auth_challenge(self._pending_challenges, self._auth_lock, ip, ua)
+            qr_uri = f"airshare://auth?cid={ch['id']}&secret={ch['qr_secret']}"
+            self._send_json(
+                200,
+                {
+                    "cid": ch["id"],
+                    "pairs": ch["pairs"],
+                    "target": ch["target"],
+                    "qr_uri": qr_uri,
+                    "qr_svg": make_qr_svg(qr_uri),
+                },
+            )
+            return
+
+        if parsed.path == "/auth/claim":
+            ip = self._get_client_ip()
+            if not (is_private_lan_ip(ip) or ip in ("127.0.0.1", "::1")):
+                self.send_error(403, "Local network only")
+                return
+            try:
+                cl = min(8192, max(0, int(self.headers.get("Content-Length", "0"))))
+            except ValueError:
+                cl = 0
+            raw = self.rfile.read(cl) if cl > 0 else b"{}"
+            try:
+                payload = json.loads(raw.decode("utf-8", errors="replace"))
+            except ValueError:
+                payload = {}
+            cid = str(payload.get("cid", ""))
+            with self._auth_lock:
+                entry = self._pending_challenges.get(cid)
+                if not entry or entry.get("ip") != ip or entry.get("status") != "approved":
+                    self._send_json(401, {"error": "Not approved"})
+                    return
+                trusted = bool(entry.get("trusted", False))
+                self._pending_challenges.pop(cid, None)
+            self._clear_auth_failures()
+            cookie_str = self._issue_session_cookie_str(trusted=trusted)
+            self._send_json(200, {"ok": True, "trusted": trusted}, extra_headers={"Set-Cookie": cookie_str})
+            return
+
         if not self.check_auth_or_respond():
+            return
+
+        if not self._is_trusted_session():
+            self.send_error(403, "Trusted device required")
             return
         self._parse_client_device(fast_skip_if_known=True)
 
         params = urllib.parse.parse_qs(parsed.query)
+        if "op" in params and params["op"]:
+            self._handle_file_op_post(params["op"][0])
+            return
         raw_filename = ""
         if "upload" in params and params["upload"]:
             raw_filename = params["upload"][0]
@@ -953,6 +1231,16 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 return
 
             is_thumb = "thumb=1" in urllib.parse.urlparse(self.path).query
+            if is_thumb and not force_attachment and not head_only:
+                cached_jpeg = get_or_create_cached_thumbnail(target_file, st)
+                if cached_jpeg:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/jpeg")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", str(len(cached_jpeg)))
+                    self.end_headers()
+                    self.wfile.write(cached_jpeg)
+                    return
             if byte_range is not None:
                 start, end = byte_range
                 if is_thumb and (end - start + 1) > THUMB_MAX_BYTES:
@@ -1141,14 +1429,37 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             self.send_error(403, "Access denied")
             return None
 
-        list_dir = [name for name in raw_list if not is_temp_part_file(name)]
-        list_dir.sort(key=lambda a: (not os.path.isdir(os.path.join(real_path, a)), a.lower()))
+        st_cfg = load_settings()
+        favorites = list(st_cfg.get("favorites", []))
+        hidden_items = set(st_cfg.get("hidden_items", []))
+        show_hidden = bool(st_cfg.get("show_hidden", False))
+        is_trusted = self._is_trusted_session()
+
+        rel_cur_dir = os.path.relpath(real_path, self.real_storage).replace("\\", "/")
+        if rel_cur_dir == ".":
+            rel_cur_dir = ""
+
+        list_dir = []
+        for name in raw_list:
+            if is_internal_hidden_name(name):
+                continue
+            rel_item = f"{rel_cur_dir}/{name}" if rel_cur_dir else name
+            if not show_hidden and (name.startswith(".") or name in hidden_items or rel_item in hidden_items):
+                continue
+            list_dir.append(name)
+
+        list_dir.sort(
+            key=lambda a: (
+                not (a in favorites or (f"{rel_cur_dir}/{a}" if rel_cur_dir else a) in favorites),
+                not os.path.isdir(os.path.join(real_path, a)),
+                a.lower(),
+            )
+        )
 
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
         theme = self._get_request_theme(params)
         lang = self._get_request_lang(params)
-        displaypath = html.escape(urllib.parse.unquote(parsed.path))
 
         total_items = len(list_dir)
         total_pages = max(1, math.ceil(total_items / MAX_DIR_ITEMS_PER_PAGE))
@@ -1160,29 +1471,74 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         start_idx = (page - 1) * MAX_DIR_ITEMS_PER_PAGE
         page_items = list_dir[start_idx : start_idx + MAX_DIR_ITEMS_PER_PAGE]
 
+        # Кликабельные хлебные крошки
+        crumbs = [f'<a class="crumb-link" href="/">{html.escape(tr("web_root_name", lang))}</a>']
+        if rel_cur_dir:
+            acc = []
+            for seg in rel_cur_dir.split("/"):
+                acc.append(urllib.parse.quote(seg, safe=""))
+                crumbs.append('<span>/</span>')
+                crumbs.append(f'<a class="crumb-link" href="/{"/".join(acc)}/">{html.escape(seg)}</a>')
+        breadcrumbs_html = '<div class="breadcrumbs">' + "".join(crumbs) + '</div>'
+
+        # Избранные папки вверху
+        fav_chips = []
+        for fav in favorites:
+            fav_full = os.path.realpath(os.path.join(self.real_storage, fav))
+            if is_within_storage(self.real_storage, fav_full) and os.path.isdir(fav_full):
+                q_fav = "/".join(urllib.parse.quote(p, safe="") for p in fav.split("/"))
+                fav_chips.append(f'<a class="fav-chip" href="/{q_fav}/">★ {html.escape(fav)}</a>')
+        fav_html = (f'<div class="fav-strip"><span style="font-size:12px;opacity:0.75;align-self:center;">★ {html.escape(tr("web_favorites", lang))}:</span>' + "".join(fav_chips) + '</div>') if fav_chips else ""
+
+        upload_dest_display = "/" + (rel_cur_dir if rel_cur_dir else "Download")
+        role_badge_cls = "role-badge" if is_trusted else "role-badge guest"
+        role_badge_txt = html.escape(tr("web_trusted_badge" if is_trusted else "web_guest_badge", lang))
+
         search_ph = html.escape(tr("web_search_ph", lang))
         r = []
         r.append('<!DOCTYPE html><html><head><meta charset="utf-8">')
         r.append('<meta name="viewport" content="width=device-width, initial-scale=1.0">')
         r.append('<title>AirShare PC</title>')
         r.append(f'<style>{get_css(theme)}</style>')
-        r.append(f'</head><body class="{theme}">')
+        r.append(f'</head><body class="{theme}" data-trusted="{"1" if is_trusted else "0"}">')
         r.append('<canvas id="skyCanvas"></canvas>')
+        r.append(f'<div id="dropOverlay" class="drop-overlay">{html.escape(tr("web_drop_hint", lang))}</div>')
+        r.append('<div id="marqueeBox" class="marquee-box"></div>')
         r.append(get_top_controls_html(theme, lang=lang, show_preview_toggle=True))
 
         r.append('<div class="container">')
-        r.append(f'<div class="header"><h1>AirShare PC</h1><p>{displaypath}</p>')
+        r.append(f'<div class="header"><h1>AirShare PC <span class="{role_badge_cls}">{role_badge_txt}</span></h1>')
+        r.append(breadcrumbs_html)
         r.append('<div class="actions-bar">')
-        r.append(
-            '<button type="button" class="upload-btn" onclick="triggerUpload()">'
-            f'{html.escape(tr("web_upload_btn", lang))}</button>'
-        )
-        r.append('<input type="file" id="up" multiple style="display:none" onchange="uploadFiles(this.files)">')
+        if is_trusted:
+            r.append(
+                '<button type="button" class="upload-btn" onclick="triggerUpload()">'
+                f'{html.escape(tr("web_upload_btn", lang))}</button>'
+            )
+            r.append(
+                '<button type="button" class="mini-btn" onclick="createNewFolder()">'
+                f'+ {html.escape(tr("web_new_folder", lang))}</button>'
+            )
+            r.append('<input type="file" id="up" multiple style="display:none" onchange="uploadFiles(this.files)">')
         if real_path != self.real_storage:
-            r.append(f'<a class="upload-btn" href="../">{html.escape(tr("web_back_btn", lang))}</a>')
+            r.append(f'<a class="upload-btn" href="../">↑ {html.escape(tr("web_up_dir", lang))}</a>')
+        r.append(f'<button type="button" class="mini-btn" onclick="toggleWideView()">⊞ {html.escape(tr("web_view_toggle", lang))}</button>')
+        r.append('<button type="button" class="mini-btn" onclick="runServerOp(\'show_hidden\', {})">👁️ ' + html.escape(tr("web_show_hidden", lang)) + '</button>')
         r.append('</div>')
+        if is_trusted:
+            r.append(f'<div class="upload-dest-hint">{html.escape(tr("web_upload_here", lang))} <b>{html.escape(upload_dest_display)}</b> • {html.escape(tr("web_drop_hint", lang))}</div>')
         r.append('<p id="status"></p></div>')
 
+        r.append('<div class="nav-tabs">')
+        r.append('<button type="button" class="nav-tab active" data-tab="files" onclick="switchTab(\'files\')">📁 ' + html.escape(tr("web_tab_files", lang)) + '</button>')
+        r.append('<button type="button" class="nav-tab" data-tab="gallery" onclick="switchTab(\'gallery\')">🖼️ ' + html.escape(tr("web_tab_gallery", lang)) + '</button>')
+        r.append('<button type="button" class="nav-tab" data-tab="recent" onclick="switchTab(\'recent\')">🕒 ' + html.escape(tr("web_tab_recent", lang)) + '</button>')
+        if is_trusted:
+            r.append('<button type="button" class="nav-tab" data-tab="trash" onclick="switchTab(\'trash\')">🗑️ ' + html.escape(tr("web_tab_trash", lang)) + '</button>')
+        r.append('</div>')
+
+        r.append('<div id="filesTabPanel">')
+        r.append(fav_html)
         r.append(
             '<div class="search-wrap">'
             f'<input type="search" id="fileSearchInput" class="search-input" placeholder="{search_ph}" oninput="onSearchInput(this)" autocomplete="off">'
@@ -1196,8 +1552,12 @@ class AirShareHandler(SimpleHTTPRequestHandler):
         if total_items > 0:
             r.append(
                 '<div class="toolbar">'
-                '<label><input type="checkbox" class="checkbox" onchange="toggleSelectAll(this)"> '
+                '<div class="toolbar-actions">'
+                '<label><input type="checkbox" id="masterSelectAll" class="checkbox" onchange="toggleSelectAll(this)"> '
                 f'{html.escape(tr("web_select_all", lang))}</label>'
+                f'<button type="button" class="mini-btn" onclick="invertSelection()">{html.escape(tr("web_invert_sel", lang))}</button>'
+                f'<button type="button" class="mini-btn" onclick="clearSelection()">{html.escape(tr("web_clear_sel", lang))}</button>'
+                '</div>'
                 f'<span>{html.escape(tr("web_total_items", lang, count=total_items))}</span>'
                 '</div>'
             )
@@ -1212,14 +1572,17 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             safe_name = html.escape(name)
             safe_data_name = html.escape(name.lower(), quote=True)
             quoted_name = urllib.parse.quote(name, safe="")
-            js_safe_name = html.escape(name.replace("\\", "\\\\").replace("'", "\\'").replace("\r", "").replace("\n", " "), quote=True)
+            js_safe_name = html.escape(name.replace("\\", "\\\\").replace("'", "\'").replace("\r", "").replace("\n", " "), quote=True)
+            is_dir_item = os.path.isdir(fullname)
+            icon_svg = get_file_icon_svg(name, is_dir=is_dir_item)
 
-            if os.path.isdir(fullname):
+            if is_dir_item:
+                fav_star = "★ " if (rel_path in favorites or name in favorites) else ""
                 r.append(
-                    f'<li class="file-item" data-name="{safe_data_name}">'
+                    f'<li class="file-item" data-name="{safe_data_name}" data-rel="{safe_val}" data-orig="{html.escape(name, quote=True)}" data-quoted="{quoted_name}" data-dir="1" data-size="—" oncontextmenu="openCtxMenu(event, this)">'
                     f'<input type="checkbox" class="checkbox" name="files" value="{safe_val}">'
                     '<div class="file-info"><div class="file-text-col">'
-                    f'<a class="file-link" href="{urllib.parse.quote(name + "/")}">📁 {safe_name}</a>'
+                    f'<a class="file-link" href="{urllib.parse.quote(name + "/")}">{icon_svg}{fav_star}{safe_name}</a>'
                     f'<div class="file-meta"><span>{folder_label}</span></div></div></div>'
                     '<div class="item-actions">'
                     f'<a class="download-btn" href="?zip={quoted_name}" title="ZIP">{dl_svg}</a>'
@@ -1233,22 +1596,18 @@ class AirShareHandler(SimpleHTTPRequestHandler):
 
                 _, ext = os.path.splitext(name)
                 ext_low = ext.lower()
-                hash_badge = (
-                    f'<span class="hash-pill" onclick="verifyFileHash(\'{quoted_name}\', this)" '
-                    'title="SHA-256">🛡️ SHA-256</span>'
-                )
                 if ext_low in IMAGE_EXTENSIONS:
                     play_onclick = f"return openMediaPlayer('{quoted_name}', '{js_safe_name}', 'image');"
                     r.append(
-                        f'<li class="file-item has-thumb" data-name="{safe_data_name}">'
+                        f'<li class="file-item has-thumb" data-name="{safe_data_name}" data-rel="{safe_val}" data-orig="{html.escape(name, quote=True)}" data-quoted="{quoted_name}" data-dir="0" data-size="{size_str}" oncontextmenu="openCtxMenu(event, this)">'
                         f'<input type="checkbox" class="checkbox" name="files" value="{safe_val}">'
                         '<div class="file-info">'
                         f'<a class="thumb-box" href="{quoted_name}" onclick="{play_onclick}" tabindex="-1">'
-                        f'<img class="file-thumb" data-src="{quoted_name}" loading="lazy" decoding="async" alt="">'
+                        f'<img class="file-thumb" data-src="{quoted_name}?thumb=1" loading="lazy" decoding="async" alt="">'
                         '</a>'
                         '<div class="file-text-col">'
-                        f'<a class="file-link" href="{quoted_name}" onclick="{play_onclick}"><span class="doc-icon">📄 </span>{safe_name}</a>'
-                        f'<div class="file-meta"><span>{size_str}</span>{hash_badge}</div></div></div>'
+                        f'<a class="file-link" href="{quoted_name}" onclick="{play_onclick}">{icon_svg}{safe_name}</a>'
+                        f'<div class="file-meta"><span>{size_str}</span></div></div></div>'
                         '<div class="item-actions">'
                         f'<a class="download-btn" href="?download={quoted_name}" download="{safe_name}">{dl_svg}</a>'
                         '</div></li>'
@@ -1256,7 +1615,7 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                 elif ext_low in VIDEO_EXTENSIONS:
                     play_onclick = f"return openMediaPlayer('{quoted_name}', '{js_safe_name}', 'video');"
                     r.append(
-                        f'<li class="file-item has-thumb" data-name="{safe_data_name}">'
+                        f'<li class="file-item has-thumb" data-name="{safe_data_name}" data-rel="{safe_val}" data-orig="{html.escape(name, quote=True)}" data-quoted="{quoted_name}" data-dir="0" data-size="{size_str}" oncontextmenu="openCtxMenu(event, this)">'
                         f'<input type="checkbox" class="checkbox" name="files" value="{safe_val}">'
                         '<div class="file-info">'
                         f'<a class="thumb-box" href="{quoted_name}" onclick="{play_onclick}" tabindex="-1">'
@@ -1264,19 +1623,19 @@ class AirShareHandler(SimpleHTTPRequestHandler):
                         '<span class="vid-badge">▶</span>'
                         '</a>'
                         '<div class="file-text-col">'
-                        f'<a class="file-link" href="{quoted_name}" onclick="{play_onclick}"><span class="doc-icon">📄 </span>{safe_name}</a>'
-                        f'<div class="file-meta"><span>{size_str}</span>{hash_badge}</div></div></div>'
+                        f'<a class="file-link" href="{quoted_name}" onclick="{play_onclick}">{icon_svg}{safe_name}</a>'
+                        f'<div class="file-meta"><span>{size_str}</span></div></div></div>'
                         '<div class="item-actions">'
                         f'<a class="download-btn" href="?download={quoted_name}" download="{safe_name}">{dl_svg}</a>'
                         '</div></li>'
                     )
                 else:
                     r.append(
-                        f'<li class="file-item" data-name="{safe_data_name}">'
+                        f'<li class="file-item" data-name="{safe_data_name}" data-rel="{safe_val}" data-orig="{html.escape(name, quote=True)}" data-quoted="{quoted_name}" data-dir="0" data-size="{size_str}" oncontextmenu="openCtxMenu(event, this)">'
                         f'<input type="checkbox" class="checkbox" name="files" value="{safe_val}">'
                         '<div class="file-info"><div class="file-text-col">'
-                        f'<a class="file-link" href="{quoted_name}" target="_blank">📄 {safe_name}</a>'
-                        f'<div class="file-meta"><span>{size_str}</span>{hash_badge}</div></div></div>'
+                        f'<a class="file-link" href="{quoted_name}" target="_blank">{icon_svg}{safe_name}</a>'
+                        f'<div class="file-meta"><span>{size_str}</span></div></div></div>'
                         '<div class="item-actions">'
                         f'<a class="download-btn" href="?download={quoted_name}" download="{safe_name}">{dl_svg}</a>'
                         '</div></li>'
@@ -1293,29 +1652,54 @@ class AirShareHandler(SimpleHTTPRequestHandler):
             r.append('</div>')
 
         if total_items > 0:
-            r.append('<div style="text-align:center;margin-top:22px;">')
-            r.append(
-                f'<button type="submit" class="upload-btn">{html.escape(tr("web_download_zip", lang))}</button>'
-            )
-            r.append('</div>')
+            r.append(f'<button type="submit" class="download-selected-btn">{html.escape(tr("web_download_zip", lang))}</button>')
         r.append('</form></div>')
+        r.append('<div id="dynamicTabPanel" style="display:none;"></div>')
+        r.append('</div>')
+
+        # Контекстное меню ПКМ и модальное окно Свойств / SHA-256
+        r.append(
+            '<div id="ctxMenu" class="ctx-menu">'
+            + '<button type="button" class="ctx-item" onclick="ctxAction(\'open\')">' + html.escape(tr("web_ctx_open", lang)) + '</button>'
+            + '<button type="button" class="ctx-item" onclick="ctxAction(\'download\')">' + html.escape(tr("web_ctx_download", lang)) + '</button>'
+            + '<button type="button" class="ctx-item trusted-only" onclick="ctxAction(\'rename\')">' + html.escape(tr("web_ctx_rename", lang)) + '</button>'
+            + '<button type="button" class="ctx-item trusted-only" onclick="ctxAction(\'move\')">' + html.escape(tr("web_ctx_move", lang)) + '</button>'
+            + '<button type="button" class="ctx-item trusted-only" onclick="ctxAction(\'copy\')">' + html.escape(tr("web_ctx_copy", lang)) + '</button>'
+            + '<button type="button" class="ctx-item trusted-only" onclick="ctxAction(\'fav\')">★ ' + html.escape(tr("web_ctx_fav", lang)) + '</button>'
+            + '<button type="button" class="ctx-item trusted-only" onclick="ctxAction(\'hide\')">👁️ ' + html.escape(tr("web_ctx_hide", lang)) + '</button>'
+            + '<button type="button" class="ctx-item" onclick="ctxAction(\'props\')">🛡️ ' + html.escape(tr("web_ctx_props", lang)) + '</button>'
+            + '<button type="button" class="ctx-item danger trusted-only" onclick="ctxAction(\'trash\')">🗑️ ' + html.escape(tr("web_ctx_trash", lang)) + '</button>'
+            + '</div>'
+        )
+        r.append(
+            '<div id="propsModal" class="media-modal" style="display:none;align-items:center;justify-content:center;" onclick="if(event.target===this)this.style.display=\'none\';">'
+            '<div class="pin-card" style="max-width:460px;text-align:left;">'
+            f'<h3 style="margin-bottom:10px;">{html.escape(tr("web_ctx_props", lang))}</h3>'
+            '<pre id="propsBody" style="white-space:pre-wrap;word-break:break-all;font-size:13px;opacity:0.9;"></pre>'
+            '<button type="button" class="upload-btn" style="margin-top:12px;" onclick="document.getElementById(\'propsModal\').style.display=\'none\'">OK</button>'
+            '</div></div>'
+        )
+
+        r.append(
+            '<div class="upload-dock" id="uploadProgressDock">'
+            '<div class="upload-dock-head"><span id="dockFileName">...</span><span id="dockPct">0%</span></div>'
+            '<div class="upload-dock-bar"><div class="upload-dock-fill" id="dockBarFill"></div></div>'
+            '<div class="upload-dock-meta"><span id="dockSpeed">0 MB/s</span><span id="dockEta"></span></div>'
+            '</div>'
+        )
         r.append(get_media_modal_html(lang))
         r.append('<div class="credit-badge">Crafted by JackBrownUA • Powered by Gemini</div>')
         r.append(f'<script>{get_star_script()}</script>')
         r.append(f'<script>{get_upload_script(lang)}</script>')
+        r.append(f'<script>{get_search_and_pwa_script()}</script>')
         r.append(f'<script>{get_theme_script()}</script>')
         r.append('</body></html>')
 
-        encoded = "\n".join(r).encode("utf-8")
+        encoded = "\n".join(r).encode("utf-8", "surrogateescape")
+        f = io.BytesIO(encoded)
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(encoded)))
-        if "theme" in params and params["theme"]:
-            self.send_header("Set-Cookie", f"airshare_theme={theme}; Path=/; Max-Age=31536000; SameSite=Lax")
-        if "lang" in params and params["lang"]:
-            self.send_header("Set-Cookie", f"airshare_lang={lang}; Path=/; Max-Age=31536000; SameSite=Lax")
         self.end_headers()
-        return BytesIO(encoded)
-
-
+        return f

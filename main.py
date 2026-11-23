@@ -25,6 +25,8 @@ from kivy.uix.textinput import TextInput
 from config import APP_NAME, APP_VERSION, SERVER_PORT, STORAGE_PATH
 from i18n import SUPPORTED_LANGUAGES, tr
 from android_bridge import (
+    get_android_top_inset_dp,
+    launch_android_qr_scanner,
     is_android_activity_paused,
     move_android_task_to_back,
     request_android_notification_permission,
@@ -93,6 +95,8 @@ class AirShareApp(App):
         self.active_nav_tab = "transfer"
         self.keep_alive_locked = True
         self._svc_poll_ev = None
+        self._active_challenge_cid = None
+        self._top_inset_dp = 0.0
         self._pending_all_storage_path = None
         self.transfer_history = []
         self.sent_files_count = 0
@@ -245,8 +249,17 @@ class AirShareApp(App):
             bars = insets.getInsets(WindowInsetsType.systemBars())
             top_px = max(0, int(bars.top))
             bot_px = max(0, int(bars.bottom))
+            top_dp_safe = dp(get_android_top_inset_dp())
+            self._top_inset_dp = top_dp_safe
             if top_px > 0 or bot_px > 0:
-                self.main_content.padding = [dp(18), dp(12) + top_px, dp(18), dp(12) + bot_px]
+                self.main_content.padding = [dp(18), dp(12) + max(top_px, top_dp_safe), dp(18), dp(12) + bot_px]
+            else:
+                self.main_content.padding = [dp(18), dp(12) + top_dp_safe, dp(18), dp(12)]
+            if hasattr(self, "toast_banner"):
+                self.toast_banner.top_inset = top_dp_safe
+            if hasattr(self, "drawer"):
+                self.drawer.height = max(dp(360), Window.height - dp(28) - top_dp_safe)
+                self.drawer.y = dp(14)
         except Exception as exc:
             logger.debug("Не удалось применить системные отступы Android 15+: %s", exc)
 
@@ -395,7 +408,7 @@ class AirShareApp(App):
             spacing=dp(10),
             size_hint=(1, 0.34),
         )
-        self.transfers_card.bind(on_press=self.open_transfers_modal)
+        self.transfers_card.bind(on_release=self.open_transfers_modal)
 
         self.tr_row1 = BoxLayout(orientation="horizontal", spacing=dp(12), size_hint=(1, 0.5))
         ico1 = VectorIcon(
@@ -566,9 +579,11 @@ class AirShareApp(App):
         self.drawer_status_card.bind(on_press=self.toggle_server)
         self.drawer.add_widget(self.drawer_status_card)
 
-        menu_box = BoxLayout(orientation="vertical", spacing=dp(4), size_hint=(1, 1))
+        menu_box = BoxLayout(orientation="vertical", spacing=dp(2), size_hint=(1, 1))
         self.menu_items_refs = []
         for menu_key, ico_name, cb in [
+            ("menu_qr_scan", "camera", self.open_qr_scanner_modal),
+            ("menu_auto_off", "sliders", self.open_auto_off_modal),
             ("menu_language", "globe", self.open_language_modal),
             ("menu_security", "lock", self.open_security_modal),
             ("menu_port", "sliders", self.open_port_modal),
@@ -619,6 +634,8 @@ class AirShareApp(App):
         Window.bind(on_request_close=self._on_request_close)
         Clock.schedule_once(self._apply_android_system_insets, 0.35)
         Clock.schedule_once(lambda _dt: request_android_notification_permission(), 1.2)
+        if not settings.get("onboarding_done", False):
+            Clock.schedule_once(lambda _dt: self.open_onboarding_modal(), 1.6)
 
         return self.root_widget
 
@@ -990,7 +1007,7 @@ class AirShareApp(App):
             self.set_keep_alive(True)
             self._refresh_foreground_notification()
             if self._svc_poll_ev is None:
-                self._svc_poll_ev = Clock.schedule_interval(self._poll_service_stop_flag, 3.0)
+                self._svc_poll_ev = Clock.schedule_interval(self._poll_service_stop_flag, 0.8)
         except OSError as exc:
             logger.error("Не удалось запустить HTTP-сервер на 0.0.0.0:%s: %s", self.server_port, exc)
             self.server = None
@@ -1050,6 +1067,15 @@ class AirShareApp(App):
             return
         if consume_service_stop_flag():
             self.toggle_server()
+            return
+        ao_min = int(load_settings().get("auto_off_minutes", 0) or 0)
+        if ao_min > 0 and DynamicAirShareHandler.get_idle_seconds() >= (ao_min * 60):
+            self.toggle_server()
+            return
+        ch = DynamicAirShareHandler.get_pending_challenge()
+        if ch and ch.get("id") != self._active_challenge_cid:
+            self._active_challenge_cid = ch.get("id")
+            self.open_challenge_confirm_modal(ch)
 
     def _on_server_stopped(self, _dt):
         self.is_stopping = self.has_server_error = False
@@ -1482,8 +1508,27 @@ class AirShareApp(App):
                     self.show_toast(self._t(toast_key, ip=ip_val), kind="info" if currently_blocked else "warn")
                     _populate()
 
+                is_trusted = DynamicAirShareHandler.is_ip_trusted(raw_ip)
+                trust_btn = RoundedActionButton(
+                    text=self._t("btn_trust") if is_trusted else self._t("btn_guest"),
+                    bg_color=p["blue"] if is_trusted else p["pill_bg"],
+                    border_color=(1, 1, 1, 0.18),
+                    text_color=(1, 1, 1, 1) if is_trusted else p["text"],
+                    font_size=sp(11),
+                    radius=dp(11),
+                    size_hint=(None, None),
+                    size=(dp(68), dp(32)),
+                    pos_hint={"center_y": 0.5},
+                )
+
+                def _toggle_trust(_b, ip_val=raw_ip, cur_tr=is_trusted):
+                    DynamicAirShareHandler.set_ip_trusted(ip_val, not cur_tr)
+                    _populate()
+
+                trust_btn.bind(on_press=_toggle_trust)
                 act_btn.bind(on_press=_toggle_ip)
                 dev_row.add_widget(dev_lbl)
+                dev_row.add_widget(trust_btn)
                 dev_row.add_widget(act_btn)
                 list_box.add_widget(dev_row)
 
@@ -1506,6 +1551,158 @@ class AirShareApp(App):
         btn_row.add_widget(btn_clr)
         btn_row.add_widget(btn_ok)
         card.add_widget(btn_row)
+
+
+    def open_onboarding_modal(self, *_args):
+        modal, card, p = self._create_mac_modal(self._t("onboard_title"), "", 290, None)
+        body = make_label(self._t("onboard_body"), size=13.5, valign="top", color=p["text"])
+        card.add_widget(body)
+        btn_row = BoxLayout(orientation="horizontal", spacing=dp(10), size_hint=(1, None), height=dp(44))
+        btn_folder = RoundedActionButton(
+            self._t("shared_folder_title"), bg_color=p["pill_bg"], border_color=p["drawer_border"], text_color=p["text"]
+        )
+        btn_ok = RoundedActionButton(self._t("onboard_ok"), bg_color=p["blue"], border_color=(1, 1, 1, 0.2))
+
+        def _done(*_):
+            save_settings(onboarding_done=True)
+            modal.dismiss()
+
+        def _pick_folder(*_):
+            save_settings(onboarding_done=True)
+            modal.dismiss()
+            self.open_shared_folders_modal()
+
+        btn_folder.bind(on_press=_pick_folder)
+        btn_ok.bind(on_press=_done)
+        btn_row.add_widget(btn_folder)
+        btn_row.add_widget(btn_ok)
+        card.add_widget(btn_row)
+
+    def open_challenge_confirm_modal(self, ch):
+        ip_str = ch.get("ip", "?")
+        modal, card, p = self._create_mac_modal(
+            self._t("auth_req_title"),
+            self._t("auth_req_sub", ip=ip_str),
+            330,
+            None,
+        )
+        trust_state = {"trusted": False}
+        trust_row = BoxLayout(orientation="horizontal", spacing=dp(8), size_hint=(1, None), height=dp(40))
+        btn_guest = RoundedActionButton(
+            self._t("auth_trust_guest"), bg_color=p["blue"], border_color=(1, 1, 1, 0.2), font_size=sp(11.5)
+        )
+        btn_trust = RoundedActionButton(
+            self._t("auth_trust_full"), bg_color=p["pill_bg"], border_color=p["drawer_border"], text_color=p["text"], font_size=sp(11.5)
+        )
+
+        def _set_trust(val):
+            trust_state["trusted"] = bool(val)
+            btn_trust.update_colors(p["green"] if val else p["pill_bg"], (1, 1, 1, 0.2))
+            btn_guest.update_colors(p["pill_bg"] if val else p["blue"], (1, 1, 1, 0.2))
+
+        btn_guest.bind(on_press=lambda *_: _set_trust(False))
+        btn_trust.bind(on_press=lambda *_: _set_trust(True))
+        trust_row.add_widget(btn_guest)
+        trust_row.add_widget(btn_trust)
+        card.add_widget(trust_row)
+
+        pairs_row = BoxLayout(orientation="horizontal", spacing=dp(10), size_hint=(1, None), height=dp(56))
+        for pair in ch.get("pairs", []):
+            pb = RoundedActionButton(
+                str(pair), bg_color=p["drawer_card"], border_color=p["blue"], text_color=p["text"], font_size=sp(20)
+            )
+
+            def _pick_pair(_b, val=pair):
+                ok, _ = DynamicAirShareHandler.resolve_challenge(
+                    ch["id"], selected_pair=val, approve=True, trusted=trust_state["trusted"]
+                )
+                self._active_challenge_cid = None
+                modal.dismiss()
+                if not ok:
+                    self.show_toast(self._t("auth_deny"), kind="error")
+
+            pb.bind(on_press=_pick_pair)
+            pairs_row.add_widget(pb)
+        card.add_widget(pairs_row)
+
+        btn_deny = RoundedActionButton(
+            self._t("auth_deny"), bg_color=p["red"], border_color=(1, 1, 1, 0.2), size_hint=(1, None), height=dp(42)
+        )
+
+        def _deny(*_):
+            DynamicAirShareHandler.resolve_challenge(ch["id"], approve=False)
+            self._active_challenge_cid = None
+            modal.dismiss()
+
+        btn_deny.bind(on_press=_deny)
+        card.add_widget(btn_deny)
+
+    def open_qr_scanner_modal(self, source_widget=None, *_args):
+        def _handle_qr_payload(raw_txt):
+            import urllib.parse as _up
+            parsed = _up.urlparse(str(raw_txt or "").strip())
+            qs = _up.parse_qs(parsed.query)
+            cid = (qs.get("cid") or [""])[0]
+            sec = (qs.get("secret") or [""])[0]
+            if cid and sec:
+                ok, _ = DynamicAirShareHandler.resolve_challenge(cid, qr_secret=sec, approve=True, trusted=True)
+                self.show_toast(self._t("auth_trust_full") if ok else self._t("auth_deny"), kind="info" if ok else "error")
+
+        if launch_android_qr_scanner(lambda txt: Clock.schedule_once(lambda _dt: _handle_qr_payload(txt), 0)):
+            return
+
+        modal, card, p = self._create_mac_modal(self._t("qr_scan_title"), self._t("qr_scan_hint"), 240, source_widget)
+        inp_wrap = RoundedCard(
+            bg_color=p["drawer_card"],
+            border_color=p["drawer_border"],
+            radius=dp(14),
+            size_hint=(1, None),
+            height=dp(46),
+            padding=[dp(10), dp(4), dp(10), dp(4)],
+        )
+        inp = TextInput(
+            text="",
+            hint_text="airshare://auth?cid=...",
+            multiline=False,
+            font_size=sp(13),
+            background_color=(0, 0, 0, 0),
+            foreground_color=p["text"],
+            cursor_color=p["blue"],
+        )
+        inp_wrap.add_widget(inp)
+        card.add_widget(inp_wrap)
+        btn_ok = RoundedActionButton(self._t("connect"), bg_color=p["blue"], border_color=(1, 1, 1, 0.2), size_hint=(1, None), height=dp(42))
+
+        def _apply(*_):
+            _handle_qr_payload(inp.text)
+            modal.dismiss()
+
+        btn_ok.bind(on_press=_apply)
+        card.add_widget(btn_ok)
+
+    def open_auto_off_modal(self, source_widget=None, *_args):
+        modal, card, p = self._create_mac_modal(self._t("menu_auto_off"), "", 290, source_widget)
+        cur = int(load_settings().get("auto_off_minutes", 0) or 0)
+        box = BoxLayout(orientation="vertical", spacing=dp(8), size_hint=(1, 1))
+        for mins in (0, 15, 30, 60):
+            lbl = self._t("auto_off_never") if mins == 0 else self._t("auto_off_min", m=mins)
+            row = ClickableCard(
+                bg_color=p["drawer_card"],
+                border_color=p["blue"] if mins == cur else p["drawer_border"],
+                radius=dp(14),
+                size_hint=(1, None),
+                height=dp(44),
+                padding=[dp(14), 0, dp(14), 0],
+            )
+            row.add_widget(make_label(lbl, size=14, color=p["text"]))
+
+            def _pick(_b, v=mins):
+                save_settings(auto_off_minutes=v)
+                modal.dismiss()
+
+            row.bind(on_press=_pick)
+            box.add_widget(row)
+        card.add_widget(box)
 
     def open_help_modal(self, source_widget=None, *_args):
         modal, card, p = self._create_mac_modal(
