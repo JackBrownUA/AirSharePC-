@@ -21,7 +21,6 @@ import zipfile
 from email.utils import formatdate
 from http import cookies
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from io import BytesIO
 
 from config import (
     MAX_CONCURRENT_CONNECTIONS,
@@ -32,7 +31,6 @@ from config import (
 )
 from i18n import SUPPORTED_CODES, tr
 from file_ops import (
-    cleanup_expired_trash,
     create_folder,
     get_or_create_cached_thumbnail,
     is_internal_hidden_name,
@@ -62,7 +60,6 @@ from security import (
     resolve_auth_challenge,
     set_ip_trust_in_sessions,
     is_temp_part_file,
-    is_valid_session_cookie,
     is_within_storage,
     make_content_disposition,
     register_auth_failure,
