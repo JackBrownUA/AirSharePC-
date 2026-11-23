@@ -399,6 +399,22 @@ class VectorIcon(Widget):
             elif t == "check":
                 d = s * 0.22
                 Line(points=[cx - d, cy, cx - d * 0.25, cy - d * 0.75, cx + d, cy + d * 0.65], width=dp(2.0))
+            elif t == "camera":
+                cw, ch = s * 0.62, s * 0.44
+                x0, y0 = cx - cw * 0.5, cy - ch * 0.54
+                Line(rounded_rectangle=[x0, y0, cw, ch, dp(3.2)], width=lw)
+                Line(
+                    points=[
+                        cx - cw * 0.22, y0 + ch,
+                        cx - cw * 0.14, y0 + ch + s * 0.10,
+                        cx + cw * 0.14, y0 + ch + s * 0.10,
+                        cx + cw * 0.22, y0 + ch,
+                    ],
+                    width=lw,
+                    joint="round",
+                )
+                Line(circle=(cx, y0 + ch * 0.48, s * 0.13), width=lw)
+                Ellipse(pos=(x0 + cw * 0.78 - dp(1.1), y0 + ch * 0.76 - dp(1.1)), size=(dp(2.2), dp(2.2)))
 
 
 class RoundedCard(BoxLayout):

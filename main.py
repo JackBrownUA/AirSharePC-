@@ -634,8 +634,6 @@ class AirShareApp(App):
         Window.bind(on_request_close=self._on_request_close)
         Clock.schedule_once(self._apply_android_system_insets, 0.35)
         Clock.schedule_once(lambda _dt: request_android_notification_permission(), 1.2)
-        if not settings.get("onboarding_done", False):
-            Clock.schedule_once(lambda _dt: self.open_onboarding_modal(), 1.6)
 
         return self.root_widget
 
@@ -1552,31 +1550,6 @@ class AirShareApp(App):
         btn_row.add_widget(btn_ok)
         card.add_widget(btn_row)
 
-
-    def open_onboarding_modal(self, *_args):
-        modal, card, p = self._create_mac_modal(self._t("onboard_title"), "", 290, None)
-        body = make_label(self._t("onboard_body"), size=13.5, valign="top", color=p["text"])
-        card.add_widget(body)
-        btn_row = BoxLayout(orientation="horizontal", spacing=dp(10), size_hint=(1, None), height=dp(44))
-        btn_folder = RoundedActionButton(
-            self._t("shared_folder_title"), bg_color=p["pill_bg"], border_color=p["drawer_border"], text_color=p["text"]
-        )
-        btn_ok = RoundedActionButton(self._t("onboard_ok"), bg_color=p["blue"], border_color=(1, 1, 1, 0.2))
-
-        def _done(*_):
-            save_settings(onboarding_done=True)
-            modal.dismiss()
-
-        def _pick_folder(*_):
-            save_settings(onboarding_done=True)
-            modal.dismiss()
-            self.open_shared_folders_modal()
-
-        btn_folder.bind(on_press=_pick_folder)
-        btn_ok.bind(on_press=_done)
-        btn_row.add_widget(btn_folder)
-        btn_row.add_widget(btn_ok)
-        card.add_widget(btn_row)
 
     def open_challenge_confirm_modal(self, ch):
         ip_str = ch.get("ip", "?")
