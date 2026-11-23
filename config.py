@@ -23,6 +23,10 @@ MAX_CONCURRENT_CONNECTIONS = 32
 # Защита от перебора PIN-кода: максимум 5 неудачных попыток, блокировка IP на 5 минут (300 сек)
 RATE_LIMIT_MAX_ATTEMPTS = 5
 RATE_LIMIT_BLOCK_SECONDS = 300
+# Срок хранения удалённых файлов в корзине (30 дней)
+TRASH_RETENTION_DAYS = 30
+TRASH_DIR_NAME = ".airshare_trash"
+DEFAULT_AUTO_OFF_MINUTES = 0
 
 # Старый захардкоженный пароль считается скомпрометированным и заменяется при запуске
 COMPROMISED_PASSWORDS = frozenset({"", "06102000"})
@@ -42,6 +46,7 @@ else:
     SETTINGS_DIR = os.path.join(os.path.expanduser("~"), ".config", "airshare")
 
 SETTINGS_FILE = os.path.join(SETTINGS_DIR, ".airshare_settings.json")
+THUMB_CACHE_DIR = os.path.join(SETTINGS_DIR, "thumb_cache")
 
 APP_NAME = "AirShare PC"
-APP_VERSION = "1.3.5"
+APP_VERSION = "1.3.6"
