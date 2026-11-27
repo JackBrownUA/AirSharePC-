@@ -1017,7 +1017,7 @@
       else {
         const stEl = document.getElementById("access-status");
         stEl.className = "status-box error";
-        stEl.textContent = d.error || t("toast_bad_pin");
+        stEl.textContent = d.error || t("pin_hint");
       }
     });
 
