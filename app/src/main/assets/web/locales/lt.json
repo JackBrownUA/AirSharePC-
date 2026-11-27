@@ -77,7 +77,7 @@
   "pin_hint": "Įveskite PIN",
   "pin_new": "Naujas PIN",
   "pin_save": "Išsaugoti PIN",
-  "pin_subtitle": "PIN kodas yra privalomas ir įtraukiamas į nuorodą:",
+  "pin_subtitle": "PIN kodas prisijungimui iš kompiuterio naršyklės:",
   "pin_title": "Saugumas ir PIN",
   "port_folder_fmt": "Prievadas {port} • {folder}",
   "port_save": "Išsaugoti prievadą",
