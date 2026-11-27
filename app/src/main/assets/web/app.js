@@ -288,7 +288,7 @@ if (btnHide) {
     } else {
       dlBtn.href = "/file/" + encPath(item.rel_path) + "?download=1";
       dlBtn.setAttribute("download", item.name);
-      dlBtn.title = t("web_download") || "Download";
+      dlBtn.title = t("web_ctx_download") || "Download";
     }
     dlBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 19h14"/></svg>`;
     dlBtn.addEventListener("click", (e) => e.stopPropagation());
@@ -943,7 +943,7 @@ function openCtxMenu(ev, item) {
       if (k === "img" || k === "image" || k === "vid" || k === "video" || k === "aud" || k === "audio") openCinema(item);
       else window.open("/file/" + encPath(item.rel_path), "_blank");
     });
-    addItem("⬇ " + (t("web_download") || "Download"), () => {
+    addItem("⬇ " + (t("web_ctx_download") || "Download"), () => {
       const a = document.createElement("a");
       a.href = "/file/" + encPath(item.rel_path) + "?download=1";
       a.setAttribute("download", item.name);
@@ -959,7 +959,7 @@ function openCtxMenu(ev, item) {
   }
   if (canEdit) {
     addSep();
-    addItem("✏ " + (t("web_rename") || "Rename"), async () => {
+    addItem("✏ " + (t("web_ctx_rename") || "Rename"), async () => {
       const nw = prompt(t("web_rename_prompt") || "New name:", item.name);
       if (!nw || nw === item.name) return;
       const res = await apiOp("rename", { path: item.rel_path, new_name: nw });
@@ -1300,7 +1300,7 @@ function initSkyCanvas() {
         toast(t("web_auth_waiting") || "Waiting for host approval...");
         const poll = setInterval(async () => {
           try {
-            const sr = await fetch("/api/auth/status?id=" + encodeURIComponent(reqId));
+            const sr = await fetch("/auth/status?cid=" + encodeURIComponent(reqId));
             if (!sr.ok) { clearInterval(poll); return; }
             const sd = await sr.json();
             if (sd.status === "approved") {
