@@ -68,6 +68,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Image
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.res.painterResource
+import com.airshare.airshare.R
+import kotlinx.coroutines.delay
 import com.airshare.airshare.SettingsStore
 import com.airshare.airshare.TransferProgress
 import com.airshare.airshare.server.AuthChallenge
@@ -812,6 +822,73 @@ fun AuthChallengeModal(
                 ) {
                     Text(tr("auth_btn_allow", emptyArray()))
                 }
+            }
+        }
+    }
+}
+@Composable
+fun AppSplashOverlay(
+    visible: Boolean,
+    palette: AirSharePalette,
+    onDismiss: () -> Unit,
+) {
+    val scale = remember { Animatable(0.82f) }
+    val contentAlpha = remember { Animatable(0f) }
+
+    LaunchedEffect(visible) {
+        if (visible) {
+            contentAlpha.animateTo(1f, animationSpec = tween(320))
+            scale.animateTo(1f, animationSpec = tween(420))
+            delay(650)
+            onDismiss()
+        }
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        exit = fadeOut(animationSpec = tween(280)),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(palette.bg)
+                .clickable { onDismiss() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .scale(scale.value)
+                    .alpha(contentAlpha.value),
+            ) {
+                Surface(
+                    modifier = Modifier.size(104.dp),
+                    shape = RoundedCornerShape(28.dp),
+                    color = palette.cardBg,
+                    border = BorderStroke(1.dp, palette.highlightBorder),
+                    shadowElevation = 18.dp,
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.app_logo),
+                        contentDescription = "AirShare PC",
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(28.dp)),
+                    )
+                }
+                Spacer(Modifier.height(18.dp))
+                Text(
+                    text = "AirShare PC",
+                    color = palette.text,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "v2.0 • Fast Wi-Fi Transfer",
+                    color = palette.subtext,
+                    fontSize = 12.5.sp,
+                )
             }
         }
     }
