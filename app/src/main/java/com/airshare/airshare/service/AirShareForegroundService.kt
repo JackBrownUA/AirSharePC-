@@ -89,8 +89,14 @@ class AirShareForegroundService : Service() {
     }
 
     private fun startServer() {
-        acquireLocks()
         val ip = store.getWifiIp()
+        if (ip == null) {
+                AppState.setServerRunning(false)
+                AppState.showToast(AppI18n.tr(this, "no_wifi_title", store.language), "error")
+                stopServerAndSelf()
+                return
+        }
+        acquireLocks()
         val port = store.port
         val srv = HttpServer(
             context = applicationContext,
@@ -125,7 +131,12 @@ class AirShareForegroundService : Service() {
         autoOffJob?.cancel()
         autoOffJob = serviceScope.launch {
             while (isActive && AppState.serverRunning.value) {
-                delay(10_000L)
+                delay(3_000L)
+                if (store.getWifiIp() == null) {
+                        AppState.showToast(AppI18n.tr(this@AirShareForegroundService, "no_wifi", store.language), "error")
+                        stopServerAndSelf()
+                        break
+                }
                 val mins = store.autoOffMinutes
                 val srv = httpServer
                 if (mins > 0 && srv != null && srv.getIdleSeconds() >= mins * 60L) {
