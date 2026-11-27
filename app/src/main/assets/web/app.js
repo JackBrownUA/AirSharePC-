@@ -190,7 +190,7 @@
     btnDel.textContent = `🗑 ${t("web_delete_btn")} (${n})`;
 if (btnHide) {
   btnHide.style.display = (n > 0 && canEdit) ? "inline-flex" : "none";
-  btnHide.textContent = `👁 ${t("web_hide_btn")} (${n})`;
+  btnHide.textContent = `👁 ${t("web_ctx_hide")} (${n})`;
 }
   }
 
@@ -935,10 +935,10 @@ function openCtxMenu(ev, item) {
   const addSep = () => { const d = document.createElement("div"); d.className = "ctx-sep"; m.appendChild(d); };
 
   if (isDir) {
-    addItem("📂 " + (t("web_open") || "Open"), () => { state.curDir = item.rel_path; loadFiles(); });
+    addItem("📂 " + (t("web_ctx_open") || "Open"), () => { state.curDir = item.rel_path; loadFiles(); });
     addItem("⬇ ZIP", () => { window.location.href = "/zip?dir=" + encodeURIComponent(item.rel_path); });
   } else {
-    addItem("👁 " + (t("web_open") || "Open"), () => {
+    addItem("👁 " + (t("web_ctx_open") || "Open"), () => {
       const k = item.kind || "other";
       if (k === "img" || k === "image" || k === "vid" || k === "video" || k === "aud" || k === "audio") openCinema(item);
       else window.open("/file/" + encPath(item.rel_path), "_blank");
@@ -968,7 +968,7 @@ function openCtxMenu(ev, item) {
     });
     addItem("📁 " + (t("web_move") || "Move"), () => openFolderPicker("move", [item.rel_path]));
     addItem("📋 " + (t("web_copy") || "Copy"), () => openFolderPicker("copy", [item.rel_path]));
-    addItem("👁 " + (t("web_hide_btn") || "Hide"), async () => {
+    addItem("👁 " + (t("web_ctx_hide") || "Hide"), async () => {
       await apiOp("hide", { rel_path: item.rel_path });
       reloadCurrentTab();
     });
@@ -1288,7 +1288,7 @@ function initSkyCanvas() {
           reloadCurrentTab();
         }
       } else {
-        const r = await fetch("/api/auth/request", {
+        const r = await fetch("/auth/start", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ mode: "biometric", action: "upgrade_trusted", folder_key: state.activeFolder || "" })
