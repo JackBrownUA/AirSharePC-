@@ -77,7 +77,7 @@
   "pin_hint": "Enter PIN",
   "pin_new": "New PIN",
   "pin_save": "Save PIN",
-  "pin_subtitle": "PIN is required and embedded into the link:",
+  "pin_subtitle": "PIN for signing in from your PC browser:",
   "pin_title": "Security & PIN",
   "port_folder_fmt": "Port {port} • {folder}",
   "port_save": "Save Port",
