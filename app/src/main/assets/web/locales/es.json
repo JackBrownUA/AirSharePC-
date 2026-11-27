@@ -77,7 +77,7 @@
   "pin_hint": "Introduce el PIN",
   "pin_new": "Nuevo PIN",
   "pin_save": "Guardar PIN",
-  "pin_subtitle": "El PIN es obligatorio y se incluye en el enlace:",
+  "pin_subtitle": "PIN para iniciar sesión desde el navegador del PC:",
   "pin_title": "Seguridad y PIN",
   "port_folder_fmt": "Puerto {port} • {folder}",
   "port_save": "Guardar puerto",
