@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="__INIT_LANG__" data-theme="__INIT_THEME__">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AirShare PC</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <div id="bg-scene">
+    <div class="bg-layer" id="layer-far"></div>
+    <div class="bg-layer" id="layer-near"></div>
+  </div>
+
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-row">
+        <div class="brand-logo">A</div>
+        <div>
+          <div class="brand-title">AirShare PC</div>
+          <div class="brand-meta">
+            <span id="role-badge" class="badge badge-trusted"></span>
+            <span id="active-folder-label"></span>
+          </div>
+        </div>
+      </div>
+      <div class="top-controls">
+        <button class="btn btn-access" id="btn-access" type="button" style="display:none;"></button>
+        <button class="btn" id="btn-wide" type="button"></button>
+        <button class="btn active" id="btn-parallax" type="button"></button>
+        <button class="btn" id="btn-theme" type="button">☀ / 🌙</button>
+        <select class="lang-select" id="lang-select">
+          <option value="en">EN</option>
+          <option value="ru">RU</option>
+          <option value="uk">UK</option>
+          <option value="es">ES</option>
+          <option value="de">DE</option>
+          <option value="lt">LT</option>
+        </select>
+      </div>
+    </header>
+
+    <div class="nav-row">
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="files" id="tab-files"></button>
+        <button class="tab-btn" data-tab="gallery" id="tab-gallery"></button>
+        <button class="tab-btn" data-tab="recent" id="tab-recent"></button>
+        <button class="tab-btn" data-tab="trash" id="tab-trash" style="display:none;"></button>
+      </div>
+      <div class="search-wrap">
+        <input class="search-input" id="search-input" type="search">
+      </div>
+    </div>
+
+    <div class="action-bar" id="action-bar">
+      <div class="action-left">
+        <label class="btn" style="gap:7px;">
+          <input type="checkbox" id="cb-select-all" class="file-cb">
+          <span id="lbl-select-all"></span>
+        </label>
+        <button class="btn btn-primary" id="btn-upload" type="button" style="display:none;"></button>
+        <input type="file" id="file-input" multiple style="display:none;">
+        <button class="btn" id="btn-mkdir" type="button" style="display:none;"></button>
+        <button class="btn" id="btn-hidden" type="button" style="display:none;"></button>
+        <button class="btn btn-danger" id="btn-empty-trash" type="button" style="display:none;"></button>
+      </div>
+      <div class="action-right">
+        <button class="btn btn-zip" id="btn-download-zip" type="button" style="display:none;"></button>
+        <button class="btn" id="btn-bulk-move" type="button" style="display:none;"></button>
+        <button class="btn" id="btn-bulk-copy" type="button" style="display:none;"></button>
+        <button class="btn btn-danger" id="btn-bulk-delete" type="button" style="display:none;"></button>
+      </div>
+    </div>
+
+    <div class="dropzone" id="dropzone" style="display:none;"></div>
+    <div class="upload-progress" id="upload-progress">
+      <div id="upload-status-text" style="font-size:13px;font-weight:600;"></div>
+      <div class="progress-track"><div class="progress-fill" id="upload-fill"></div></div>
+    </div>
+
+    <div class="favorites-strip" id="favorites-strip" style="display:none;"></div>
+    <div class="breadcrumbs" id="breadcrumbs"></div>
+
+    <main id="content-area"></main>
+    <div class="pager" id="pager" style="display:none;"></div>
+
+    <footer class="app-footer">Crafted by JackBrownUA • Powered by Gemini</footer>
+  </div>
+
+  <div class="modal-backdrop" id="modal-delete">
+    <div class="modal-card">
+      <div class="modal-title" id="del-modal-title"></div>
+      <div class="modal-sub" id="del-modal-hint"></div>
+      <div class="modal-actions">
+        <button class="btn" id="del-cancel" type="button"></button>
+        <button class="btn btn-danger" id="del-confirm" type="button"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modal-folder-picker">
+    <div class="modal-card">
+      <div class="modal-title" id="picker-title"></div>
+      <div class="folder-picker-list" id="picker-list"></div>
+      <div class="modal-actions">
+        <button class="btn" id="picker-cancel" type="button"></button>
+        <button class="btn btn-primary" id="picker-confirm" type="button"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modal-access">
+    <div class="modal-card">
+      <div class="modal-title" id="access-title"></div>
+      <div class="modal-sub" id="access-sub"></div>
+      <div class="access-grid" id="access-grid"></div>
+      <div id="access-confirm-area" style="display:none;">
+        <div id="access-status" class="status-box"></div>
+        <div id="access-code" class="code-big" style="display:none;"></div>
+        <div style="display:flex;gap:8px;margin-bottom:8px;">
+          <button class="btn btn-primary" id="access-btn-bio" type="button" style="flex:1;"></button>
+          <button class="btn" id="access-btn-pairs" type="button" style="flex:1;"></button>
+        </div>
+        <details style="margin-top:6px;">
+          <summary id="access-pin-summary" style="cursor:pointer;font-size:12px;color:var(--muted);text-align:center;"></summary>
+          <form id="access-pin-form" style="display:flex;gap:6px;margin-top:8px;">
+            <input class="login-input" id="access-pin-input" type="password" inputmode="numeric" style="margin:0;flex:1;padding:8px;">
+            <button class="btn btn-primary" type="submit">OK</button>
+          </form>
+        </details>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="access-close" type="button"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modal-cinema">
+    <div class="modal-card cinema-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div id="cinema-title" style="font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+        <div style="display:flex;gap:8px;">
+          <a class="btn btn-primary" id="cinema-dl" download>⬇</a>
+          <button class="btn" id="cinema-close" type="button">✕</button>
+        </div>
+      </div>
+      <div id="cinema-body" style="display:flex;justify-content:center;align-items:center;"></div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modal-sha">
+    <div class="modal-card">
+      <div class="modal-title" id="sha-title"></div>
+      <div class="modal-sub" id="sha-file"></div>
+      <code id="sha-value" style="display:block;word-break:break-all;padding:10px;border-radius:10px;background:var(--card);border:1px solid var(--border);font-size:12px;"></code>
+      <div class="modal-actions">
+        <button class="btn" id="sha-close" type="button"></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script>
+    window.__INIT_LANG__ = "__INIT_LANG__";
+    window.__INIT_THEME__ = "__INIT_THEME__";
+    window.__I18N__ = __INIT_I18N__;
+  </script>
+  <script src="/assets/app.js"></script>
+</body>
+</html>
