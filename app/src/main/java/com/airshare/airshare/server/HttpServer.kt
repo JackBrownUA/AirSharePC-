@@ -286,6 +286,8 @@ class HttpServer(
                             .put("trash_path", File(storage, FileOps.TRASH_DIR_NAME).absolutePath),
                     )
                 }
+               method == "GET" && path == "/api/status" -> { sendJson(out, 200, JSONObject().put("trusted", session.trusted).put("active_folder", store.activeFolderKey).put("show_hidden", session.trusted && store.showHidden).put("lang", lang)) }
+                method == "POST" && path == "/api/role" -> { val raw = readBodyBytes(ins, headers, 4096).toString(Charsets.UTF_8); val obj = try { JSONObject(raw.ifBlank { "{}" }) } catch (_: Exception) { JSONObject() }; if (obj.optBoolean("trusted", false)) { sendJson(out, 403, JSONObject().put("error", "Trusted device required")) } else { val tok = SecurityManager.createSessionToken(ip, store.password, trusted = false); sendJson(out, 200, JSONObject().put("ok", true).put("trusted", false), extraHeaders = mapOf("Set-Cookie" to "airshare_auth=$tok; HttpOnly; Path=/; SameSite=Lax")) } }
                 method == "GET" && path == "/api/folders" -> {
                     if (!session.trusted) {
                         sendJson(out, 403, JSONObject().put("error", "Trusted device required"))
@@ -468,11 +470,12 @@ class HttpServer(
                 sendJson(out, 200, JSONObject().put("ok", true).put("folder_key", folderKey))
                 return
             }
-            val tok = SecurityManager.createSessionToken(ip, store.password, trusted = true)
+            val isFirstConnect = store.recentIps.none { it.substringAfterLast("•").trim() == ip }; val startTrusted = !isFirstConnect; if (isFirstConnect) { val ch = SecurityManager.createChallenge(ip = ip, device = detectDeviceLabel(headers["user-agent"]), mode = "biometric", action = "role_select", targetFolderKey = store.activeFolderKey); AppState.setPendingChallenge(ch) }
+            val tok = SecurityManager.createSessionToken(ip, store.password, trusted = startTrusted)
             sendJson(
                 out,
                 200,
-                JSONObject().put("ok", true).put("trusted", true),
+                JSONObject().put("ok", true).put("trusted", startTrusted),
                 extraHeaders = mapOf("Set-Cookie" to "airshare_auth=$tok; HttpOnly; Path=/; SameSite=Lax"),
             )
             return
@@ -765,7 +768,7 @@ class HttpServer(
 
         val size = file.length()
         val ext = file.extension.lowercase(Locale.ROOT)
-        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
+        val mime = when (ext) { "mp4", "m4v" -> "video/mp4"; "webm" -> "video/webm"; "mkv" -> "video/x-matroska"; "mov" -> "video/quicktime"; "avi" -> "video/x-msvideo"; "mp3" -> "audio/mpeg"; "m4a" -> "audio/mp4"; "ogg" -> "audio/ogg"; "wav" -> "audio/wav"; "flac" -> "audio/flac"; "jpg", "jpeg" -> "image/jpeg"; "png" -> "image/png"; "webp" -> "image/webp"; "gif" -> "image/gif"; else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream" }
         val sandboxed = ".$ext" in SecurityManager.SANDBOX_EXTS
         val forceAttach = asAttachment || sandboxed
 
@@ -794,7 +797,7 @@ class HttpServer(
                     }
                 } else {
                     val sVal = sStr.toLongOrNull()
-                    val eVal = if (eStr.isEmpty()) size - 1L else eStr.toLongOrNull()
+                    val eVal = if (eStr.isEmpty()) { if (sVal != null && (mime.startsWith("video/") || mime.startsWith("audio/"))) (sVal + 8L * 1024L * 1024L - 1L).coerceAtMost(size - 1L) else size - 1L } else eStr.toLongOrNull()
                     if (sVal == null || eVal == null || sVal < 0L || sVal >= size || eVal < sVal) {
                         writeHeaders(out, 416, "Range Not Satisfiable", "text/plain", 0L, mapOf("Content-Range" to "bytes */$size"))
                         out.flush()
@@ -829,7 +832,7 @@ class HttpServer(
                 out.write(buf, 0, r)
                 left -= r
                 done += r
-                if (forceAttach) {
+                if (forceAttach || (!isThumb && size >= 65536L)) {
                     val now = System.currentTimeMillis()
                     if (now - lastProg >= 150L || left == 0L) {
                         lastProg = now
@@ -839,7 +842,7 @@ class HttpServer(
             }
         }
         out.flush()
-        if (forceAttach && start == 0L) {
+        if (!isThumb && size > 0L && start == 0L && (forceAttach || left == 0L)) {
             val lbl = AppI18n.tr(context, "downloaded", store.language)
             AppState.recordTransfer("${file.name} ($lbl • ${SettingsStore.formatSize(size)})", "download")
             onTransferCompleted()
