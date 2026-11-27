@@ -85,6 +85,7 @@ import com.airshare.airshare.server.SecurityManager
 import com.airshare.airshare.service.AirShareForegroundService
 import com.airshare.airshare.ui.AirSharePalettes
 import com.airshare.airshare.ui.AirShareTheme
+import com.airshare.airshare.ui.AppSplashOverlay
 import com.airshare.airshare.ui.AuthChallengeModal
 import com.airshare.airshare.ui.DrawerMenuRowItem
 import com.airshare.airshare.ui.OriginalBottomNav
@@ -230,6 +231,7 @@ class MainActivity : FragmentActivity() {
         var showHelpModal by remember { mutableStateOf(false) }
         var showAllStorageWarn by remember { mutableStateOf(false) }
         var showWifiModal by remember { mutableStateOf(false) }
+        var showSplash by remember { mutableStateOf(true) }
 
         val serverRunning by AppState.serverRunning.collectAsState()
         val serverUrl by AppState.serverUrl.collectAsState()
@@ -950,6 +952,8 @@ class MainActivity : FragmentActivity() {
                     Text(t("no_wifi_body"), fontSize = 12.5.sp, color = palette.subtext)
                 }
             }
+
+            AppSplashOverlay(visible = showSplash, palette = palette, onDismiss = { showSplash = false })
 
             if (showHelpModal) {
                 OriginalModalDialog(
