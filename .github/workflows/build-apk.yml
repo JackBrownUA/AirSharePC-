@@ -11,6 +11,26 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore Original AirShare PC Icon
+        run: |
+          COMMIT=$(git log -1 --diff-filter=A --format=%H -- icon.png)
+          if [ -n "$COMMIT" ]; then
+            git show "$COMMIT:icon.png" > orig_icon.png
+            mkdir -p app/src/main/res/drawable-nodpi
+            convert orig_icon.png -gravity center -crop 72%x72%+0+0 +repage -resize 432x432 app/src/main/res/drawable-nodpi/ic_launcher_fg.png
+            convert orig_icon.png -resize 512x512 app/src/main/res/drawable-nodpi/app_logo.png
+            for pair in "mipmap-mdpi:48" "mipmap-hdpi:72" "mipmap-xhdpi:96" "mipmap-xxhdpi:144" "mipmap-xxxhdpi:192"; do
+              DIR="app/src/main/res/${pair%%:*}"
+              SZ="${pair##*:}"
+              mkdir -p "$DIR"
+              convert orig_icon.png -gravity center -crop 72%x72%+0+0 +repage -resize "${SZ}x${SZ}" "$DIR/ic_launcher.png"
+              cp "$DIR/ic_launcher.png" "$DIR/ic_launcher_round.png"
+            done
+            rm -f orig_icon.png
+          fi
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
