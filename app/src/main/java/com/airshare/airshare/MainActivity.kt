@@ -98,7 +98,8 @@ import java.util.Locale
 class MainActivity : FragmentActivity() {
 
     private lateinit var store: SettingsStore
-
+    private val resumeTick = mutableIntStateOf(0)
+    
     private val permLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { }
@@ -117,6 +118,7 @@ class MainActivity : FragmentActivity() {
     override fun onResume() {
         super.onResume()
         AppState.isActivityInForeground = true
+            resumeTick.intValue++
     }
 
     override fun onPause() {
@@ -271,8 +273,13 @@ class MainActivity : FragmentActivity() {
 
         val storageStats = remember(serverRunning, history.size) { store.getStorageStats() }
         val devName = remember { store.getDeviceName() }
-        val hasFullPerm = store.hasFullStoragePermission()
-
+        var hasFullPerm by remember { mutableStateOf(store.hasFullStoragePermission()) }
+        val rTick by resumeTick
+        LaunchedEffect(rTick) {
+            hasFullPerm = store.hasFullStoragePermission()
+            wifiIp = store.getWifiIp()
+        }
+        
         AirShareTheme(darkTheme = darkTheme) {
             ModalNavigationDrawer(
                 drawerState = drawerState,
@@ -377,7 +384,9 @@ class MainActivity : FragmentActivity() {
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(15.dp))
                                     .clickable {
-                                        if (serverRunning) AirShareForegroundService.stop(this@MainActivity)
+                                        wifiIp = store.getWifiIp()
+                                        if (!serverRunning && wifiIp == null) showWifiModal = true
+                                        else if (serverRunning) AirShareForegroundService.stop(this@MainActivity)
                                         else AirShareForegroundService.start(this@MainActivity)
                                     },
                                 shape = RoundedCornerShape(15.dp),
