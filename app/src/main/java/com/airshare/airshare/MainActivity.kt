@@ -698,7 +698,7 @@ class MainActivity : FragmentActivity() {
             }
 
             if (showDevicesModal) {
-                val ips = remember(devicesVer, showDevicesModal) { store.recentIps }
+                val ver = devicesVer; val ips = remember(ver, showDevicesModal) { store.recentIps }
                 OriginalModalDialog(
                     palette = palette,
                     title = t("devices_title"),
@@ -709,9 +709,9 @@ class MainActivity : FragmentActivity() {
                     if (ips.isEmpty()) {
                         Text(t("no_devices_yet"), fontSize = 12.5.sp, color = palette.subtext)
                     } else {
-                        ips.forEach { ip ->
-                            val isTrusted = SecurityManager.isIpTrusted(ip)
-                            val isDisc = SecurityManager.isIpDisconnected(ip)
+                        ips.forEach { entry -> val cleanIp = entry.substringAfterLast("•").trim()
+                            val isTrusted = remember(ver, cleanIp) { SecurityManager.isIpTrusted(cleanIp) }
+                            val isDisc = remember(ver, cleanIp) { SecurityManager.isIpDisconnected(cleanIp) }
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
                                 color = palette.drawerCard,
@@ -720,20 +720,20 @@ class MainActivity : FragmentActivity() {
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 Column(Modifier.padding(10.dp)) {
-                                    Text(ip, color = palette.text, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
+                                    Text(entry, color = palette.text, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
                                     Spacer(Modifier.height(5.dp))
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         FilterChip(
                                             selected = isTrusted,
                                             onClick = {
-                                                SecurityManager.setIpTrusted(ip, !isTrusted)
+                                                SecurityManager.setIpTrusted(cleanIp, !isTrusted)
                                                 AppState.bumpDevices()
                                             },
                                             label = { Text(if (isTrusted) t("btn_trust") else t("btn_guest"), fontSize = 11.sp) },
                                         )
                                         OutlinedButton(
                                             onClick = {
-                                                SecurityManager.setIpDisconnected(ip, !isDisc)
+                                                SecurityManager.setIpDisconnected(cleanIp, !isDisc)
                                                 AppState.bumpDevices()
                                             },
                                         ) {
