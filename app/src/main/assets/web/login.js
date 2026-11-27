@@ -145,6 +145,7 @@
 
   document.addEventListener("DOMContentLoaded", () => {
     const savedTheme = localStorage.getItem("airshare_theme") || window.__INIT_THEME__ || "dark";
+    document.body.classList.remove("dark","light");document.body.classList.add(window.__INIT_THEME__||"dark");
     document.documentElement.setAttribute("data-theme", savedTheme);
 
     document.getElementById("login-sub").textContent = t("web_auth_prompt_sub");
