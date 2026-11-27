@@ -151,7 +151,7 @@ class AirShareForegroundService : Service() {
     private fun sendLockoutNotification(ip: String, attempts: Int) {
         val lang = store.language
         val title = AppI18n.tr(this, "notif_lockout_title", lang)
-        val body = AppI18n.tr(this, "notif_lockout_body", lang, "count" to attempts, "ip" to ip, "sec" to 300)
+        val body = AppI18n.tr(this, "notif_lockout_body", lang, "attempts" to attempts, "ip" to ip)
         sendAlertNotification(NOTIF_LOCKOUT_ID, title, body)
     }
 
@@ -197,8 +197,8 @@ class AirShareForegroundService : Service() {
             this,
             "notif_stats_fmt",
             lang,
-            "sent" to AppState.sentCount.value,
-            "received" to AppState.receivedCount.value,
+            "up" to AppState.sentCount.value,
+            "down" to AppState.receivedCount.value,
         )
         val url = AppState.serverUrl.value
         val bigText = if (url.isNotBlank()) "$stats\n$url" else stats
