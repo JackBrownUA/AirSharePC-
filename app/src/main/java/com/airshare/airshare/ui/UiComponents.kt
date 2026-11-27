@@ -60,6 +60,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -72,6 +73,9 @@ import androidx.compose.ui.window.DialogProperties
 import com.airshare.airshare.SettingsStore
 import com.airshare.airshare.TransferProgress
 import com.airshare.airshare.server.AuthChallenge
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 @Composable
 fun OriginalHeader(
@@ -155,23 +159,14 @@ fun RadarHeroCard(
     onCopyAddress: () -> Unit,
 ) {
     val transition = rememberInfiniteTransition(label = "radar")
-    val pulse by transition.animateFloat(
+    val wavePhase by transition.animateFloat(
         initialValue = 0f,
-        targetValue = 1f,
+        targetValue = (2.0 * PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 3200, easing = LinearEasing),
+            animation = tween(durationMillis = 3000, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
-        label = "pulse",
-    )
-    val sweepAngle by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 3600, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "sweep",
+        label = "wavePhase",
     )
 
     Surface(
@@ -191,60 +186,43 @@ fun RadarHeroCard(
                 .fillMaxSize()
                 .clipToBounds(),
         ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val centerY = size.height * 0.25f
-                val center = Offset(size.width / 2f, centerY)
-                val maxR = minOf(centerY - 10.dp.toPx(), size.width * 0.28f).coerceAtLeast(36.dp.toPx())
+Canvas(modifier = Modifier.fillMaxSize()) {
+    val centerY = size.height * 0.25f
+val center = Offset(size.width / 2f, centerY)
+val maxR = minOf(centerY - 8.dp.toPx(), size.width * 0.26f, 66.dp.toPx()).coerceAtLeast(38.dp.toPx())
 
-                drawCircle(
-                    color = palette.radarGlow,
-                    radius = maxR * 0.50f,
-                    center = center,
-                )
+drawCircle(
+    color = palette.radarGlow,
+    radius = maxR * 0.78f,
+    center = center,
+)
+val radii = listOf(maxR * 0.62f, maxR * 0.81f, maxR * 1.00f)
+val amps = if (serverRunning) listOf(1.6.dp.toPx(), 2.1.dp.toPx(), 2.6.dp.toPx()) else listOf(0f, 0f, 0f)
+val steps = 72
+val ringColor = if (serverRunning) palette.green.copy(alpha = 0.48f) else palette.radarRing
 
-                if (serverRunning) {
-                    for (i in 0..2) {
-                        val phase = (pulse + i / 3f) % 1f
-                        val r = maxR * (0.34f + 0.66f * phase)
-                        val alpha = (1f - phase) * 0.42f
-                        drawCircle(
-                            color = palette.green.copy(alpha = alpha),
-                            radius = r,
-                            center = center,
-                            style = Stroke(width = 1.6.dp.toPx()),
-                        )
-                    }
-                    val arcR = maxR * 0.78f
-                    drawArc(
-                        color = palette.green.copy(alpha = 0.55f),
-                        startAngle = sweepAngle,
-                        sweepAngle = 78f,
-                        useCenter = false,
-                        topLeft = Offset(center.x - arcR, center.y - arcR),
-                        size = Size(arcR * 2f, arcR * 2f),
-                        style = Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round),
-                    )
-                    val innerArcR = maxR * 0.52f
-                    drawArc(
-                        color = palette.blue.copy(alpha = 0.45f),
-                        startAngle = -sweepAngle * 1.3f,
-                        sweepAngle = 64f,
-                        useCenter = false,
-                        topLeft = Offset(center.x - innerArcR, center.y - innerArcR),
-                        size = Size(innerArcR * 2f, innerArcR * 2f),
-                        style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round),
-                    )
-                } else {
-                    for (f in listOf(0.46f, 0.72f, 0.98f)) {
-                        drawCircle(
-                            color = palette.radarRing,
-                            radius = maxR * f,
-                            center = center,
-                            style = Stroke(width = 1.1.dp.toPx()),
-                        )
-                    }
-                }
-            }
+radii.forEachIndexed { idx, baseR ->
+val amp = amps[idx]
+val phase = if (serverRunning) wavePhase + idx * 1.15f else 0f
+val path = Path()
+for (s in 0 until steps) {
+val ang = ((2.0 * PI * s) / steps).toFloat()
+val wave = if (amp > 0f) {
+amp * sin(6f * ang + phase) + (amp * 0.35f) * cos(3f * ang - phase)
+} else 0f
+val r = baseR + wave
+val px = center.x + cos(ang) * r
+val py = center.y + sin(ang) * r
+if (s == 0) path.moveTo(px, py) else path.lineTo(px, py)
+}
+path.close()
+drawPath(
+path = path,
+color = ringColor,
+style = Stroke(width = if (serverRunning) 1.5.dp.toPx() else 1.15.dp.toPx()),
+)
+}
+}
 
             Column(
                 modifier = Modifier
@@ -389,9 +367,31 @@ fun RecentTransfersCard(
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.SpaceEvenly,
         ) {
+            fun parseEntry(entry: String): Triple<String, String, String> {
+                val parts = entry.split("•", limit = 2)
+                val title = parts[0].trim()
+                val meta = if (parts.size > 1) parts[1].trim() else ""
+                val lower = title.lowercase()
+                val badge = when {
+                    lower.endsWith(".zip") || lower.endsWith(".rar") || lower.endsWith(".7z") || lower.endsWith(".tar") || lower.endsWith(".gz") -> "ZIP"
+                    lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".webp") || lower.endsWith(".gif") || lower.endsWith(".heic") -> "IMG"
+                    entry.contains("↑") || lower.startsWith("up:") || meta.contains("upload", ignoreCase = true) -> "UP"
+                    entry.contains("↓") || lower.startsWith("dl:") || meta.contains("download", ignoreCase = true) -> "DL"
+                    else -> "FILE"
+                }
+                return Triple(badge, title, meta)
+            }
+
+            val firstParsed = if (history.isNotEmpty()) parseEntry(history[0]) else null
+            val row1Badge = when {
+                progress.active && progress.direction == "upload" -> "UP"
+                progress.active -> "DL"
+                firstParsed != null -> firstParsed.first
+                else -> "ZIP"
+            }
             val row1Title = when {
                 progress.active -> progress.filename
-                history.isNotEmpty() -> history[0]
+                firstParsed != null -> firstParsed.second
                 else -> noActiveText
             }
             val row1Ratio = when {
@@ -407,12 +407,12 @@ fun RecentTransfersCard(
             }
             val row1Sub = when {
                 progress.active -> "${SettingsStore.formatSize(progress.transferredBytes)} / ${SettingsStore.formatSize(progress.totalBytes)}"
-                history.isNotEmpty() -> history[0]
+                firstParsed != null -> firstParsed.third
                 else -> waitingText
             }
 
             TransferBadgeRow(
-                badgeText = if (progress.active && progress.direction == "upload") "UP" else "ZIP",
+                badgeText = row1Badge,
                 badgeColor = palette.amber,
                 title = row1Title,
                 pctText = row1Pct,
@@ -422,13 +422,13 @@ fun RecentTransfersCard(
             )
 
             if (history.size > 1) {
-                val second = history[1]
+                val (badge2, title2, meta2) = parseEntry(history[1])
                 TransferBadgeRow(
-                    badgeText = "FILE",
+                    badgeText = badge2,
                     badgeColor = palette.blue,
-                    title = second,
+                    title = title2,
                     pctText = "100%",
-                    subText = second,
+                    subText = meta2,
                     ratio = 1f,
                     palette = palette,
                 )
