@@ -2,108 +2,134 @@
 <html lang="__INIT_LANG__" data-theme="__INIT_THEME__">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <title>AirShare PC</title>
   <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body class="__INIT_THEME__">
   <canvas id="skyCanvas"></canvas>
-  <div id="bg-scene">
+  <div id="bg-scene" style="display:none;">
     <div class="bg-layer" id="layer-far"></div>
     <div class="bg-layer" id="layer-near"></div>
   </div>
 
-  <div class="app-shell">
-    <header class="topbar">
-      <div class="brand-row">
-        <div class="brand-logo">A</div>
-        <div>
-          <div class="brand-title">AirShare PC</div>
-          <div class="brand-meta">
-            <span id="role-badge" class="badge badge-trusted"></span>
-            <span id="active-folder-label"></span>
-          </div>
-        </div>
+  <!-- Top Floating Controls (Theme Switch, Parallax 3D Switch, Flag Language Menu) -->
+  <div class="top-bar-floating">
+    <div class="top-left-controls">
+      <div class="ctrl-pill">
+        <span>☀ / 🌙</span>
+        <label class="ios-switch">
+          <input type="checkbox" id="themeToggle">
+          <span class="ios-slider"></span>
+        </label>
       </div>
-      <div class="top-controls">
-        <button class="btn btn-access" id="btn-access" type="button" style="display:none;"></button>
-        <button class="btn" id="btn-wide" type="button"></button>
-        <button class="btn active" id="btn-parallax" type="button"></button>
-        <button class="btn" id="btn-theme" type="button">☀ / 🌙</button>
-       <div class="lang-menu-wrap" id="lang-menu-wrap"><button class="btn lang-btn" id="lang-btn" type="button"></button><div class="lang-dropdown" id="lang-dropdown" style="display:none;"></div></div>
+      <div class="ctrl-pill">
+        <span id="lbl-parallax">✨ Parallax 3D</span>
+        <label class="ios-switch">
+          <input type="checkbox" id="parallaxToggle" checked>
+          <span class="ios-slider"></span>
+        </label>
+      </div>
+    </div>
+    <div class="top-right-controls">
+      <div class="lang-menu-wrap" id="lang-menu-wrap">
+        <button class="ctrl-pill lang-btn" id="lang-btn" type="button"></button>
+        <div class="lang-dropdown" id="lang-dropdown" style="display:none;"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <!-- Central Glassmorphic Header Card & Drag-and-Drop Zone -->
+    <header class="header-card" id="header-dropzone">
+      <div class="header-title-row">
+        <h1 class="header-title">AirShare PC</h1>
+        <span id="role-badge" class="badge badge-trusted" role="button" tabindex="0"></span>
+      </div>
+      <div class="header-sub-row">
+        <span id="active-folder-label" class="folder-sub"></span>
+      </div>
+      <div class="breadcrumbs" id="breadcrumbs"></div>
+
+      <div class="header-actions" id="action-bar">
+        <button class="btn-upload-hero" id="btn-upload" type="button" style="display:none;"></button>
+        <input type="file" id="file-input" multiple style="display:none;">
+        <button class="mini-pill" id="btn-mkdir" type="button" style="display:none;"></button>
+        <button class="mini-pill btn-access" id="btn-access" type="button" style="display:none;"></button>
+        <button class="mini-pill desktop-only" id="btn-wide" type="button"></button>
+        <button class="mini-pill" id="btn-hidden" type="button" style="display:none;"></button>
+        <button class="mini-pill btn-danger" id="btn-empty-trash" type="button" style="display:none;"></button>
+      </div>
+
+      <div class="bulk-actions" id="bulk-actions">
+        <button class="mini-pill btn-zip" id="btn-download-zip" type="button" style="display:none;"></button>
+        <button class="mini-pill" id="btn-bulk-move" type="button" style="display:none;"></button>
+        <button class="mini-pill" id="btn-bulk-copy" type="button" style="display:none;"></button>
+        <button class="mini-pill" id="btn-bulk-hide" type="button" style="display:none;"></button>
+        <button class="mini-pill btn-danger" id="btn-bulk-delete" type="button" style="display:none;"></button>
+      </div>
+
+      <div class="header-drop-hint desktop-only" id="dropzone" style="display:none;"></div>
+
+      <div class="upload-progress" id="upload-progress">
+        <div id="upload-status-text" style="font-size:13px;font-weight:600;"></div>
+        <div class="progress-track"><div class="progress-fill" id="upload-fill"></div></div>
       </div>
     </header>
 
-    <div class="nav-row">
-      <div class="tabs">
-        <button class="tab-btn active" data-tab="files" id="tab-files"></button>
-        <button class="tab-btn" data-tab="gallery" id="tab-gallery"></button>
-        <button class="tab-btn" data-tab="recent" id="tab-recent"></button>
-        <button class="tab-btn" data-tab="trash" id="tab-trash" style="display:none;"></button>
-      </div>
-      <div class="search-wrap">
-        <input class="search-input" id="search-input" type="search">
-      </div>
-    </div>
-
-    <div class="action-bar" id="action-bar">
-      <div class="action-left">
-        <label class="btn" style="gap:7px;">
-          <input type="checkbox" id="cb-select-all" class="file-cb">
-          <span id="lbl-select-all"></span>
-        </label>
-        <button class="btn btn-primary" id="btn-upload" type="button" style="display:none;"></button>
-        <input type="file" id="file-input" multiple style="display:none;">
-        <button class="btn" id="btn-mkdir" type="button" style="display:none;"></button>
-        <button class="btn" id="btn-hidden" type="button" style="display:none;"></button>
-        <button class="btn btn-danger" id="btn-empty-trash" type="button" style="display:none;"></button>
-      </div>
-      <div class="action-right">
-        <button class="btn btn-zip" id="btn-download-zip" type="button" style="display:none;"></button>
-        <button class="btn" id="btn-bulk-move" type="button" style="display:none;"></button>
-        <button class="btn" id="btn-bulk-copy" type="button" style="display:none;"></button>
-        <button class="btn" id="btn-bulk-hide" type="button" style="display:none;"></button>
-        <button class="btn btn-danger" id="btn-bulk-delete" type="button" style="display:none;"></button>
-      </div>
-    </div>
-
-    <div class="dropzone" id="dropzone" style="display:none;"></div>
-    <div class="upload-progress" id="upload-progress">
-      <div id="upload-status-text" style="font-size:13px;font-weight:600;"></div>
-      <div class="progress-track"><div class="progress-fill" id="upload-fill"></div></div>
-    </div>
+    <!-- Floating Navigation Tabs -->
+    <nav class="nav-tabs">
+      <button class="tab-btn active" data-tab="files" id="tab-files" type="button"></button>
+      <button class="tab-btn" data-tab="gallery" id="tab-gallery" type="button"></button>
+      <button class="tab-btn" data-tab="recent" id="tab-recent" type="button"></button>
+      <button class="tab-btn" data-tab="trash" id="tab-trash" type="button" style="display:none;"></button>
+    </nav>
 
     <div class="favorites-strip" id="favorites-strip" style="display:none;"></div>
-    <div class="breadcrumbs" id="breadcrumbs"></div>
+
+    <div class="search-wrap">
+      <input class="search-input" id="search-input" type="search" autocomplete="off">
+    </div>
+
+    <div class="select-toolbar" id="select-toolbar">
+      <label class="select-all-label">
+        <input type="checkbox" id="cb-select-all" class="file-cb">
+        <span id="lbl-select-all"></span>
+      </label>
+      <span id="items-count" class="items-count"></span>
+    </div>
 
     <main id="content-area"></main>
     <div class="pager" id="pager" style="display:none;"></div>
-
-    <footer class="app-footer">Crafted by JackBrownUA • Powered by Gemini</footer>
   </div>
 
+  <footer class="app-footer-pill">Crafted by JackBrownUA • Powered by Gemini</footer>
+
+  <!-- Custom Delete Confirmation Modal -->
   <div class="modal-backdrop" id="modal-delete">
     <div class="modal-card">
       <div class="modal-title" id="del-modal-title"></div>
       <div class="modal-sub" id="del-modal-hint"></div>
       <div class="modal-actions">
-        <button class="btn" id="del-cancel" type="button"></button>
-        <button class="btn btn-danger" id="del-confirm" type="button"></button>
+        <button class="mini-pill" id="del-cancel" type="button"></button>
+        <button class="mini-pill btn-danger" id="del-confirm" type="button"></button>
       </div>
     </div>
   </div>
 
+  <!-- Folder Picker Modal (Move / Copy) -->
   <div class="modal-backdrop" id="modal-folder-picker">
     <div class="modal-card">
       <div class="modal-title" id="picker-title"></div>
       <div class="folder-picker-list" id="picker-list"></div>
       <div class="modal-actions">
-        <button class="btn" id="picker-cancel" type="button"></button>
-        <button class="btn btn-primary" id="picker-confirm" type="button"></button>
+        <button class="mini-pill" id="picker-cancel" type="button"></button>
+        <button class="mini-pill btn-primary" id="picker-confirm" type="button"></button>
       </div>
     </div>
   </div>
 
+  <!-- Access Folder Switcher + 3-Method Confirmation Overlay -->
   <div class="modal-backdrop" id="modal-access">
     <div class="modal-card">
       <div class="modal-title" id="access-title"></div>
@@ -113,51 +139,69 @@
         <div id="access-status" class="status-box"></div>
         <div id="access-code" class="code-big" style="display:none;"></div>
         <div style="display:flex;gap:8px;margin-bottom:8px;">
-          <button class="btn btn-primary" id="access-btn-bio" type="button" style="flex:1;"></button>
-          <button class="btn" id="access-btn-pairs" type="button" style="flex:1;"></button>
+          <button class="mini-pill btn-primary" id="access-btn-bio" type="button" style="flex:1;"></button>
+          <button class="mini-pill" id="access-btn-pairs" type="button" style="flex:1;"></button>
         </div>
         <details style="margin-top:6px;">
-          <summary id="access-pin-summary" style="cursor:pointer;font-size:12px;color:var(--muted);text-align:center;"></summary>
+          <summary id="access-pin-summary" style="cursor:pointer;font-size:12px;opacity:0.75;text-align:center;"></summary>
           <form id="access-pin-form" style="display:flex;gap:6px;margin-top:8px;">
             <input class="login-input" id="access-pin-input" type="password" inputmode="numeric" style="margin:0;flex:1;padding:8px;">
-            <button class="btn btn-primary" type="submit">OK</button>
+            <button class="mini-pill btn-primary" type="submit">OK</button>
           </form>
         </details>
       </div>
       <div class="modal-actions">
-        <button class="btn" id="access-close" type="button"></button>
+        <button class="mini-pill" id="access-close" type="button"></button>
       </div>
     </div>
   </div>
 
+  <!-- Original Full-Featured Ambient Cinema Player -->
   <div class="modal-backdrop" id="modal-cinema">
-    <canvas id="ambilightCanvas" class="ambilight-canvas"></canvas>
-    <div class="modal-card cinema-card">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
-        <div id="cinema-title" style="font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
-        <div style="display:flex;gap:8px;">
-          <button class="btn" id="cinema-ambient-btn" type="button"></button>
-          <a class="btn btn-primary" id="cinema-dl" download>⬇</a>
-          <button class="btn" id="cinema-close" type="button">✕</button>
+    <div class="modal-card cinema-card" id="cinema-card">
+      <div class="cinema-head">
+        <div id="cinema-title" class="cinema-title"></div>
+        <div class="cinema-head-btns">
+          <button class="mini-pill active" id="cinema-ambient-btn" type="button">✨ Ambilight</button>
+          <button class="mini-pill" id="c-pip" type="button">📺 PiP</button>
+          <button class="mini-pill" id="c-mini" type="button">🗗</button>
+          <a class="mini-pill btn-primary" id="cinema-dl" download>⬇</a>
+          <button class="mini-pill" id="cinema-close" type="button">✕</button>
         </div>
       </div>
-      <div id="cinema-body" style="display:flex;justify-content:center;align-items:center;"></div>
-      <div class="cinema-controls" id="cinema-controls" style="display:none;"><button class="btn" id="c-play" type="button">▶</button><span id="c-time">0:00 / 0:00</span><input type="range" id="c-seek" min="0" max="100" value="0" step="0.1"><button class="btn" id="c-speed" type="button">1x</button><button class="btn" id="c-fs" type="button">⛶</button></div>
+      <div class="cinema-stage">
+        <canvas id="ambilightCanvas" class="ambilight-canvas"></canvas>
+        <div id="cinema-body" class="cinema-body"></div>
+        <div id="cinema-resume" class="cinema-resume" style="display:none;">
+          <span id="c-resume-text"></span>
+          <button class="mini-pill btn-resume" id="c-resume-btn" type="button">▶</button>
+        </div>
+      </div>
+      <div id="cinema-controls" class="cinema-controls" style="display:none;">
+        <button class="mini-pill cinema-play" id="c-play" type="button">▶</button>
+        <span id="c-time" class="cinema-time">0:00 / 0:00</span>
+        <input id="c-seek" class="cinema-seek" type="range" min="0" max="1000" value="0">
+        <button class="mini-pill" id="c-speed" type="button">1x</button>
+        <button class="mini-pill" id="c-fs" type="button">⛶</button>
+      </div>
     </div>
   </div>
 
+  <!-- SHA-256 Modal -->
   <div class="modal-backdrop" id="modal-sha">
     <div class="modal-card">
       <div class="modal-title" id="sha-title"></div>
       <div class="modal-sub" id="sha-file"></div>
-      <code id="sha-value" style="display:block;word-break:break-all;padding:10px;border-radius:10px;background:var(--card);border:1px solid var(--border);font-size:12px;"></code>
+      <code id="sha-value" style="display:block;word-break:break-all;padding:10px;border-radius:10px;background:rgba(15,23,42,0.5);border:1px solid rgba(255,255,255,0.14);font-size:12px;"></code>
       <div class="modal-actions">
-        <button class="btn" id="sha-close" type="button"></button>
+        <button class="mini-pill" id="sha-close" type="button"></button>
       </div>
     </div>
   </div>
 
+  <!-- Custom Glassmorphic Right-Click Context Menu -->
   <div id="ctxMenu" class="ctx-menu" style="display:none;"></div>
+
   <div id="toast"></div>
 
   <script>
