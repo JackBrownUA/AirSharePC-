@@ -23,8 +23,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.ContentCopy
@@ -36,7 +39,6 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiOff
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
@@ -53,14 +55,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.airshare.airshare.SettingsStore
 import com.airshare.airshare.TransferProgress
 import com.airshare.airshare.server.AuthChallenge
@@ -77,7 +85,7 @@ fun OriginalHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(44.dp),
+            .height(42.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
@@ -87,7 +95,7 @@ fun OriginalHeader(
         ) {
             Box(
                 modifier = Modifier
-                    .size(14.dp)
+                    .size(13.dp)
                     .clip(CircleShape)
                     .background(if (serverRunning) palette.green else palette.red),
             )
@@ -104,12 +112,13 @@ fun OriginalHeader(
         Spacer(Modifier.width(8.dp))
         Surface(
             modifier = Modifier
-                .height(34.dp)
+                .height(33.dp)
                 .clip(RoundedCornerShape(17.dp))
                 .clickable { onWifiClick() },
             shape = RoundedCornerShape(17.dp),
             color = palette.pillBg,
             border = BorderStroke(1.dp, palette.cardBorder),
+            shadowElevation = 6.dp,
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 12.dp),
@@ -119,7 +128,7 @@ fun OriginalHeader(
                     imageVector = if (wifiOnline) Icons.Default.Wifi else Icons.Default.WifiOff,
                     contentDescription = null,
                     tint = if (wifiOnline) palette.green else palette.red,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(15.dp),
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
@@ -150,61 +159,103 @@ fun RadarHeroCard(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2800, easing = LinearEasing),
+            animation = tween(durationMillis = 3200, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
         label = "pulse",
     )
+    val sweepAngle by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 3600, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "sweep",
+    )
 
     Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp)),
+        shape = RoundedCornerShape(24.dp),
         color = palette.radarBg,
-        border = BorderStroke(1.dp, palette.cardBorder),
+        border = BorderStroke(
+            1.dp,
+            Brush.verticalGradient(listOf(palette.highlightBorder, palette.cardBorder)),
+        ),
+        shadowElevation = 14.dp,
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clipToBounds(),
+        ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
-                val center = Offset(size.width / 2f, size.height * 0.28f)
-                val maxR = size.minDimension * 0.44f
+                val centerY = size.height * 0.25f
+                val center = Offset(size.width / 2f, centerY)
+                val maxR = minOf(centerY - 10.dp.toPx(), size.width * 0.28f).coerceAtLeast(36.dp.toPx())
+
+                drawCircle(
+                    color = palette.radarGlow,
+                    radius = maxR * 0.50f,
+                    center = center,
+                )
+
                 if (serverRunning) {
                     for (i in 0..2) {
                         val phase = (pulse + i / 3f) % 1f
-                        val r = maxR * (0.28f + 0.72f * phase)
-                        val alpha = (1f - phase) * 0.35f
+                        val r = maxR * (0.34f + 0.66f * phase)
+                        val alpha = (1f - phase) * 0.42f
                         drawCircle(
                             color = palette.green.copy(alpha = alpha),
                             radius = r,
                             center = center,
-                            style = Stroke(width = 2.dp.toPx()),
+                            style = Stroke(width = 1.6.dp.toPx()),
                         )
                     }
+                    val arcR = maxR * 0.78f
+                    drawArc(
+                        color = palette.green.copy(alpha = 0.55f),
+                        startAngle = sweepAngle,
+                        sweepAngle = 78f,
+                        useCenter = false,
+                        topLeft = Offset(center.x - arcR, center.y - arcR),
+                        size = Size(arcR * 2f, arcR * 2f),
+                        style = Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round),
+                    )
+                    val innerArcR = maxR * 0.52f
+                    drawArc(
+                        color = palette.blue.copy(alpha = 0.45f),
+                        startAngle = -sweepAngle * 1.3f,
+                        sweepAngle = 64f,
+                        useCenter = false,
+                        topLeft = Offset(center.x - innerArcR, center.y - innerArcR),
+                        size = Size(innerArcR * 2f, innerArcR * 2f),
+                        style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round),
+                    )
                 } else {
-                    for (f in listOf(0.45f, 0.72f, 0.98f)) {
+                    for (f in listOf(0.46f, 0.72f, 0.98f)) {
                         drawCircle(
                             color = palette.radarRing,
                             radius = maxR * f,
                             center = center,
-                            style = Stroke(width = 1.2.dp.toPx()),
+                            style = Stroke(width = 1.1.dp.toPx()),
                         )
                     }
                 }
-                drawCircle(
-                    color = palette.radarGlow,
-                    radius = maxR * 0.42f,
-                    center = center,
-                )
             }
 
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 16.dp, vertical = 16.dp),
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.SpaceBetween,
             ) {
                 Box(
                     modifier = Modifier
-                        .weight(0.40f)
+                        .weight(0.42f)
                         .fillMaxWidth(),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -212,7 +263,7 @@ fun RadarHeroCard(
                         imageVector = Icons.Default.Computer,
                         contentDescription = "PC",
                         tint = if (serverRunning) palette.green else palette.text,
-                        modifier = Modifier.size(56.dp),
+                        modifier = Modifier.size(50.dp),
                     )
                 }
 
@@ -229,10 +280,11 @@ fun RadarHeroCard(
                             containerColor = if (serverRunning) palette.red else palette.green,
                             contentColor = Color.White,
                         ),
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp),
                         modifier = Modifier
                             .width(204.dp)
-                            .height(46.dp),
+                            .height(45.dp),
                     ) {
                         Text(
                             text = buttonLabel,
@@ -252,12 +304,13 @@ fun RadarHeroCard(
                     Surface(
                         modifier = Modifier
                             .weight(1f)
-                            .height(38.dp)
+                            .height(37.dp)
                             .clip(RoundedCornerShape(16.dp))
                             .clickable { onCopyAddress() },
                         shape = RoundedCornerShape(16.dp),
                         color = palette.pillBg,
                         border = BorderStroke(1.dp, palette.cardBorder),
+                        shadowElevation = 4.dp,
                     ) {
                         Box(
                             modifier = Modifier.padding(horizontal = 12.dp),
@@ -276,19 +329,20 @@ fun RadarHeroCard(
 
                     Surface(
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(37.dp)
                             .clip(RoundedCornerShape(14.dp))
                             .clickable { onCopyAddress() },
                         shape = RoundedCornerShape(14.dp),
                         color = palette.pillBg,
                         border = BorderStroke(1.dp, palette.cardBorder),
+                        shadowElevation = 4.dp,
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = Icons.Default.ContentCopy,
                                 contentDescription = "Copy",
                                 tint = palette.text,
-                                modifier = Modifier.size(18.dp),
+                                modifier = Modifier.size(17.dp),
                             )
                         }
                     }
@@ -319,11 +373,15 @@ fun RecentTransfersCard(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(20.dp))
             .clickable { onClick() },
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(20.dp),
         color = palette.cardBg,
-        border = BorderStroke(1.dp, palette.cardBorder),
+        border = BorderStroke(
+            1.dp,
+            Brush.verticalGradient(listOf(palette.highlightBorder, palette.cardBorder)),
+        ),
+        shadowElevation = 10.dp,
     ) {
         Column(
             modifier = Modifier
@@ -394,7 +452,7 @@ private fun TransferBadgeRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Surface(
-            modifier = Modifier.size(40.dp),
+            modifier = Modifier.size(38.dp),
             shape = RoundedCornerShape(11.dp),
             color = badgeColor.copy(alpha = 0.18f),
             border = BorderStroke(1.dp, badgeColor.copy(alpha = 0.45f)),
@@ -474,15 +532,19 @@ fun OriginalBottomNav(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(64.dp),
-        shape = RoundedCornerShape(26.dp),
+            .height(55.dp),
+        shape = RoundedCornerShape(23.dp),
         color = palette.cardBg,
-        border = BorderStroke(1.dp, palette.cardBorder),
+        border = BorderStroke(
+            1.dp,
+            Brush.verticalGradient(listOf(palette.highlightBorder, palette.cardBorder)),
+        ),
+        shadowElevation = 14.dp,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+                .padding(horizontal = 6.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             NavTabPill(
@@ -533,9 +595,9 @@ private fun NavTabPill(
     Surface(
         modifier = modifier
             .fillMaxHeight()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(18.dp))
             .clickable { onClick() },
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(18.dp),
         color = if (active) palette.pillActive else Color.Transparent,
     ) {
         Column(
@@ -547,13 +609,13 @@ private fun NavTabPill(
                 imageVector = icon,
                 contentDescription = label,
                 tint = if (active) palette.text else palette.subtext,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(18.dp),
             )
-            Spacer(Modifier.height(2.dp))
+            Spacer(Modifier.height(1.dp))
             Text(
                 text = label,
                 color = if (active) palette.text else palette.subtext,
-                fontSize = 10.5.sp,
+                fontSize = 10.sp,
                 fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -572,7 +634,7 @@ fun DrawerMenuRowItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(44.dp)
+            .height(42.dp)
             .clip(RoundedCornerShape(12.dp))
             .clickable { onClick() }
             .padding(horizontal = 8.dp),
@@ -582,13 +644,13 @@ fun DrawerMenuRowItem(
             imageVector = icon,
             contentDescription = null,
             tint = palette.subtext,
-            modifier = Modifier.size(20.dp),
+            modifier = Modifier.size(19.dp),
         )
-        Spacer(Modifier.width(14.dp))
+        Spacer(Modifier.width(13.dp))
         Text(
             text = label,
             color = palette.text,
-            fontSize = 14.sp,
+            fontSize = 13.5.sp,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -600,19 +662,52 @@ fun DrawerMenuRowItem(
 fun OriginalModalDialog(
     palette: AirSharePalette,
     title: String,
+    compact: Boolean = false,
     onDismiss: () -> Unit,
     buttons: @Composable () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        containerColor = palette.modalBg,
-        titleContentColor = palette.text,
-        textContentColor = palette.subtext,
-        title = { Text(title, fontWeight = FontWeight.Bold, fontSize = 18.sp) },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp), content = content) },
-        confirmButton = buttons,
-    )
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(if (compact) 0.84f else 0.90f)
+                .widthIn(max = if (compact) 330.dp else 400.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = palette.modalBg,
+            border = BorderStroke(
+                1.dp,
+                Brush.verticalGradient(listOf(palette.highlightBorder, palette.cardBorder)),
+            ),
+            shadowElevation = 22.dp,
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(horizontal = 18.dp, vertical = 16.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                Text(
+                    text = title,
+                    color = palette.text,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp,
+                )
+                content()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    buttons()
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -631,95 +726,14 @@ fun AuthChallengeModal(
     var trustedChoice by remember(challenge.id) { mutableStateOf(true) }
     val isAccessChange = challenge.action == "access_change"
 
-    AlertDialog(
-        onDismissRequest = onCancel,
-        containerColor = palette.modalBg,
-        titleContentColor = palette.text,
-        textContentColor = palette.subtext,
-        icon = {
-            Icon(
-                imageVector = if (isAccessChange) Icons.Default.Folder else Icons.Default.Lock,
-                contentDescription = null,
-                tint = palette.blue,
-                modifier = Modifier.size(32.dp),
-            )
-        },
-        title = {
-            Text(
-                text = if (isAccessChange) tr("auth_access_title", emptyArray()) else tr("auth_req_title", emptyArray()),
-                fontWeight = FontWeight.Bold,
-            )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = if (isAccessChange) {
-                        tr("auth_access_sub", arrayOf("ip" to challenge.ip, "folder" to folderName))
-                    } else {
-                        "${challenge.device} (${challenge.ip})\n${tr("auth_req_sub", arrayOf("ip" to challenge.ip))}"
-                    },
-                    fontSize = 13.sp,
-                    color = palette.subtext,
-                )
-
-                if (!isAccessChange) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(
-                            selected = trustedChoice,
-                            onClick = { trustedChoice = true },
-                            label = { Text(tr("auth_trust_full", emptyArray()), fontSize = 12.sp) },
-                        )
-                        FilterChip(
-                            selected = !trustedChoice,
-                            onClick = { trustedChoice = false },
-                            label = { Text(tr("auth_trust_guest", emptyArray()), fontSize = 12.sp) },
-                        )
-                    }
-                }
-
-                if (challenge.mode == "pairs") {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        challenge.pairs.forEach { code ->
-                            Button(
-                                onClick = { onPairClick(code, trustedChoice) },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = palette.blue, contentColor = Color.White),
-                            ) {
-                                Text(code, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-                            }
-                        }
-                    }
-                } else {
-                    if (canUseBiometrics) {
-                        Button(
-                            onClick = { onBiometricClick(trustedChoice) },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = palette.green, contentColor = Color.White),
-                        ) {
-                            Icon(Icons.Default.Fingerprint, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text(tr("auth_btn_bio", emptyArray()))
-                        }
-                    } else {
-                        Text(tr("bio_unavailable", emptyArray()), fontSize = 12.sp, color = palette.amber)
-                        Button(
-                            onClick = { onDirectApprove(trustedChoice) },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = palette.green, contentColor = Color.White),
-                        ) {
-                            Text(tr("auth_btn_allow", emptyArray()))
-                        }
-                    }
-                }
+    OriginalModalDialog(
+        palette = palette,
+        title = if (isAccessChange) tr("auth_access_title", emptyArray()) else tr("auth_req_title", emptyArray()),
+        onDismiss = onCancel,
+        buttons = {
+            TextButton(onClick = onCancel) {
+                Text(tr("cancel", emptyArray()), color = palette.subtext)
             }
-        },
-        confirmButton = {
             OutlinedButton(
                 onClick = onDeny,
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = palette.red),
@@ -727,10 +741,80 @@ fun AuthChallengeModal(
                 Text(tr("auth_deny", emptyArray()))
             }
         },
-        dismissButton = {
-            TextButton(onClick = onCancel) {
-                Text(tr("cancel", emptyArray()))
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = if (isAccessChange) Icons.Default.Folder else Icons.Default.Lock,
+                contentDescription = null,
+                tint = palette.blue,
+                modifier = Modifier.size(22.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = if (isAccessChange) {
+                    tr("auth_access_sub", arrayOf("ip" to challenge.ip, "folder" to folderName))
+                } else {
+                    "${challenge.device} (${challenge.ip})\n${tr("auth_req_sub", arrayOf("ip" to challenge.ip))}"
+                },
+                fontSize = 12.5.sp,
+                color = palette.subtext,
+            )
+        }
+
+        if (!isAccessChange) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = trustedChoice,
+                    onClick = { trustedChoice = true },
+                    label = { Text(tr("auth_trust_full", emptyArray()), fontSize = 12.sp) },
+                )
+                FilterChip(
+                    selected = !trustedChoice,
+                    onClick = { trustedChoice = false },
+                    label = { Text(tr("auth_trust_guest", emptyArray()), fontSize = 12.sp) },
+                )
             }
-        },
-    )
+        }
+
+        if (challenge.mode == "pairs") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                challenge.pairs.forEach { code ->
+                    Button(
+                        onClick = { onPairClick(code, trustedChoice) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = palette.blue, contentColor = Color.White),
+                    ) {
+                        Text(code, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                    }
+                }
+            }
+        } else {
+            if (canUseBiometrics) {
+                Button(
+                    onClick = { onBiometricClick(trustedChoice) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = palette.green, contentColor = Color.White),
+                ) {
+                    Icon(Icons.Default.Fingerprint, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(tr("auth_btn_bio", emptyArray()))
+                }
+            } else {
+                Text(tr("bio_unavailable", emptyArray()), fontSize = 12.sp, color = palette.amber)
+                Button(
+                    onClick = { onDirectApprove(trustedChoice) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = palette.green, contentColor = Color.White),
+                ) {
+                    Text(tr("auth_btn_allow", emptyArray()))
+                }
+            }
+        }
+    }
 }
