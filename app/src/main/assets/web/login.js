@@ -136,7 +136,7 @@
       if (r.ok && d.ok) {
         window.location.href = "/";
       } else {
-        setStatus(d.error || t("toast_bad_pin"), true);
+        setStatus(d.error || t("pin_hint"), true);
       }
     } catch (_) {
       setStatus("Network error", true);
@@ -147,7 +147,7 @@
     const savedTheme = localStorage.getItem("airshare_theme") || window.__INIT_THEME__ || "dark";
     document.documentElement.setAttribute("data-theme", savedTheme);
 
-    document.getElementById("login-sub").textContent = t("auth_req_sub");
+    document.getElementById("login-sub").textContent = t("web_auth_prompt_sub");
     document.getElementById("btn-connect-bio").textContent = "👆 " + t("web_login_use_bio");
     document.getElementById("btn-connect-pairs").textContent = "🔢 " + t("web_login_use_pairs");
     document.getElementById("pin-summary").textContent = "🔑 " + t("web_login_use_pin");
