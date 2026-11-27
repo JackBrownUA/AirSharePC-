@@ -1,24 +1,25 @@
 # AirShare PC
 
-**AirShare PC** — беспроводной локальный файловый сервер для Android (на базе Python и Kivy), позволяющий передавать файлы и папки между смартфоном и ПК по домашней сети Wi-Fi напрямую через браузер.
+**AirShare PC** is a fast, native Android app (Kotlin + Jetpack Compose) for wireless file transfer between your phone and any PC over local Wi-Fi — no cables, cloud uploads, or desktop software required.
 
-## Основные возможности
+## Key Features
 
-- **Обмен файлами через любой браузер**: скачивание отдельных файлов, потоковая упаковка папок и выбранных элементов в ZIP (`_ZipStream`), загрузка файлов с ПК на телефон и поддержка докачки / перемотки медиафайлов (`HTTP 206 Partial Content`).
-- **6 языков интерфейса**: полная локализация мобильного приложения и веб-страницы (**English**, **Español**, **Deutsch**, **Lietuvių**, **Русский**, **Українська**) с автоматическим определением системного языка.
-- **Многоуровневая защита в домашней сети**:
-  - Автоматическая генерация 6-значного криптостойкого PIN-кода (`secrets.randbelow(10**6)`).
-  - Сравнение пароля через `hmac.compare_digest` и блокировка IP на 5 минут (`HTTP 429`) после 5 неверных попыток ввода PIN.
-  - Привязка сокета строго к локальному Wi-Fi интерфейсу (`192.168.x.x` / `10.x.x.x` / `172.16-31.x.x`), исключающая мобильные сети сотовых операторов (`100.64.0.0/10`).
-  - Управление подключёнными компьютерами с возможностью мгновенно отключить любое устройство прямо из приложения.
-  - Защита от обхода директорий (`Path Traversal`), внешних симлинков и перезаписи существующих файлов (`файл (1).ext`).
-- **Работа при выключенном экране**: удержание `PARTIAL_WAKE_LOCK` и `WIFI_MODE_FULL_HIGH_PERF` (`WifiLock`).
+- **Instant Wi-Fi Access** — open your phone's files in any PC browser over the local network with one tap.
+- **Biometric & Code Sign-In** — confirm PC connections directly on your phone via fingerprint, a 2-digit verification code, or PIN, with brute-force lockout and security alerts.
+- **Trusted & Guest Modes** — grant full read/write access to your own PC or read-only guest access to other devices, and disconnect any client anytime.
+- **Remote Folder Switching** — switch shared folders (`Downloads`, `Camera Roll`, `Documents`, or `All Storage`) right from the PC web UI with phone confirmation.
+- **Full Media Gallery** — browse your entire photo and video library by date and albums with video thumbnails and built-in media preview.
+- **Smart File Manager** — drag-and-drop uploads with SHA-256 verification, streaming ZIP downloads, search, favorites, rename, move/copy, and a safe manual Trash folder.
+- **Themes, Parallax & 6 Languages** — Dark and Light themes, 2-column view, 3D Parallax sky, background auto-off timer, and full localization in English, Russian, Ukrainian, Spanish, German, and Lithuanian.
 
-## Быстрый старт
+## Quick Start
 
-1. Подключите смартфон и компьютер к одной сети Wi-Fi (или включите точку доступа на телефоне).
-2. Нажмите зелёную кнопку **Подключить (`Connect`)** в приложении.
-3. Скопируйте ссылку или введите её вручную в адресную строку браузера на ПК.
-4. Во вкладке **Файлы (`Files`)** выберите папку для раздачи (`Загрузки`, `Камера`, `Документы` или `Вся память устройства`).
+1. Connect your phone and PC to the same Wi-Fi network (or enable a mobile hotspot).
+2. Open **AirShare PC** and tap **Connect**.
+3. Open the shown `http://...` address in your PC browser and approve the sign-in on your phone.
 
-> **Примечание по безопасности**: соединение работает по локальному протоколу HTTP без TLS-шифрования и предназначено для использования в доверенной домашней сети Wi-Fi.
+## Build
+
+Pushes to `main` automatically build a Debug APK via GitHub Actions (`.github/workflows/build-apk.yml`). When release keystore secrets are configured, signed Release AAB and APK artifacts are built as well.
+
+Crafted by JackBrownUA • Powered by Gemini
