@@ -142,27 +142,31 @@ object SecurityManager {
         challenges.clear()
         sessionSecret = randomHex(16)
     }
-
+        private fun normalizeIp(ip: String): String = ip.substringAfterLast("•").trim()
+    
     fun setIpDisconnected(ip: String, disconnected: Boolean) = synchronized(lock) {
-        if (disconnected) {
-            disconnectedIps.add(ip)
-            notifiedIps.remove(ip)
-            sessions.entries.removeIf { it.value.ip == ip }
+            val clean = normalizeIp(ip)
+            if (disconnected) {
+            disconnectedIps.add(clean)
+            notifiedIps.remove(clean)
+            sessions.entries.removeIf { it.value.ip == clean }
         } else {
-            disconnectedIps.remove(ip)
+            disconnectedIps.remove(clean)
         }
     }
 
-    fun isIpDisconnected(ip: String): Boolean = synchronized(lock) { ip in disconnectedIps }
+    fun isIpDisconnected(ip: String): Boolean = synchronized(lock) { val clean = normalizeIp(ip); clean in disconnectedIps }
 
-    fun markIpNotified(ip: String): Boolean = synchronized(lock) { notifiedIps.add(ip) }
+    fun markIpNotified(ip: String): Boolean = synchronized(lock) { val clean = normalizeIp(ip); notifiedIps.add(clean) }
 
     fun setIpTrusted(ip: String, trusted: Boolean) = synchronized(lock) {
-        sessions.values.filter { it.ip == ip }.forEach { it.trusted = trusted }
+            val clean = normalizeIp(ip)
+            sessions.values.filter { it.ip == clean }.forEach { it.trusted = trusted }
     }
 
     fun isIpTrusted(ip: String): Boolean = synchronized(lock) {
-        sessions.values.any { it.ip == ip && it.trusted }
+            val clean = normalizeIp(ip)
+            sessions.values.any { it.ip == clean && it.trusted }
     }
 
     fun checkRateLimit(ip: String): Pair<Boolean, Int> = synchronized(lock) {
@@ -284,7 +288,8 @@ object SecurityManager {
         if (biometricOk || pairOk) {
             ch.status = "approved"
             ch.trusted = trusted
-            return true to "approved"
+                sessions.values.filter { it.ip == ch.ip }.forEach { it.trusted = trusted }
+                return true to "approved"
         }
         ch.status = "denied"
         false to "mismatch"
