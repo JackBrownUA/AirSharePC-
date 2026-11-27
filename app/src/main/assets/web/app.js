@@ -361,7 +361,7 @@ if (btnHide) {
     }
 
     renderFileRows(data.items || [], { showPath: false });
-    renderPager();
+    renderPager(); const ic = document.getElementById("items-count"); if (ic) ic.textContent = t("web_total_items", { count: data.total_items ?? (data.items ? data.items.length : 0) });
   }
 
   function renderPager() {
@@ -857,7 +857,7 @@ function openCinema(title, previewUrl, dlUrl, kind) {
     m.controls = !controls;
     m.src = previewUrl;
     _cinemaMediaEl = m;
-    body.appendChild(m);
+    body.appendChild(m); if (isVid) { const pipBtn = document.getElementById("c-pip"); if (pipBtn) { pipBtn.style.display = document.pictureInPictureEnabled ? "" : "none"; pipBtn.onclick = () => { if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {}); else if (m.requestPictureInPicture) m.requestPictureInPicture().catch(() => {}); }; } const miniBtn = document.getElementById("c-mini"); const cardEl = document.getElementById("cinema-card"); if (miniBtn && cardEl) { cardEl.classList.remove("mini-mode"); miniBtn.onclick = () => cardEl.classList.toggle("mini-mode"); } const resBox = document.getElementById("cinema-resume"); const resTxt = document.getElementById("c-resume-text"); const resBtn = document.getElementById("c-resume-btn"); const posKey = "airshare_pos_" + title; if (resBox) resBox.style.display = "none"; let savedPos = 0; try { savedPos = parseFloat(localStorage.getItem(posKey) || "0"); } catch (_) {} if (savedPos > 5 && resBox && resTxt && resBtn) { const mm = Math.floor(savedPos / 60), ss = String(Math.floor(savedPos % 60)).padStart(2, "0"); resTxt.textContent = mm + ":" + ss; resBox.style.display = "flex"; resBtn.onclick = () => { m.currentTime = savedPos; resBox.style.display = "none"; }; } m.addEventListener("timeupdate", () => { if (m.currentTime > 5) try { localStorage.setItem(posKey, String(Math.floor(m.currentTime))); } catch (_) {} }); }
 
     if (controls) {
       controls.style.display = "flex";
@@ -952,7 +952,7 @@ function openCtxMenu(ev, item) {
     addItem("🔐 SHA-256", () => showSha(item.rel_path));
   }
   if (canFav) {
-    addItem((item.is_fav ? "★ " : "☆ ") + (t("web_fav") || "Favorite"), async () => {
+    addItem((item.is_fav ? "★ " : "☆ ") + (t("web_ctx_fav") || "Favorite"), async () => {
       await apiOp("fav", { rel_path: item.rel_path });
       reloadCurrentTab();
     });
@@ -966,14 +966,14 @@ function openCtxMenu(ev, item) {
       if (res && res.ok) reloadCurrentTab();
       else toast((res && res.msg) || "Error");
     });
-    addItem("📁 " + (t("web_move") || "Move"), () => openFolderPicker("move", [item.rel_path]));
-    addItem("📋 " + (t("web_copy") || "Copy"), () => openFolderPicker("copy", [item.rel_path]));
+    addItem("📁 " + (t("web_ctx_move") || "Move"), () => openFolderPicker("move", [item.rel_path]));
+    addItem("📋 " + (t("web_ctx_copy") || "Copy"), () => openFolderPicker("copy", [item.rel_path]));
     addItem("👁 " + (t("web_ctx_hide") || "Hide"), async () => {
       await apiOp("hide", { rel_path: item.rel_path });
       reloadCurrentTab();
     });
     addSep();
-    addItem("🗑 " + (t("web_delete") || "Delete"), () => openDeleteModal([item.rel_path]), true);
+    addItem("🗑 " + (t("web_ctx_trash") || "Delete"), () => openDeleteModal([item.rel_path]), true);
   }
   m.style.display = "block";
   const mw = m.offsetWidth || 190, mh = m.offsetHeight || 220;
@@ -985,54 +985,7 @@ function openCtxMenu(ev, item) {
 document.addEventListener("click", hideCtxMenu);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideCtxMenu(); });
 
-function initSkyCanvas() {
-  const canvas = document.getElementById("skyCanvas");
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  let w = 0, h = 0, mx = 0, my = 0;
-  const stars = Array.from({ length: 110 }, () => ({
-    x: Math.random(), y: Math.random(), r: Math.random() * 1.6 + 0.4,
-    a: Math.random() * Math.PI * 2, s: Math.random() * 0.02 + 0.008, d: Math.random() * 0.6 + 0.2
-  }));
-  const resize = () => {
-    w = canvas.width = window.innerWidth;
-    h = canvas.height = window.innerHeight;
-  };
-  resize();
-  window.addEventListener("resize", resize);
-  window.addEventListener("mousemove", (e) => {
-    if (!state.parallaxEnabled) { mx = 0; my = 0; return; }
-    mx = (e.clientX / (w || 1) - 0.5) * 28;
-    my = (e.clientY / (h || 1) - 0.5) * 28;
-  });
-  const frame = () => {
-    ctx.clearRect(0, 0, w, h);
-    const isLight = document.body.classList.contains("light");
-    if (isLight) {
-      const gx = w * 0.78 - mx * 0.8;
-      const gy = h * 0.18 - my * 0.8;
-      const g = ctx.createRadialGradient(gx, gy, 10, gx, gy, Math.max(w, h) * 0.55);
-      g.addColorStop(0, "rgba(255, 236, 179, 0.55)");
-      g.addColorStop(0.45, "rgba(255, 224, 130, 0.18)");
-      g.addColorStop(1, "rgba(255, 224, 130, 0)");
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, w, h);
-    } else {
-      for (const st of stars) {
-        st.a += st.s;
-        const alpha = 0.25 + 0.75 * (0.5 + 0.5 * Math.sin(st.a));
-        const px = ((st.x * w - mx * st.d) % w + w) % w;
-        const py = ((st.y * h - my * st.d) % h + h) % h;
-        ctx.fillStyle = `rgba(220, 235, 255, ${alpha.toFixed(3)})`;
-        ctx.beginPath();
-        ctx.arc(px, py, st.r, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-    requestAnimationFrame(frame);
-  };
-  requestAnimationFrame(frame);
-}
+function initSkyCanvas() { const c = document.getElementById("sky-canvas"); if (!c) return; const ctx = c.getContext("2d"); let w = 0, h = 0, mx = 0, my = 0; const resize = () => { w = c.width = window.innerWidth; h = c.height = window.innerHeight; }; resize(); window.addEventListener("resize", resize); window.addEventListener("mousemove", e => { if (!state.parallaxEnabled) return; mx = (e.clientX / Math.max(1, w) - 0.5) * 40; my = (e.clientY / Math.max(1, h) - 0.5) * 40; }); window.addEventListener("deviceorientation", e => { if (!state.parallaxEnabled || e.gamma == null || e.beta == null) return; mx = Math.max(-30, Math.min(30, e.gamma)) * 1.2; my = Math.max(-30, Math.min(30, e.beta - 45)) * 1.2; }); const starColors = ["255,255,255", "200,225,255", "255,235,205", "180,210,255", "255,215,240"]; const stars = Array.from({ length: 260 }, () => ({ x: Math.random(), y: Math.random(), r: Math.random() * 1.7 + 0.4, a: Math.random() * Math.PI * 2, s: Math.random() * 0.025 + 0.008, d: Math.random() * 0.8 + 0.2, col: starColors[Math.floor(Math.random() * starColors.length)] })); const meteors = []; const spawnMeteor = () => { meteors.push({ x: Math.random() * w * 0.8 + w * 0.1, y: Math.random() * h * 0.35, vx: -(Math.random() * 6 + 7), vy: Math.random() * 3 + 3, len: Math.random() * 70 + 60, alpha: 1 }); }; const clouds = Array.from({ length: 11 }, () => ({ x: Math.random(), y: Math.random() * 0.55 + 0.05, sc: Math.random() * 0.7 + 0.6, sp: Math.random() * 0.00018 + 0.00008, d: Math.random() * 0.5 + 0.25 })); const drawCloud = (cx, cy, sc) => { ctx.save(); ctx.translate(cx, cy); ctx.scale(sc, sc); ctx.fillStyle = "rgba(255, 255, 255, 0.72)"; ctx.beginPath(); ctx.arc(0, 0, 28, 0, Math.PI * 2); ctx.arc(26, -8, 22, 0, Math.PI * 2); ctx.arc(-26, -4, 20, 0, Math.PI * 2); ctx.arc(46, 4, 16, 0, Math.PI * 2); ctx.arc(-44, 6, 15, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }; const frame = () => { ctx.clearRect(0, 0, w, h); const isLight = document.documentElement.getAttribute("data-theme") === "light"; if (isLight) { const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, "#cfe4ff"); g.addColorStop(1, "#f2f7ff"); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h); for (const cl of clouds) { cl.x = (cl.x + cl.sp) % 1.25; const cx = (cl.x - 0.12) * w - mx * cl.d; const cy = cl.y * h - my * cl.d; drawCloud(cx, cy, cl.sc); } } else { for (const st of stars) { st.a += st.s; const alpha = 0.25 + 0.75 * (0.5 + 0.5 * Math.sin(st.a)); const px = ((st.x * w - mx * st.d) % w + w) % w; const py = ((st.y * h - my * st.d) % h + h) % h; ctx.fillStyle = `rgba(${st.col}, ${alpha.toFixed(3)})`; ctx.beginPath(); ctx.arc(px, py, st.r, 0, Math.PI * 2); ctx.fill(); } if (Math.random() < 0.008 && meteors.length < 3) spawnMeteor(); for (let i = meteors.length - 1; i >= 0; i--) { const mt = meteors[i]; const tx = mt.x - mt.vx * (mt.len / 10); const ty = mt.y - mt.vy * (mt.len / 10); const grad = ctx.createLinearGradient(mt.x, mt.y, tx, ty); grad.addColorStop(0, `rgba(255,255,255,${mt.alpha.toFixed(3)})`); grad.addColorStop(1, "rgba(180,220,255,0)"); ctx.strokeStyle = grad; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(mt.x, mt.y); ctx.lineTo(tx, ty); ctx.stroke(); mt.x += mt.vx; mt.y += mt.vy; mt.alpha -= 0.015; if (mt.alpha <= 0) meteors.splice(i, 1); } } requestAnimationFrame(frame); }; requestAnimationFrame(frame); }
 
   async function showSha(relPath) {
     document.getElementById("sha-title").textContent = t("web_sha_title");
@@ -1064,24 +1017,26 @@ function initSkyCanvas() {
   document.body.classList.remove("dark", "light"); document.body.classList.add(savedTheme);
     document.body.classList.toggle("wide-view", state.wideView);
 
-    document.getElementById("btn-access").textContent = "🔐 " + t("web_access_btn");
-    document.getElementById("btn-wide").textContent = "⊞ " + t("web_wide_view");
-    document.getElementById("btn-wide").classList.toggle("active", state.wideView);
-    document.getElementById("btn-parallax").textContent = "✨ " + t("web_parallax");
-    document.getElementById("btn-parallax").classList.toggle("active", state.parallaxEnabled);
-
-    document.getElementById("tab-files").textContent = "📁 " + t("web_tab_files");
-    document.getElementById("tab-gallery").textContent = "🖼 " + t("web_tab_gallery");
-    document.getElementById("tab-recent").textContent = "🕒 " + t("web_tab_recent");
-    document.getElementById("tab-trash").textContent = "🗑 " + t("web_tab_trash");
-    document.getElementById("search-input").placeholder = t("web_search_placeholder");
-
-    document.getElementById("lbl-select-all").textContent = t("web_select_all");
-    document.getElementById("btn-upload").textContent = "⬆ " + t("web_upload_btn");
-    document.getElementById("btn-mkdir").textContent = "＋ " + t("web_new_folder");
-    document.getElementById("btn-hidden").textContent = "👁 " + t("web_hidden_btn");
-    document.getElementById("btn-empty-trash").textContent = "🧹 " + t("web_empty_trash");
-    document.getElementById("dropzone").textContent = "⬆ " + t("web_upload_btn");
+ const setTxt = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    setTxt("btn-access", "🔐 " + t("web_access_btn"));
+setTxt("btn-wide", "▫ " + t("web_wide_view"));
+document.getElementById("btn-wide")?.classList.toggle("active", state.wideView);
+setTxt("lbl-parallax", "✨ " + t("web_parallax"));
+setTxt("tab-files", "📁 " + t("web_tab_files"));
+setTxt("tab-gallery", "🖼 " + t("web_tab_gallery"));
+setTxt("tab-recent", "🕒 " + t("web_tab_recent"));
+setTxt("tab-trash", "🗑 " + t("web_tab_trash"));
+const searchEl = document.getElementById("search-input");
+if (searchEl) searchEl.placeholder = t("web_search_placeholder");
+setTxt("lbl-select-all", t("web_select_all"));
+setTxt("btn-upload", "⬆ " + t("web_upload_btn"));
+setTxt("btn-mkdir", "+ " + t("web_new_folder"));
+setTxt("btn-hidden", "👁 " + t("web_hidden_btn"));
+setTxt("btn-empty-trash", "🧹 " + t("web_empty_trash"));
+setTxt("dropzone", "⬆ " + t("web_drop_hint"));
+setTxt("cinema-ambient-btn", t("web_ambilight"));
+setTxt("c-pip", t("web_pip"));
+setTxt("c-mini", t("web_mini"));
 
     const langFlags = {
     en: `<svg viewBox="0 0 24 16" width="20" height="14"><rect width="24" height="16" fill="#012169"/><path d="M0,0 L24,16 M24,0 L0,16" stroke="#fff" stroke-width="3"/><path d="M0,0 L24,16 M24,0 L0,16" stroke="#C8102E" stroke-width="1.5"/><path d="M12,0 V16 M0,8 H24" stroke="#fff" stroke-width="5"/><path d="M12,0 V16 M0,8 H24" stroke="#C8102E" stroke-width="3"/></svg>`,
@@ -1091,11 +1046,12 @@ function initSkyCanvas() {
     de: `<svg viewBox="0 0 24 16" width="20" height="14"><rect width="24" height="5.33" fill="#000"/><rect y="5.33" width="24" height="5.33" fill="#DD0000"/><rect y="10.67" width="24" height="5.33" fill="#FFCE00"/></svg>`,
     lt: `<svg viewBox="0 0 24 16" width="20" height="14"><rect width="24" height="5.33" fill="#FDB913"/><rect y="5.33" width="24" height="5.33" fill="#006A44"/><rect y="10.67" width="24" height="5.33" fill="#C1272D"/></svg>`
   };
-  const curLang = window.__INIT_LANG__ || "en";
+ const cookieLang = (document.cookie.match(/(?:^|;\s*)airshare_lang=([^;]+)/) || [])[1];
+const curLang = window.__INIT_LANG__ || cookieLang || "en";
   const langBtn = document.getElementById("lang-btn");
   const langDrop = document.getElementById("lang-dropdown");
   if (langBtn && langDrop) {
-    langBtn.innerHTML = (langFlags[curLang] || langFlags.en) + ` <span>${curLang.toUpperCase()}</span>`;
+     langBtn.innerHTML = (langFlags[curLang] || langFlags.en) + " " + curLang.toUpperCase() + " ▾";
     langDrop.innerHTML = "";
     for (const [code, svg] of Object.entries(langFlags)) {
       const opt = document.createElement("button");
@@ -1109,19 +1065,24 @@ function initSkyCanvas() {
       };
       langDrop.appendChild(opt);
     }
-    langBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      langDrop.classList.toggle("open");
-    });
-    document.addEventListener("click", () => langDrop.classList.remove("open"));
+     langBtn.addEventListener("click", (ev) => {
+  ev.stopPropagation();
+  langDrop.style.display = langDrop.style.display === "flex" ? "none" : "flex";
+});
+document.addEventListener("click", () => { langDrop.style.display = "none"; });
   }
 
-    document.getElementById("btn-theme").addEventListener("click", () => {
-      const cur = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
-      document.documentElement.setAttribute("data-theme", cur);
-  document.body.classList.remove("dark", "light"); document.body.classList.add(cur);
-      localStorage.setItem("airshare_theme", cur);
-    });
+ const tToggle = document.getElementById("themeToggle");
+if (tToggle) {
+  tToggle.checked = document.documentElement.getAttribute("data-theme") !== "light";
+  tToggle.addEventListener("change", () => {
+    const cur = tToggle.checked ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", cur);
+    document.body.classList.remove("dark", "light");
+    document.body.classList.add(cur);
+    localStorage.setItem("airshare_theme", cur);
+  });
+}
 
     document.getElementById("btn-wide").addEventListener("click", () => {
       state.wideView = !state.wideView;
@@ -1130,11 +1091,14 @@ function initSkyCanvas() {
       localStorage.setItem("airshare_wide", state.wideView ? "1" : "0");
     });
 
-    document.getElementById("btn-parallax").addEventListener("click", () => {
-      state.parallaxEnabled = !state.parallaxEnabled;
-      document.getElementById("btn-parallax").classList.toggle("active", state.parallaxEnabled);
-      localStorage.setItem("airshare_parallax", state.parallaxEnabled ? "1" : "0");
-    });
+ const pToggle = document.getElementById("parallaxToggle");
+if (pToggle) {
+  pToggle.checked = !!state.parallaxEnabled;
+  pToggle.addEventListener("change", () => {
+    state.parallaxEnabled = !!pToggle.checked;
+    localStorage.setItem("airshare_parallax", state.parallaxEnabled ? "1" : "0");
+  });
+}
 
     document.querySelectorAll(".tab-btn").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -1192,7 +1156,13 @@ function initSkyCanvas() {
       dz.classList.remove("dragover");
       uploadFiles(e.dataTransfer.files);
     });
-
+  const hdz = document.getElementById("header-dropzone");
+if (hdz) {
+  ["dragenter", "dragover"].forEach(ev => hdz.addEventListener(ev, (e) => { e.preventDefault(); hdz.classList.add("drag-over"); }));
+  ["dragleave", "drop"].forEach(ev => hdz.addEventListener(ev, (e) => { e.preventDefault(); hdz.classList.remove("drag-over"); }));
+  hdz.addEventListener("drop", (e) => { if (state.trusted && e.dataTransfer?.files?.length) uploadFiles(e.dataTransfer.files); });
+}
+    
     document.getElementById("btn-download-zip").addEventListener("click", () => {
       const qs = Array.from(state.selected).map(p => "p=" + encodeURIComponent(p)).join("&");
       if (qs) window.location.href = "/download_selected?" + qs;
