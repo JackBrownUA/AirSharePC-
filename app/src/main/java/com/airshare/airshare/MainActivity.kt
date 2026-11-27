@@ -25,10 +25,10 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -71,6 +71,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -252,6 +253,16 @@ class MainActivity : FragmentActivity() {
             else -> t("folder_dl_title")
         }
 
+        fun langFlag(code: String): String = when (code) {
+            "en" -> "\uD83C\uDDEC\uD83C\uDDE7"
+            "es" -> "\uD83C\uDDEA\uD83C\uDDF8"
+            "de" -> "\uD83C\uDDE9\uD83C\uDDEA"
+            "lt" -> "\uD83C\uDDF1\uD83C\uDDF9"
+            "ru" -> "\uD83C\uDDF7\uD83C\uDDFA"
+            "uk" -> "\uD83C\uDDFA\uD83C\uDDE6"
+            else -> "\uD83C\uDF10"
+        }
+
         LaunchedEffect(toastEvent?.id) {
             val ev = toastEvent ?: return@LaunchedEffect
             snackbar.showSnackbar(ev.message)
@@ -268,17 +279,17 @@ class MainActivity : FragmentActivity() {
                 drawerContent = {
                     ModalDrawerSheet(
                         modifier = Modifier
-                            .width(295.dp)
+                            .width(292.dp)
                             .fillMaxHeight()
-                            .padding(start = 12.dp, top = 28.dp, bottom = 24.dp),
+                            .padding(start = 12.dp, top = 28.dp, bottom = 22.dp),
                         drawerShape = RoundedCornerShape(26.dp),
                         drawerContainerColor = palette.drawerBg,
                     ) {
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .padding(horizontal = 18.dp, vertical = 20.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                                .padding(horizontal = 18.dp, vertical = 18.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             Text(
                                 text = "AirShare PC",
@@ -314,25 +325,32 @@ class MainActivity : FragmentActivity() {
                                     },
                                 shape = RoundedCornerShape(15.dp),
                                 color = palette.drawerCard,
-                                border = BorderStroke(1.dp, palette.drawerBorder),
+                                border = BorderStroke(
+                                    1.dp,
+                                    Brush.verticalGradient(listOf(palette.highlightBorder, palette.drawerBorder)),
+                                ),
+                                shadowElevation = 6.dp,
                             ) {
                                 Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Text(
-                                            text = String.format(Locale.US, "%.1f GB / %.1f GB", storageStats.usedGb, storageStats.totalGb),
+                                            text = String.format(Locale.US, "%.1f / %.1f GB", storageStats.usedGb, storageStats.totalGb),
                                             color = palette.text,
-                                            fontSize = 13.sp,
+                                            fontSize = 12.5.sp,
                                             fontWeight = FontWeight.SemiBold,
                                         )
+                                        Spacer(Modifier.width(10.dp))
                                         Text(
                                             text = folderTitle(activeFolder),
                                             color = palette.subtext,
                                             fontSize = 11.sp,
+                                            textAlign = TextAlign.End,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f),
                                         )
                                     }
                                     Spacer(Modifier.height(7.dp))
@@ -364,17 +382,21 @@ class MainActivity : FragmentActivity() {
                                     },
                                 shape = RoundedCornerShape(15.dp),
                                 color = palette.drawerCard,
-                                border = BorderStroke(1.dp, palette.drawerBorder),
+                                border = BorderStroke(
+                                    1.dp,
+                                    Brush.verticalGradient(listOf(palette.highlightBorder, palette.drawerBorder)),
+                                ),
+                                shadowElevation = 6.dp,
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Computer,
                                         contentDescription = null,
                                         tint = if (serverRunning) palette.green else palette.text,
-                                        modifier = Modifier.size(28.dp),
+                                        modifier = Modifier.size(26.dp),
                                     )
                                     Spacer(Modifier.width(12.dp))
                                     Column {
@@ -393,9 +415,11 @@ class MainActivity : FragmentActivity() {
                                 }
                             }
 
+                            Spacer(Modifier.weight(1f))
+
                             Column(
                                 modifier = Modifier
-                                    .weight(1f)
+                                    .fillMaxWidth()
                                     .verticalScroll(rememberScrollState()),
                             ) {
                                 DrawerMenuRowItem(Icons.Default.Timer, t("menu_auto_off"), palette) {
@@ -423,7 +447,7 @@ class MainActivity : FragmentActivity() {
                             Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(42.dp),
+                                    .height(40.dp),
                                 shape = RoundedCornerShape(16.dp),
                                 color = palette.drawerCard,
                                 border = BorderStroke(1.dp, palette.drawerBorder),
@@ -623,9 +647,9 @@ class MainActivity : FragmentActivity() {
                     palette = palette,
                     title = t("folders_title"),
                     onDismiss = { showFilesModal = false },
-                    buttons = { TextButton(onClick = { showFilesModal = false }) { Text(t("close")) } },
+                    buttons = { TextButton(onClick = { showFilesModal = false }) { Text(t("close"), color = palette.blue) } },
                 ) {
-                    Text(t("folders_subtitle"), fontSize = 13.sp, color = palette.subtext)
+                    Text(t("folders_subtitle"), fontSize = 12.5.sp, color = palette.subtext)
                     listOf(
                         Triple("downloads", t("folder_dl_title"), t("folder_dl_desc")),
                         Triple("camera", t("folder_cam_title"), t("folder_cam_desc")),
@@ -636,7 +660,7 @@ class MainActivity : FragmentActivity() {
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
+                                .clip(RoundedCornerShape(13.dp))
                                 .clickable {
                                     if (key == "all" && activeFolder != "all") {
                                         showFilesModal = false
@@ -647,19 +671,25 @@ class MainActivity : FragmentActivity() {
                                         showFilesModal = false
                                     }
                                 },
-                            shape = RoundedCornerShape(14.dp),
-                            color = if (selected) palette.pillActive else palette.cardBg,
+                            shape = RoundedCornerShape(13.dp),
+                            color = if (selected) palette.pillActive else palette.drawerCard,
                             border = BorderStroke(1.dp, if (selected) palette.green else palette.cardBorder),
+                            shadowElevation = if (selected) 6.dp else 2.dp,
                         ) {
                             Row(
-                                modifier = Modifier.padding(12.dp),
+                                modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Icon(Icons.Default.Folder, contentDescription = null, tint = if (selected) palette.green else palette.subtext)
+                                Icon(
+                                    Icons.Default.Folder,
+                                    contentDescription = null,
+                                    tint = if (selected) palette.green else palette.subtext,
+                                    modifier = Modifier.size(19.dp),
+                                )
                                 Spacer(Modifier.width(10.dp))
                                 Column {
-                                    Text(title, color = palette.text, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                    Text(desc, color = palette.subtext, fontSize = 11.5.sp)
+                                    Text(title, color = palette.text, fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp)
+                                    Text(desc, color = palette.subtext, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
                             }
                         }
@@ -673,24 +703,25 @@ class MainActivity : FragmentActivity() {
                     palette = palette,
                     title = t("devices_title"),
                     onDismiss = { showDevicesModal = false },
-                    buttons = { TextButton(onClick = { showDevicesModal = false }) { Text(t("close")) } },
+                    buttons = { TextButton(onClick = { showDevicesModal = false }) { Text(t("close"), color = palette.blue) } },
                 ) {
-                    Text(t("devices_subtitle"), fontSize = 13.sp, color = palette.subtext)
+                    Text(t("devices_subtitle"), fontSize = 12.5.sp, color = palette.subtext)
                     if (ips.isEmpty()) {
-                        Text(t("no_devices_yet"), fontSize = 13.sp, color = palette.subtext)
+                        Text(t("no_devices_yet"), fontSize = 12.5.sp, color = palette.subtext)
                     } else {
                         ips.forEach { ip ->
                             val isTrusted = SecurityManager.isIpTrusted(ip)
                             val isDisc = SecurityManager.isIpDisconnected(ip)
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
-                                color = palette.cardBg,
+                                color = palette.drawerCard,
                                 border = BorderStroke(1.dp, palette.cardBorder),
+                                shadowElevation = 4.dp,
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 Column(Modifier.padding(10.dp)) {
-                                    Text(ip, color = palette.text, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                    Spacer(Modifier.height(6.dp))
+                                    Text(ip, color = palette.text, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
+                                    Spacer(Modifier.height(5.dp))
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         FilterChip(
                                             selected = isTrusted,
@@ -721,13 +752,13 @@ class MainActivity : FragmentActivity() {
                     palette = palette,
                     title = t("recent_transfers"),
                     onDismiss = { showTransfersModal = false },
-                    buttons = { TextButton(onClick = { showTransfersModal = false }) { Text(t("close")) } },
+                    buttons = { TextButton(onClick = { showTransfersModal = false }) { Text(t("close"), color = palette.blue) } },
                 ) {
                     if (history.isEmpty()) {
-                        Text(t("no_transfers_yet"), fontSize = 13.sp, color = palette.subtext)
+                        Text(t("no_transfers_yet"), fontSize = 12.5.sp, color = palette.subtext)
                     } else {
                         history.take(15).forEach { entry ->
-                            Text("• $entry", fontSize = 12.5.sp, color = palette.text)
+                            Text("• $entry", fontSize = 12.sp, color = palette.text)
                         }
                     }
                 }
@@ -737,8 +768,9 @@ class MainActivity : FragmentActivity() {
                 OriginalModalDialog(
                     palette = palette,
                     title = t("menu_auto_off"),
+                    compact = true,
                     onDismiss = { showAutoOffModal = false },
-                    buttons = { TextButton(onClick = { showAutoOffModal = false }) { Text(t("close")) } },
+                    buttons = { TextButton(onClick = { showAutoOffModal = false }) { Text(t("close"), color = palette.blue) } },
                 ) {
                     listOf(0, 15, 30, 60).forEach { mins ->
                         val selected = autoOffMin == mins
@@ -753,10 +785,10 @@ class MainActivity : FragmentActivity() {
                                     showAutoOffModal = false
                                 },
                             shape = RoundedCornerShape(12.dp),
-                            color = if (selected) palette.pillActive else palette.cardBg,
+                            color = if (selected) palette.pillActive else palette.drawerCard,
                             border = BorderStroke(1.dp, if (selected) palette.green else palette.cardBorder),
                         ) {
-                            Text(label, color = palette.text, fontSize = 14.sp, modifier = Modifier.padding(12.dp))
+                            Text(label, color = palette.text, fontSize = 13.5.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp))
                         }
                     }
                 }
@@ -766,10 +798,11 @@ class MainActivity : FragmentActivity() {
                 OriginalModalDialog(
                     palette = palette,
                     title = t("lang_title"),
+                    compact = true,
                     onDismiss = { showLanguageModal = false },
-                    buttons = { TextButton(onClick = { showLanguageModal = false }) { Text(t("close")) } },
+                    buttons = { TextButton(onClick = { showLanguageModal = false }) { Text(t("close"), color = palette.blue) } },
                 ) {
-                    Text(t("lang_subtitle"), fontSize = 13.sp, color = palette.subtext)
+                    Text(t("lang_subtitle"), fontSize = 12.sp, color = palette.subtext)
                     SettingsStore.SUPPORTED_LANGUAGES.forEach { (code, name) ->
                         val selected = lang == code
                         Surface(
@@ -782,10 +815,23 @@ class MainActivity : FragmentActivity() {
                                     showLanguageModal = false
                                 },
                             shape = RoundedCornerShape(12.dp),
-                            color = if (selected) palette.pillActive else palette.cardBg,
+                            color = if (selected) palette.pillActive else palette.drawerCard,
                             border = BorderStroke(1.dp, if (selected) palette.green else palette.cardBorder),
+                            shadowElevation = if (selected) 4.dp else 1.dp,
                         ) {
-                            Text("${code.uppercase()} — $name", color = palette.text, fontSize = 14.sp, modifier = Modifier.padding(12.dp))
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(langFlag(code), fontSize = 16.sp)
+                                Spacer(Modifier.width(10.dp))
+                                Text(
+                                    text = name,
+                                    color = palette.text,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                )
+                            }
                         }
                     }
                 }
@@ -796,9 +842,10 @@ class MainActivity : FragmentActivity() {
                 OriginalModalDialog(
                     palette = palette,
                     title = t("pin_title"),
+                    compact = true,
                     onDismiss = { showSecurityModal = false },
                     buttons = {
-                        TextButton(onClick = { showSecurityModal = false }) { Text(t("cancel")) }
+                        TextButton(onClick = { showSecurityModal = false }) { Text(t("cancel"), color = palette.subtext) }
                         Button(
                             onClick = {
                                 if (!store.isWeakPin(pinInput)) {
@@ -811,7 +858,7 @@ class MainActivity : FragmentActivity() {
                         ) { Text(t("pin_save")) }
                     },
                 ) {
-                    Text(t("pin_subtitle"), fontSize = 13.sp, color = palette.subtext)
+                    Text(t("pin_subtitle"), fontSize = 12.5.sp, color = palette.subtext)
                     OutlinedTextField(
                         value = pinInput,
                         onValueChange = { pinInput = it.filter(Char::isDigit).take(12) },
@@ -835,9 +882,10 @@ class MainActivity : FragmentActivity() {
                 OriginalModalDialog(
                     palette = palette,
                     title = t("port_title"),
+                    compact = true,
                     onDismiss = { showPortModal = false },
                     buttons = {
-                        TextButton(onClick = { showPortModal = false }) { Text(t("cancel")) }
+                        TextButton(onClick = { showPortModal = false }) { Text(t("cancel"), color = palette.subtext) }
                         Button(
                             onClick = {
                                 val p = portInput.toIntOrNull()
@@ -851,7 +899,7 @@ class MainActivity : FragmentActivity() {
                         ) { Text(t("port_save")) }
                     },
                 ) {
-                    Text(t("port_subtitle"), fontSize = 13.sp, color = palette.subtext)
+                    Text(t("port_subtitle"), fontSize = 12.5.sp, color = palette.subtext)
                     OutlinedTextField(
                         value = portInput,
                         onValueChange = { portInput = it.filter(Char::isDigit).take(5) },
@@ -864,9 +912,10 @@ class MainActivity : FragmentActivity() {
                 OriginalModalDialog(
                     palette = palette,
                     title = t("all_storage_warn_title"),
+                    compact = true,
                     onDismiss = { showAllStorageWarn = false },
                     buttons = {
-                        TextButton(onClick = { showAllStorageWarn = false }) { Text(t("cancel")) }
+                        TextButton(onClick = { showAllStorageWarn = false }) { Text(t("cancel"), color = palette.subtext) }
                         Button(
                             onClick = {
                                 store.activeFolderKey = "all"
@@ -877,7 +926,7 @@ class MainActivity : FragmentActivity() {
                         ) { Text(t("confirm_allow")) }
                     },
                 ) {
-                    Text(t("all_storage_warn_body"), fontSize = 13.sp, color = palette.subtext)
+                    Text(t("all_storage_warn_body"), fontSize = 12.5.sp, color = palette.subtext)
                 }
             }
 
@@ -885,10 +934,11 @@ class MainActivity : FragmentActivity() {
                 OriginalModalDialog(
                     palette = palette,
                     title = t("no_wifi_title"),
+                    compact = true,
                     onDismiss = { showWifiModal = false },
-                    buttons = { TextButton(onClick = { showWifiModal = false }) { Text(t("ok_understand")) } },
+                    buttons = { TextButton(onClick = { showWifiModal = false }) { Text(t("ok_understand"), color = palette.blue) } },
                 ) {
-                    Text(t("no_wifi_body"), fontSize = 13.sp, color = palette.subtext)
+                    Text(t("no_wifi_body"), fontSize = 12.5.sp, color = palette.subtext)
                 }
             }
 
@@ -897,9 +947,9 @@ class MainActivity : FragmentActivity() {
                     palette = palette,
                     title = t("help_title"),
                     onDismiss = { showHelpModal = false },
-                    buttons = { TextButton(onClick = { showHelpModal = false }) { Text(t("close")) } },
+                    buttons = { TextButton(onClick = { showHelpModal = false }) { Text(t("close"), color = palette.blue) } },
                 ) {
-                    Text(t("help_body"), fontSize = 13.sp, color = palette.subtext)
+                    Text(t("help_body"), fontSize = 12.5.sp, color = palette.subtext)
                 }
             }
         }
