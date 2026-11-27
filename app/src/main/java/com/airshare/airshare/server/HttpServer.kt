@@ -287,7 +287,7 @@ class HttpServer(
                     )
                 }
                method == "GET" && path == "/api/status" -> { sendJson(out, 200, JSONObject().put("trusted", session.trusted).put("active_folder", store.activeFolderKey).put("show_hidden", session.trusted && store.showHidden).put("lang", lang)) }
-                method == "POST" && path == "/api/role" -> { val raw = readBodyBytes(ins, headers, 4096).toString(Charsets.UTF_8); val obj = try { JSONObject(raw.ifBlank { "{}" }) } catch (_: Exception) { JSONObject() }; if (obj.optBoolean("trusted", false)) { sendJson(out, 403, JSONObject().put("error", "Trusted device required")) } else { val tok = SecurityManager.createSessionToken(ip, store.password, trusted = false); sendJson(out, 200, JSONObject().put("ok", true).put("trusted", false), extraHeaders = mapOf("Set-Cookie" to "airshare_auth=$tok; HttpOnly; Path=/; SameSite=Lax")) } }
+                method == "POST" && path == "/api/role" -> { val raw = readBodyBytes(ins, headers, 4096).toString(Charsets.UTF_8); val obj = try { JSONObject(raw.ifBlank { "{}" }) } catch (_: Exception) { JSONObject() }; if (obj.optBoolean("trusted", false)) { sendJson(out, 403, JSONObject().put("error", "Trusted device required")) } else { SecurityManager.setIpTrusted(ip, false); AppState.bumpDevices(); val tok = SecurityManager.createSessionToken(ip, store.password, trusted = false); sendJson(out, 200, JSONObject().put("ok", true).put("trusted", false), extraHeaders = mapOf("Set-Cookie" to "airshare_auth=$tok; HttpOnly; Path=/; SameSite=Lax")) } }
                 method == "GET" && path == "/api/folders" -> {
                     if (!session.trusted) {
                         sendJson(out, 403, JSONObject().put("error", "Trusted device required"))
@@ -377,17 +377,21 @@ class HttpServer(
         }
         return store.language
     }
-
-    private fun notifyClientIfNew(ip: String, ua: String) {
-        if (!SecurityManager.markIpNotified(ip)) return
-        val osName = when {
-            "Windows" in ua -> "Windows PC"
-            "Macintosh" in ua || "Mac OS" in ua -> "Mac"
-            "Android" in ua -> "Android"
-            "iPhone" in ua || "iPad" in ua -> "iOS"
-            "Linux" in ua -> "Linux PC"
+    private fun detectDeviceLabel(ua: String?): String {
+        val s = ua ?: ""
+        return when {
+            "Windows" in s -> "Windows PC"
+            "Macintosh" in s || "Mac OS" in s -> "Mac"
+            "Android" in s -> "Android"
+            "iPhone" in s || "iPad" in s -> "iOS"
+            "Linux" in s -> "Linux PC"
             else -> "PC"
         }
+    }
+    
+    private fun notifyClientIfNew(ip: String, ua: String) {
+        if (!SecurityManager.markIpNotified(ip)) return
+            val osName = detectDeviceLabel(ua)
         store.addRecentIp("$osName • $ip")
         AppState.bumpDevices()
         AppState.showToast(AppI18n.tr(context, "toast_connected", store.language, "dev" to osName, "ip" to ip))
@@ -406,7 +410,7 @@ class HttpServer(
         val folderKey = obj.optString("folder_key", "")
         val ch = SecurityManager.createChallenge(
             ip = ip,
-            device = headers["user-agent"] ?: "Browser",
+            device = detectDeviceLabel(headers["user-agent"]),
             mode = mode,
             action = action,
             targetFolderKey = folderKey,
