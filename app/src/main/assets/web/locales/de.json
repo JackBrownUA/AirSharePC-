@@ -77,7 +77,7 @@
   "pin_hint": "PIN eingeben",
   "pin_new": "Neue PIN",
   "pin_save": "PIN speichern",
-  "pin_subtitle": "PIN ist erforderlich und im Link enthalten:",
+  "pin_subtitle": "PIN für die Anmeldung im PC-Browser:",
   "pin_title": "Sicherheit & PIN",
   "port_folder_fmt": "Port {port} • {folder}",
   "port_save": "Port speichern",
