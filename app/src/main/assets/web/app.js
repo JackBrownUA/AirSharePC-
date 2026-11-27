@@ -176,6 +176,7 @@
     const btnMove = document.getElementById("btn-bulk-move");
     const btnCopy = document.getElementById("btn-bulk-copy");
     const btnDel = document.getElementById("btn-bulk-delete");
+  const btnHide = document.getElementById("btn-bulk-hide");
 
     btnZip.style.display = (n > 0 && state.tab !== "trash") ? "inline-flex" : "none";
     btnZip.textContent = `⬇ ${t("web_download_zip")} (${n})`;
@@ -187,6 +188,10 @@
     btnCopy.textContent = `📋 ${t("web_copy_btn")} (${n})`;
     btnDel.style.display = (n > 0 && state.trusted && state.tab !== "gallery") ? "inline-flex" : "none";
     btnDel.textContent = `🗑 ${t("web_delete_btn")} (${n})`;
+if (btnHide) {
+  btnHide.style.display = (n > 0 && canEdit) ? "inline-flex" : "none";
+  btnHide.textContent = `👁 ${t("web_hide_btn")} (${n})`;
+}
   }
 
   function folderTitleByKey(key) {
@@ -275,64 +280,20 @@
       const actions = document.createElement("div");
       actions.className = "file-actions";
 
-      if (isDir) {
-        const aZip = document.createElement("a");
-        aZip.className = "icon-btn";
-        aZip.href = "/zip?path=" + encodeURIComponent(item.rel_path);
-        aZip.title = "ZIP";
-        aZip.textContent = "⬇";
-        actions.appendChild(aZip);
-      } else {
-        const aDl = document.createElement("a");
-        aDl.className = "icon-btn";
-        aDl.href = "/file/" + encPath(item.rel_path);
-        aDl.title = "Download";
-        aDl.textContent = "⬇";
-        actions.appendChild(aDl);
-
-        const bSha = document.createElement("button");
-        bSha.className = "icon-btn";
-        bSha.type = "button";
-        bSha.title = "SHA-256";
-        bSha.textContent = "#";
-        bSha.addEventListener("click", () => showSha(item.rel_path));
-        actions.appendChild(bSha);
-      }
-
-      if (state.trusted) {
-        if (isDir) {
-          const bFav = document.createElement("button");
-          bFav.className = "icon-btn" + (item.fav ? " fav-on" : "");
-          bFav.type = "button";
-          bFav.textContent = "★";
-          bFav.addEventListener("click", async () => {
-            await apiOp("fav", { rel_path: item.rel_path });
-            reloadCurrentTab();
-          });
-          actions.appendChild(bFav);
-        }
-        const bRen = document.createElement("button");
-        bRen.className = "icon-btn";
-        bRen.type = "button";
-        bRen.title = "Rename";
-        bRen.textContent = "✎";
-        bRen.addEventListener("click", async () => {
-          const nw = prompt(t("web_rename_prompt"), item.name);
-          if (!nw || nw === item.name) return;
-          const res = await apiOp("rename", { path: item.rel_path, new_name: nw });
-          if (res && res.ok) reloadCurrentTab();
-          else toast((res && res.msg) || "Error");
-        });
-        actions.appendChild(bRen);
-
-        const bDel = document.createElement("button");
-        bDel.className = "icon-btn danger";
-        bDel.type = "button";
-        bDel.title = t("web_delete_btn");
-        bDel.textContent = "🗑";
-        bDel.addEventListener("click", () => openDeleteModal([item.rel_path]));
-        actions.appendChild(bDel);
-      }
+          const dlBtn = document.createElement("a");
+    dlBtn.className = "download-btn";
+    if (isDir) {
+      dlBtn.href = "/zip?dir=" + encodeURIComponent(item.rel_path);
+      dlBtn.title = "ZIP";
+    } else {
+      dlBtn.href = "/file/" + encPath(item.rel_path) + "?download=1";
+      dlBtn.setAttribute("download", item.name);
+      dlBtn.title = t("web_download") || "Download";
+    }
+    dlBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 19h14"/></svg>`;
+    dlBtn.addEventListener("click", (e) => e.stopPropagation());
+    actions.appendChild(dlBtn);
+    row.addEventListener("contextmenu", (ev) => { ev.preventDefault(); openCtxMenu(ev, item); });
 
       row.append(cb, icon, main, actions);
       list.appendChild(row);
@@ -801,33 +762,277 @@
     }, 950);
   }
 
-  function openCinema(title, previewUrl, dlUrl, kind) {
-    document.getElementById("cinema-title").textContent = title;
-    document.getElementById("cinema-dl").href = dlUrl;
-    const body = document.getElementById("cinema-body");
-    body.innerHTML = "";
-    if (kind === "img" || kind === "image") {
-      const img = document.createElement("img");
-      img.className = "cinema-media";
-      img.src = previewUrl;
-      body.appendChild(img);
-    } else if (kind === "vid" || kind === "video") {
-      const v = document.createElement("video");
-      v.className = "cinema-media";
-      v.controls = true;
-      v.autoplay = true;
-      v.src = previewUrl;
-      body.appendChild(v);
-    } else if (kind === "aud" || kind === "audio") {
-      const a = document.createElement("audio");
-      a.controls = true;
-      a.autoplay = true;
-      a.src = previewUrl;
-      a.style.width = "360px";
-      body.appendChild(a);
-    }
-    document.getElementById("modal-cinema").classList.add("open");
+ let _ambilightEnabled = true;
+let _ambilightRaf = 0;
+let _cinemaMediaEl = null;
+
+function formatCinemaTime(sec) {
+  if (!isFinite(sec) || sec < 0) return "0:00";
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return m + ":" + (s < 10 ? "0" : "") + s;
+}
+
+function stopCinemaMedia() {
+  if (_ambilightRaf) { cancelAnimationFrame(_ambilightRaf); _ambilightRaf = 0; }
+  if (_cinemaMediaEl) {
+    try { _cinemaMediaEl.pause(); _cinemaMediaEl.removeAttribute("src"); _cinemaMediaEl.load(); } catch (_) {}
+    _cinemaMediaEl = null;
   }
+  const body = document.getElementById("cinema-body");
+  if (body) {
+    body.querySelectorAll("video,audio").forEach((m) => {
+      try { m.pause(); m.removeAttribute("src"); m.load(); } catch (_) {}
+    });
+    body.innerHTML = "";
+  }
+  const modal = document.getElementById("modal-cinema");
+  if (modal) modal.classList.remove("open");
+  if (document.fullscreenElement) {
+    try { document.exitFullscreen(); } catch (_) {}
+  }
+}
+
+function openCinema(title, previewUrl, dlUrl, kind) {
+  if (typeof title === "object" && title !== null) {
+    const item = title;
+    title = item.name || "";
+    previewUrl = "/file/" + encPath(item.rel_path);
+    dlUrl = previewUrl + "?download=1";
+    kind = item.kind || "other";
+  }
+  stopCinemaMedia();
+  const modal = document.getElementById("modal-cinema");
+  const body = document.getElementById("cinema-body");
+  const titleEl = document.getElementById("cinema-title");
+  const dlEl = document.getElementById("cinema-dl");
+  const ambCanvas = document.getElementById("ambilightCanvas");
+  const ambBtn = document.getElementById("cinema-ambient-btn");
+  const controls = document.getElementById("cinema-controls");
+  const playBtn = document.getElementById("c-play");
+  const seekEl = document.getElementById("c-seek");
+  const timeEl = document.getElementById("c-time");
+  const speedBtn = document.getElementById("c-speed");
+  const fsBtn = document.getElementById("c-fs");
+  const closeBtn = document.getElementById("cinema-close");
+
+  if (titleEl) titleEl.textContent = title || "";
+  if (dlEl) { dlEl.href = dlUrl || "#"; dlEl.setAttribute("download", title || ""); }
+  if (closeBtn) closeBtn.onclick = stopCinemaMedia;
+
+  if (ambCanvas) {
+    ambCanvas.width = 64;
+    ambCanvas.height = 36;
+    ambCanvas.style.display = _ambilightEnabled ? "" : "none";
+  }
+  if (ambBtn) {
+    ambBtn.classList.toggle("active", _ambilightEnabled);
+    ambBtn.onclick = () => {
+      _ambilightEnabled = !_ambilightEnabled;
+      ambBtn.classList.toggle("active", _ambilightEnabled);
+      if (ambCanvas) {
+        ambCanvas.style.display = _ambilightEnabled ? "" : "none";
+        if (!_ambilightEnabled) ambCanvas.getContext("2d").clearRect(0, 0, 64, 36);
+      }
+    };
+  }
+
+  if (kind === "img" || kind === "image") {
+    if (controls) controls.style.display = "none";
+    const img = document.createElement("img");
+    img.className = "cinema-media";
+    img.src = previewUrl;
+    img.onload = () => {
+      if (_ambilightEnabled && ambCanvas) {
+        try { ambCanvas.getContext("2d").drawImage(img, 0, 0, 64, 36); } catch (_) {}
+      }
+    };
+    body.appendChild(img);
+  } else if (kind === "vid" || kind === "video" || kind === "aud" || kind === "audio") {
+    const isVid = kind === "vid" || kind === "video";
+    const m = document.createElement(isVid ? "video" : "audio");
+    m.className = "cinema-media";
+    m.autoplay = true;
+    if (isVid) m.playsInline = true;
+    m.controls = !controls;
+    m.src = previewUrl;
+    _cinemaMediaEl = m;
+    body.appendChild(m);
+
+    if (controls) {
+      controls.style.display = "flex";
+      const speeds = [1, 1.25, 1.5, 2, 0.5];
+      let sIdx = 0;
+      if (speedBtn) {
+        speedBtn.textContent = "1x";
+        speedBtn.onclick = () => {
+          sIdx = (sIdx + 1) % speeds.length;
+          m.playbackRate = speeds[sIdx];
+          speedBtn.textContent = speeds[sIdx] + "x";
+        };
+      }
+      if (playBtn) {
+        playBtn.textContent = "⏸";
+        playBtn.onclick = () => { if (m.paused) m.play(); else m.pause(); };
+      }
+      if (seekEl) {
+        seekEl.value = 0;
+        seekEl.oninput = () => {
+          if (m.duration) m.currentTime = (Number(seekEl.value) / 100) * m.duration;
+        };
+      }
+      if (timeEl) timeEl.textContent = "0:00 / 0:00";
+      if (fsBtn) {
+        fsBtn.onclick = () => {
+          if (document.fullscreenElement) document.exitFullscreen();
+          else (modal.querySelector(".cinema-stage") || modal).requestFullscreen().catch(() => {});
+        };
+      }
+      m.addEventListener("timeupdate", () => {
+        if (seekEl && m.duration) seekEl.value = String((m.currentTime / m.duration) * 100);
+        if (timeEl) timeEl.textContent = formatCinemaTime(m.currentTime) + " / " + formatCinemaTime(m.duration);
+      });
+      m.addEventListener("pause", () => { if (playBtn) playBtn.textContent = "▶"; });
+    }
+    let lastDraw = 0;
+    const drawAmb = (now) => {
+      if (_cinemaMediaEl !== m) return;
+      if (!m.paused && !m.ended) {
+        if (isVid && _ambilightEnabled && ambCanvas && now - lastDraw >= 180) {
+          lastDraw = now;
+          try { ambCanvas.getContext("2d").drawImage(m, 0, 0, 64, 36); } catch (_) {}
+        }
+        _ambilightRaf = requestAnimationFrame(drawAmb);
+      }
+    };
+    m.addEventListener("play", () => {
+      if (playBtn) playBtn.textContent = "⏸";
+      if (isVid) _ambilightRaf = requestAnimationFrame(drawAmb);
+    });
+  }
+  if (modal) modal.classList.add("open");
+}
+
+function hideCtxMenu() {
+  const m = document.getElementById("ctxMenu");
+  if (m) m.style.display = "none";
+}
+
+function openCtxMenu(ev, item) {
+  const m = document.getElementById("ctxMenu");
+  if (!m) return;
+  const isDir = item.kind === "dir" || item.is_dir;
+  const canEdit = !!(state.trusted && state.tab !== "trash");
+  const canFav = !!(state.trusted && isDir);
+  m.innerHTML = "";
+  const addItem = (label, fn, danger = false) => {
+    const btn = document.createElement("button");
+    btn.className = "ctx-item" + (danger ? " danger" : "");
+    btn.textContent = label;
+    btn.onclick = (e) => { e.stopPropagation(); hideCtxMenu(); fn(); };
+    m.appendChild(btn);
+  };
+  const addSep = () => { const d = document.createElement("div"); d.className = "ctx-sep"; m.appendChild(d); };
+
+  if (isDir) {
+    addItem("📂 " + (t("web_open") || "Open"), () => { state.curDir = item.rel_path; loadFiles(); });
+    addItem("⬇ ZIP", () => { window.location.href = "/zip?dir=" + encodeURIComponent(item.rel_path); });
+  } else {
+    addItem("👁 " + (t("web_open") || "Open"), () => {
+      const k = item.kind || "other";
+      if (k === "img" || k === "image" || k === "vid" || k === "video" || k === "aud" || k === "audio") openCinema(item);
+      else window.open("/file/" + encPath(item.rel_path), "_blank");
+    });
+    addItem("⬇ " + (t("web_download") || "Download"), () => {
+      const a = document.createElement("a");
+      a.href = "/file/" + encPath(item.rel_path) + "?download=1";
+      a.setAttribute("download", item.name);
+      document.body.appendChild(a); a.click(); a.remove();
+    });
+    addItem("🔐 SHA-256", () => showSha(item.rel_path));
+  }
+  if (canFav) {
+    addItem((item.is_fav ? "★ " : "☆ ") + (t("web_fav") || "Favorite"), async () => {
+      await apiOp("fav", { rel_path: item.rel_path });
+      reloadCurrentTab();
+    });
+  }
+  if (canEdit) {
+    addSep();
+    addItem("✏ " + (t("web_rename") || "Rename"), async () => {
+      const nw = prompt(t("web_rename_prompt") || "New name:", item.name);
+      if (!nw || nw === item.name) return;
+      const res = await apiOp("rename", { path: item.rel_path, new_name: nw });
+      if (res && res.ok) reloadCurrentTab();
+      else toast((res && res.msg) || "Error");
+    });
+    addItem("📁 " + (t("web_move") || "Move"), () => openFolderPicker("move", [item.rel_path]));
+    addItem("📋 " + (t("web_copy") || "Copy"), () => openFolderPicker("copy", [item.rel_path]));
+    addItem("👁 " + (t("web_hide_btn") || "Hide"), async () => {
+      await apiOp("hide", { rel_path: item.rel_path });
+      reloadCurrentTab();
+    });
+    addSep();
+    addItem("🗑 " + (t("web_delete") || "Delete"), () => openDeleteModal([item.rel_path]), true);
+  }
+  m.style.display = "block";
+  const mw = m.offsetWidth || 190, mh = m.offsetHeight || 220;
+  const x = Math.min(ev.clientX, window.innerWidth - mw - 8);
+  const y = Math.min(ev.clientY, window.innerHeight - mh - 8);
+  m.style.left = Math.max(8, x) + "px";
+  m.style.top = Math.max(8, y) + "px";
+}
+document.addEventListener("click", hideCtxMenu);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideCtxMenu(); });
+
+function initSkyCanvas() {
+  const canvas = document.getElementById("skyCanvas");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  let w = 0, h = 0, mx = 0, my = 0;
+  const stars = Array.from({ length: 110 }, () => ({
+    x: Math.random(), y: Math.random(), r: Math.random() * 1.6 + 0.4,
+    a: Math.random() * Math.PI * 2, s: Math.random() * 0.02 + 0.008, d: Math.random() * 0.6 + 0.2
+  }));
+  const resize = () => {
+    w = canvas.width = window.innerWidth;
+    h = canvas.height = window.innerHeight;
+  };
+  resize();
+  window.addEventListener("resize", resize);
+  window.addEventListener("mousemove", (e) => {
+    if (!state.parallaxEnabled) { mx = 0; my = 0; return; }
+    mx = (e.clientX / (w || 1) - 0.5) * 28;
+    my = (e.clientY / (h || 1) - 0.5) * 28;
+  });
+  const frame = () => {
+    ctx.clearRect(0, 0, w, h);
+    const isLight = document.body.classList.contains("light");
+    if (isLight) {
+      const gx = w * 0.78 - mx * 0.8;
+      const gy = h * 0.18 - my * 0.8;
+      const g = ctx.createRadialGradient(gx, gy, 10, gx, gy, Math.max(w, h) * 0.55);
+      g.addColorStop(0, "rgba(255, 236, 179, 0.55)");
+      g.addColorStop(0.45, "rgba(255, 224, 130, 0.18)");
+      g.addColorStop(1, "rgba(255, 224, 130, 0)");
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+    } else {
+      for (const st of stars) {
+        st.a += st.s;
+        const alpha = 0.25 + 0.75 * (0.5 + 0.5 * Math.sin(st.a));
+        const px = ((st.x * w - mx * st.d) % w + w) % w;
+        const py = ((st.y * h - my * st.d) % h + h) % h;
+        ctx.fillStyle = `rgba(220, 235, 255, ${alpha.toFixed(3)})`;
+        ctx.beginPath();
+        ctx.arc(px, py, st.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
 
   async function showSha(relPath) {
     document.getElementById("sha-title").textContent = t("web_sha_title");
@@ -856,6 +1061,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     const savedTheme = localStorage.getItem("airshare_theme") || window.__INIT_THEME__ || "dark";
     document.documentElement.setAttribute("data-theme", savedTheme);
+  document.body.classList.remove("dark", "light"); document.body.classList.add(savedTheme);
     document.body.classList.toggle("wide-view", state.wideView);
 
     document.getElementById("btn-access").textContent = "🔐 " + t("web_access_btn");
@@ -877,16 +1083,43 @@
     document.getElementById("btn-empty-trash").textContent = "🧹 " + t("web_empty_trash");
     document.getElementById("dropzone").textContent = "⬆ " + t("web_upload_btn");
 
-    const langSel = document.getElementById("lang-select");
-    langSel.value = window.__INIT_LANG__ || "en";
-    langSel.addEventListener("change", () => {
-      document.cookie = "airshare_lang=" + langSel.value + "; path=/; max-age=31536000";
-      window.location.href = "/?lang=" + encodeURIComponent(langSel.value);
+    const langFlags = {
+    en: `<svg viewBox="0 0 24 16" width="20" height="14"><rect width="24" height="16" fill="#012169"/><path d="M0,0 L24,16 M24,0 L0,16" stroke="#fff" stroke-width="3"/><path d="M0,0 L24,16 M24,0 L0,16" stroke="#C8102E" stroke-width="1.5"/><path d="M12,0 V16 M0,8 H24" stroke="#fff" stroke-width="5"/><path d="M12,0 V16 M0,8 H24" stroke="#C8102E" stroke-width="3"/></svg>`,
+    ru: `<svg viewBox="0 0 24 16" width="20" height="14"><rect width="24" height="5.33" fill="#fff"/><rect y="5.33" width="24" height="5.33" fill="#0039A6"/><rect y="10.67" width="24" height="5.33" fill="#D52B1E"/></svg>`,
+    uk: `<svg viewBox="0 0 24 16" width="20" height="14"><rect width="24" height="8" fill="#005BBB"/><rect y="8" width="24" height="8" fill="#FFD500"/></svg>`,
+    es: `<svg viewBox="0 0 24 16" width="20" height="14"><rect width="24" height="4" fill="#AA151B"/><rect y="4" width="24" height="8" fill="#F1BF00"/><rect y="12" width="24" height="4" fill="#AA151B"/></svg>`,
+    de: `<svg viewBox="0 0 24 16" width="20" height="14"><rect width="24" height="5.33" fill="#000"/><rect y="5.33" width="24" height="5.33" fill="#DD0000"/><rect y="10.67" width="24" height="5.33" fill="#FFCE00"/></svg>`,
+    lt: `<svg viewBox="0 0 24 16" width="20" height="14"><rect width="24" height="5.33" fill="#FDB913"/><rect y="5.33" width="24" height="5.33" fill="#006A44"/><rect y="10.67" width="24" height="5.33" fill="#C1272D"/></svg>`
+  };
+  const curLang = window.__INIT_LANG__ || "en";
+  const langBtn = document.getElementById("lang-btn");
+  const langDrop = document.getElementById("lang-dropdown");
+  if (langBtn && langDrop) {
+    langBtn.innerHTML = (langFlags[curLang] || langFlags.en) + ` <span>${curLang.toUpperCase()}</span>`;
+    langDrop.innerHTML = "";
+    for (const [code, svg] of Object.entries(langFlags)) {
+      const opt = document.createElement("button");
+      opt.type = "button";
+      opt.className = "lang-opt" + (code === curLang ? " active" : "");
+      opt.innerHTML = svg + ` <span>${code.toUpperCase()}</span>`;
+      opt.onclick = (e) => {
+        e.stopPropagation();
+        document.cookie = "airshare_lang=" + code + "; path=/; max-age=31536000";
+        window.location.href = "/?lang=" + encodeURIComponent(code);
+      };
+      langDrop.appendChild(opt);
+    }
+    langBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      langDrop.classList.toggle("open");
     });
+    document.addEventListener("click", () => langDrop.classList.remove("open"));
+  }
 
     document.getElementById("btn-theme").addEventListener("click", () => {
       const cur = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
       document.documentElement.setAttribute("data-theme", cur);
+  document.body.classList.remove("dark", "light"); document.body.classList.add(cur);
       localStorage.setItem("airshare_theme", cur);
     });
 
@@ -1028,7 +1261,87 @@
     document.getElementById("sha-close").addEventListener("click", () => {
       document.getElementById("modal-sha").classList.remove("open");
     });
+  const btnBulkHide = document.getElementById("btn-bulk-hide");
+  if (btnBulkHide) {
+    btnBulkHide.addEventListener("click", async () => {
+      const items = Array.from(state.selected);
+      if (!items.length) return;
+      for (const p of items) await apiOp("hide", { rel_path: p });
+      state.selected.clear();
+      reloadCurrentTab();
+    });
+  }
 
+  const roleBadge = document.getElementById("role-badge");
+  if (roleBadge) {
+    roleBadge.style.cursor = "pointer";
+    roleBadge.addEventListener("click", async () => {
+      if (state.trusted) {
+        const r = await fetch("/api/role", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ trusted: false })
+        });
+        if (r.ok) {
+          state.trusted = false;
+          if (typeof applyRoleUi === "function") applyRoleUi();
+          reloadCurrentTab();
+        }
+      } else {
+        const r = await fetch("/api/auth/request", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "biometric", action: "upgrade_trusted", folder_key: state.activeFolder || "" })
+        });
+        if (!r.ok) return;
+        const d = await r.json();
+        const reqId = d.request_id || d.id;
+        if (!reqId) return;
+        toast(t("web_auth_waiting") || "Waiting for host approval...");
+        const poll = setInterval(async () => {
+          try {
+            const sr = await fetch("/api/auth/status?id=" + encodeURIComponent(reqId));
+            if (!sr.ok) { clearInterval(poll); return; }
+            const sd = await sr.json();
+            if (sd.status === "approved") {
+              clearInterval(poll);
+              window.location.href = "/auth/claim?id=" + encodeURIComponent(reqId);
+            } else if (sd.status === "denied" || sd.status === "expired") {
+              clearInterval(poll);
+              toast(sd.status);
+            }
+          } catch (_) { clearInterval(poll); }
+        }, 1200);
+      }
+    });
+  }
+
+  setInterval(async () => {
+    try {
+      const r = await fetch("/api/status");
+      if (r.status === 401 || r.status === 403) {
+        window.location.href = "/";
+        return;
+      }
+      if (!r.ok) return;
+      const d = await r.json();
+      let changed = false;
+      if (typeof d.trusted === "boolean" && d.trusted !== state.trusted) {
+        state.trusted = d.trusted;
+        changed = true;
+      }
+      if (d.active_folder !== undefined && d.active_folder !== state.activeFolder) {
+        state.activeFolder = d.active_folder;
+        changed = true;
+      }
+      if (changed) {
+        if (typeof applyRoleUi === "function") applyRoleUi();
+        reloadCurrentTab();
+      }
+    } catch (_) {}
+  }, 2500);
+
+  initSkyCanvas();
     initSky();
     loadFiles();
   });
