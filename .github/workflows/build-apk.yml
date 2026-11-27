@@ -18,6 +18,7 @@ jobs:
         run: |
           COMMIT=$(git log -1 --diff-filter=A --format=%H -- icon.png)
           if [ -n "$COMMIT" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick
             git show "$COMMIT:icon.png" > orig_icon.png
             mkdir -p app/src/main/res/drawable-nodpi
             convert orig_icon.png -gravity center -crop 72%x72%+0+0 +repage -resize 432x432 app/src/main/res/drawable-nodpi/ic_launcher_fg.png
