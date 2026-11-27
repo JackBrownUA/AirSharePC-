@@ -77,7 +77,7 @@
   "pin_hint": "Введите PIN",
   "pin_new": "Новый PIN",
   "pin_save": "Сохранить PIN",
-  "pin_subtitle": "PIN обязателен и автоматически встраивается в ссылку:",
+  "pin_subtitle": "PIN-код для входа через браузер ПК:",
   "pin_title": "Безопасность и PIN",
   "port_folder_fmt": "Порт {port} • {folder}",
   "port_save": "Сохранить порт",
