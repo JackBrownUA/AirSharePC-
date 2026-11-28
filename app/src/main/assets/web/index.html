@@ -9,10 +9,6 @@
 <body class="__INIT_THEME__">
   <canvas id="skyCanvas"></canvas>
 <div id="marqueeBox" class="marquee-box"></div>
-  <div id="bg-scene" style="display:none;">
-    <div class="bg-layer" id="layer-far"></div>
-    <div class="bg-layer" id="layer-near"></div>
-  </div>
 
   <!-- Top Floating Controls (Theme Switch, Parallax 3D Switch, Flag Language Menu) -->
   <div class="top-bar-floating">
@@ -54,10 +50,7 @@
         <h1 class="header-title">AirShare PC</h1>
         <span id="role-badge" class="badge badge-trusted" role="button" tabindex="0"></span>
       </div>
-      <div class="header-sub-row">
-        <span id="active-folder-label" class="folder-sub"></span>
-      </div>
-      <div class="breadcrumbs" id="breadcrumbs"></div>
+      <span id="active-folder-label" style="display:none;"></span>
 
       <div class="header-actions" id="action-bar">
         <button class="btn-upload-hero" id="btn-upload" type="button" style="display:none;"></button>
@@ -99,7 +92,7 @@
     <div class="search-wrap">
       <input class="search-input" id="search-input" type="search" autocomplete="off">
     </div>
-
+    <div class="breadcrumbs" id="breadcrumbs"></div>
     <div class="select-toolbar" id="select-toolbar">
 <div class="select-left-group">
       <label class="select-all-label">
@@ -178,7 +171,7 @@
           <button class="mini-pill active" id="cinema-ambient-btn" type="button">✨ Ambilight</button>
           <button class="mini-pill" id="c-pip" type="button">📺 PiP</button>
           <button class="mini-pill" id="c-mini" type="button">🗗</button>
-          <a class="mini-pill btn-primary" id="cinema-dl" download>⬇</a>
+          <a class="download-btn" id="cinema-dl" download title="Download"><svg viewBox="0 0 24 24"><path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 19h14"/></svg></a>
           <button class="mini-pill" id="cinema-close" type="button">✕</button>
         </div>
       </div>
