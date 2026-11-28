@@ -478,7 +478,7 @@ if (btnHide) {
       if (existing) existing.items.push(...g.items);
       else state.galleryGroups.push({ date: g.date, items: [...g.items] });
     }
-    renderGallery(data.all_total || 0);
+    renderGallery(data.all_total || 0); const ic = document.getElementById("items-count"); if (ic) ic.textContent = t("web_total_items", { count: data.all_total || 0 });
   }
 
   function renderGallery(allTotal) {
@@ -518,7 +518,7 @@ if (btnHide) {
       }
       albumBar.appendChild(p);
     }
-    area.appendChild(albumBar);
+    const albumWrap = document.createElement("div"); albumWrap.className = "album-bar-wrap" + (!state.galleryExpanded ? " collapsed" : ""); albumWrap.appendChild(albumBar); area.appendChild(albumWrap); requestAnimationFrame(() => { if (albumBar.scrollHeight > 88 || state.galleryExpanded) { const moreBtn = document.createElement("button"); moreBtn.className = "album-pill album-more-btn"; moreBtn.type = "button"; moreBtn.textContent = state.galleryExpanded ? "\u25b2" : "\u2022\u2022\u2022"; moreBtn.addEventListener("click", () => { state.galleryExpanded = !state.galleryExpanded; albumWrap.classList.toggle("collapsed", !state.galleryExpanded); moreBtn.textContent = state.galleryExpanded ? "\u25b2" : "\u2022\u2022\u2022"; }); albumWrap.appendChild(moreBtn); } });
 
     if (!state.galleryGroups.length) {
       const empty = document.createElement("div");
@@ -545,7 +545,7 @@ if (btnHide) {
           ${(item.kind === "vid" || item.kind === "video") ? '<div class="video-badge">▶</div>' : ""}
           <div class="media-meta">${esc(item.name)}</div>`;
         card.addEventListener("click", () => { const list = state.galleryGroups.flatMap(g => g.items.map(it => { const r = "/media/raw/" + encPath(it.rel_path); return { title: it.name, previewUrl: r + "?preview=1", dlUrl: r, kind: it.kind, rel_path: it.rel_path }; })); const idx = list.findIndex(m => m.rel_path === item.rel_path); openCinemaList(list, idx >= 0 ? idx : 0); });
-        grid.appendChild(card);
+        card.addEventListener("contextmenu", (ev) => openCtxMenu(ev, item, { mode: "gallery" })); grid.appendChild(card);
       }
       area.appendChild(grid);
     }
