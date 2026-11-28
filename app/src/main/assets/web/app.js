@@ -311,7 +311,7 @@ if (btnHide) {
         if (isDir) {
           navigateToDir(item.rel_path, true);
         } else if (["img", "image", "vid", "video", "aud", "audio"].includes(item.kind)) {
-          openCinema(item.name, "/file/" + encPath(item.rel_path) + "?preview=1", "/file/" + encPath(item.rel_path), item.kind);
+          const mediaList = items.filter(it => !it.is_dir && ["img", "image", "vid", "video", "aud", "audio"].includes(it.kind)).map(it => ({ title: it.name, previewUrl: "/file/" + encPath(it.rel_path) + "?preview=1", dlUrl: "/file/" + encPath(it.rel_path), kind: it.kind, rel_path: it.rel_path })); const idx = mediaList.findIndex(m => m.rel_path === item.rel_path); openCinemaList(mediaList, idx >= 0 ? idx : 0);
         } else {
           window.location.href = "/file/" + encPath(item.rel_path);
         }
@@ -544,7 +544,7 @@ if (btnHide) {
         card.innerHTML = `<img loading="lazy" src="${thumbUrl}" alt="${esc(item.name)}">
           ${(item.kind === "vid" || item.kind === "video") ? '<div class="video-badge">▶</div>' : ""}
           <div class="media-meta">${esc(item.name)}</div>`;
-        card.addEventListener("click", () => openCinema(item.name, rawUrl + "?preview=1", rawUrl, item.kind));
+        card.addEventListener("click", () => { const list = state.galleryGroups.flatMap(g => g.items.map(it => { const r = "/media/raw/" + encPath(it.rel_path); return { title: it.name, previewUrl: r + "?preview=1", dlUrl: r, kind: it.kind, rel_path: it.rel_path }; })); const idx = list.findIndex(m => m.rel_path === item.rel_path); openCinemaList(list, idx >= 0 ? idx : 0); });
         grid.appendChild(card);
       }
       area.appendChild(grid);
@@ -918,7 +918,7 @@ function stopCinemaMedia() {
   }
 }
 
-function openCinema(title, previewUrl, dlUrl, kind) {
+function openCinemaList(list, idx) { state.cinemaList = Array.isArray(list) ? list : []; state.cinemaIdx = idx >= 0 && idx < state.cinemaList.length ? idx : 0; const entry = state.cinemaList[state.cinemaIdx]; if (!entry) return; if (entry.previewUrl) openCinema(entry.title, entry.previewUrl, entry.dlUrl, entry.kind); else openCinema(entry); } function stepCinema(delta) { if (!state.cinemaList || state.cinemaList.length < 2) return; const n = state.cinemaList.length; state.cinemaIdx = ((state.cinemaIdx || 0) + delta + n) % n; const entry = state.cinemaList[state.cinemaIdx]; if (entry.previewUrl) openCinema(entry.title, entry.previewUrl, entry.dlUrl, entry.kind); else openCinema(entry); } function openCinema(title, previewUrl, dlUrl, kind) {
   if (typeof title === "object" && title !== null) {
     const item = title;
     title = item.name || "";
@@ -939,7 +939,7 @@ function openCinema(title, previewUrl, dlUrl, kind) {
   const timeEl = document.getElementById("c-time");
   const speedBtn = document.getElementById("c-speed");
   const fsBtn = document.getElementById("c-fs");
-  const closeBtn = document.getElementById("cinema-close");
+  const closeBtn = document.getElementById("cinema-close"); const prevBtn = document.getElementById("cinema-prev"); const nextBtn = document.getElementById("cinema-next"); const showNav = !!(state.cinemaList && state.cinemaList.length > 1); if (prevBtn) prevBtn.style.display = showNav ? "flex" : "none"; if (nextBtn) nextBtn.style.display = showNav ? "flex" : "none";
 
   if (titleEl) titleEl.textContent = title || "";
   if (dlEl) { dlEl.href = dlUrl || "#"; dlEl.setAttribute("download", title || ""); }
@@ -1374,10 +1374,10 @@ if (hdz) {
     });
 
     document.getElementById("cinema-close").addEventListener("click", () => {
-      document.getElementById("cinema-body").innerHTML = "";
+      stopCinemaMedia();
       document.getElementById("modal-cinema").classList.remove("open");
     });
-    document.getElementById("sha-close").addEventListener("click", () => {
+    document.getElementById("cinema-prev")?.addEventListener("click", () => stepCinema(-1)); document.getElementById("cinema-next")?.addEventListener("click", () => stepCinema(1)); document.getElementById("sha-close").addEventListener("click", () => {
       document.getElementById("modal-sha").classList.remove("open");
     });
   const btnBulkHide = document.getElementById("btn-bulk-hide");
@@ -1469,6 +1469,6 @@ if (hdz) {
   
     loadFiles();
   });
-  let osdTimer = null; function showPlayerOsd(msg) { const el = document.getElementById("cinema-osd"); if (!el) return; el.textContent = msg; el.classList.add("show"); clearTimeout(osdTimer); osdTimer = setTimeout(() => el.classList.remove("show"), 850); } document.addEventListener("keydown", (e) => { const m = document.getElementById("modal-cinema"); if (!m || !m.classList.contains("open")) return; if (e.key === "Escape") { m.classList.remove("open"); stopCinemaMedia(); return; } const v = document.getElementById("mainVideo"); if (!v || v.style.display === "none") return; if (e.key === " " || e.key === "k") { e.preventDefault(); if (v.paused) { v.play(); showPlayerOsd("▶"); } else { v.pause(); showPlayerOsd("⏸"); } } else if (e.key === "ArrowLeft" || e.key === "j") { e.preventDefault(); v.currentTime = Math.max(0, v.currentTime - 5); showPlayerOsd("-5s"); } else if (e.key === "ArrowRight" || e.key === "l") { e.preventDefault(); v.currentTime = Math.min(v.duration || v.currentTime + 5, v.currentTime + 5); showPlayerOsd("+5s"); } else if (e.key === "ArrowUp") { e.preventDefault(); v.volume = Math.min(1, Math.round((v.volume + 0.1) * 10) / 10); showPlayerOsd(Math.round(v.volume * 100) + "%"); } else if (e.key === "ArrowDown") { e.preventDefault(); v.volume = Math.max(0, Math.round((v.volume - 0.1) * 10) / 10); showPlayerOsd(Math.round(v.volume * 100) + "%"); } else if (e.key === "m") { v.muted = !v.muted; showPlayerOsd(v.muted ? "Muted" : "Unmuted"); } else if (e.key === "f") { if (document.fullscreenElement) document.exitFullscreen(); else v.requestFullscreen?.(); } });
+  let osdTimer = null; function showPlayerOsd(msg) { const el = document.getElementById("cinema-osd"); if (!el) return; el.textContent = msg; el.classList.add("show"); clearTimeout(osdTimer); osdTimer = setTimeout(() => el.classList.remove("show"), 850); } document.addEventListener("keydown", (e) => { const m = document.getElementById("modal-cinema"); if (!m || !m.classList.contains("open")) return; if (e.key === "Escape") { m.classList.remove("open"); stopCinemaMedia(); return; } const v = document.getElementById("mainVideo"); if (!v || v.style.display === "none") { if (e.key === "ArrowLeft") { e.preventDefault(); stepCinema(-1); } else if (e.key === "ArrowRight") { e.preventDefault(); stepCinema(1); } return; } if (e.key === " " || e.key === "k") { e.preventDefault(); if (v.paused) { v.play(); showPlayerOsd("▶"); } else { v.pause(); showPlayerOsd("⏸"); } } else if (e.key === "ArrowLeft" || e.key === "j") { e.preventDefault(); v.currentTime = Math.max(0, v.currentTime - 5); showPlayerOsd("-5s"); } else if (e.key === "ArrowRight" || e.key === "l") { e.preventDefault(); v.currentTime = Math.min(v.duration || v.currentTime + 5, v.currentTime + 5); showPlayerOsd("+5s"); } else if (e.key === "ArrowUp") { e.preventDefault(); v.volume = Math.min(1, Math.round((v.volume + 0.1) * 10) / 10); showPlayerOsd(Math.round(v.volume * 100) + "%"); } else if (e.key === "ArrowDown") { e.preventDefault(); v.volume = Math.max(0, Math.round((v.volume - 0.1) * 10) / 10); showPlayerOsd(Math.round(v.volume * 100) + "%"); } else if (e.key === "m") { v.muted = !v.muted; showPlayerOsd(v.muted ? "Muted" : "Unmuted"); } else if (e.key === "f") { if (document.fullscreenElement) document.exitFullscreen(); else v.requestFullscreen?.(); } });
     function initMarqueeSelect() { const box = document.getElementById("marqueeBox"); if (!box) return; let dragging = false, sx = 0, sy = 0; document.addEventListener("mousedown", (e) => { if (window.innerWidth <= 760 || e.button !== 0) return; if (e.target.closest("button,a,input,select,textarea,label,.modal,header,.tabs,.topbar,.nav-tabs")) return; dragging = true; sx = e.clientX; sy = e.clientY; }); document.addEventListener("mousemove", (e) => { if (!dragging) return; const dx = e.clientX - sx, dy = e.clientY - sy; if (Math.hypot(dx, dy) <= 8 && box.style.display !== "block") return; const l = Math.min(sx, e.clientX), t = Math.min(sy, e.clientY), w = Math.abs(dx), h = Math.abs(dy); box.style.display = "block"; box.style.left = l + "px"; box.style.top = t + "px"; box.style.width = w + "px"; box.style.height = h + "px"; document.querySelectorAll("#content-area .file-row .file-cb").forEach((cb) => { const row = cb.closest(".file-row"); if (!row) return; const r = row.getBoundingClientRect(); const hit = !(r.right < l || r.left > l + w || r.bottom < t || r.top > t + h); if (cb.checked !== hit) { cb.checked = hit; cb.dispatchEvent(new Event("change")); } }); }); document.addEventListener("mouseup", () => { if (!dragging) return; dragging = false; box.style.display = "none"; }); } initMarqueeSelect();
 })();
