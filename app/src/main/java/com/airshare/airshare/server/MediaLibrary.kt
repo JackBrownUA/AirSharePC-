@@ -18,6 +18,7 @@ import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.Semaphore
 
 data class MediaItem(
     val id: Long,
@@ -35,7 +36,8 @@ class MediaLibrary(private val context: Context, private val store: SettingsStor
     private var cachedAtMs = 0L
     private var cachedItems: List<MediaItem> = emptyList()
     private val thumbDir = File(context.cacheDir, "airshare_thumbs").apply { mkdirs() }
-
+    private val thumbSemaphore = Semaphore(3)
+    
     fun invalidateCache() = synchronized(cacheLock) {
         cachedAtMs = 0L
         cachedItems = emptyList()
@@ -130,10 +132,11 @@ class MediaLibrary(private val context: Context, private val store: SettingsStor
             if (album.isNotEmpty() && album != "__all__" && item.album != album) continue
             filtered.add(item)
         }
-
+        val priorityAlbums = setOf("camera", "камера", "dcim")
+        
         val albumsArr = JSONArray()
         albumCounts.entries
-            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key.lowercase(Locale.ROOT) })
+            .sortedWith(compareBy<Map.Entry<String, Int>> { if (it.key.lowercase(Locale.ROOT) in priorityAlbums) 0 else 1 }.thenByDescending { it.value }.thenBy { it.key.lowercase(Locale.ROOT) })
             .forEach { (name, cnt) ->
                 if (showHidden || name !in hiddenAlbums) {
                     albumsArr.put(
@@ -184,13 +187,14 @@ class MediaLibrary(private val context: Context, private val store: SettingsStor
         if (!file.isFile) return null
         val keyRaw = "${file.canonicalPath}:${file.lastModified()}:${file.length()}"
         val key = MessageDigest.getInstance("SHA-1").digest(keyRaw.toByteArray()).joinToString("") { "%02x".format(it) }
-        val cacheFile = File(thumbDir, "$key.jpg")
+        val cacheFile = File(thumbDir, "$key.webp")
         if (cacheFile.isFile) {
             return try { cacheFile.readBytes() } catch (_: Exception) { null }
         }
 
         val ext = file.extension.lowercase(Locale.ROOT).let { if (it.isEmpty()) "" else ".$it" }
         var bmp: Bitmap? = null
+       thumbSemaphore.acquire()
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && mediaId > 0L) {
                 val baseUri = if (ext in SecurityManager.VIDEO_EXTS) {
@@ -237,7 +241,8 @@ class MediaLibrary(private val context: Context, private val store: SettingsStor
             }
             if (bmp != null) {
                 val baos = ByteArrayOutputStream()
-                bmp.compress(Bitmap.CompressFormat.JPEG, 78, baos)
+                val fmt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP
+                bmp.compress(fmt, 76, baos)
                 val bytes = baos.toByteArray()
                 bmp.recycle()
                 if (bytes.isNotEmpty()) {
@@ -247,7 +252,7 @@ class MediaLibrary(private val context: Context, private val store: SettingsStor
             }
         } catch (_: Exception) {
             try { bmp?.recycle() } catch (_: Exception) {}
-        }
+        } finally { thumbSemaphore.release() }
         return null
     }
 }
