@@ -2,7 +2,59 @@
 <html lang="__INIT_LANG__" data-theme="__INIT_THEME__">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>AirShare PC</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body class="__INIT_THEME__">
+  <canvas id="skyCanvas"></canvas>
+
+  <div class="login-wrap">
+    <div class="login-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+        <div class="ctrl-pill" style="padding:5px 10px;">
+          <span>☀ / 🌙</span>
+          <label class="ios-switch">
+            <input type="checkbox" id="themeToggle">
+            <span class="ios-slider"></span>
+          </label>
+        </div>
+        <div class="lang-menu-wrap" id="lang-menu-wrap">
+          <button class="ctrl-pill lang-btn" id="lang-btn" type="button"></button>
+          <div class="lang-dropdown" id="lang-dropdown" style="display:none;"></div>
+        </div>
+      </div>
+
+      <div class="brand-logo" style="margin:0 auto 12px;">A</div>
+      <h1 style="font-size:23px;font-weight:800;text-align:center;margin-bottom:4px;">AirShare PC</h1>
+      <p id="login-sub" style="font-size:13px;opacity:0.78;text-align:center;margin-bottom:18px;"></p>
+
+      <div id="status-area" class="status-box" style="display:none;"></div>
+      <div id="code-display" class="code-big" style="display:none;"></div>
+
+      <button class="btn-upload-hero" id="btn-connect-bio" type="button" style="width:100%;padding:12px;font-size:14px;margin-bottom:10px;"></button>
+      <button class="mini-pill" id="btn-connect-pairs" type="button" style="width:100%;padding:11px;margin-bottom:10px;"></button>
+
+      <details id="pin-details" style="margin-top:8px;text-align:left;">
+        <summary id="pin-summary" style="cursor:pointer;font-size:13px;opacity:0.8;text-align:center;padding:6px;"></summary>
+        <form id="pin-form" style="margin-top:8px;">
+          <input class="login-input" id="pin-input" type="password" inputmode="numeric" maxlength="12" autocomplete="off" placeholder="••••••">
+          <button class="btn-upload-hero" id="btn-pin-submit" type="submit" style="width:100%;padding:10px;"></button>
+        </form>
+      </details>
+    </div>
+
+    <div class="app-footer-pill">Crafted by JackBrownUA • Powered by Gemini</div>
+  </div>
+
+  <script>
+    window.__INIT_LANG__ = "__INIT_LANG__";
+    window.__INIT_THEME__ = "__INIT_THEME__";
+    window.__I18N__ = __INIT_I18N__;
+  </script>
+  <script src="/assets/login.js"></script>
+</body>
+</html
   <title>AirShare PC</title>
   <link rel="stylesheet" href="/assets/style.css">
 </head>
