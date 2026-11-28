@@ -268,13 +268,13 @@ object FileOps {
         walk(storage, "", 0)
         return result
     }
-
+    @Volatile private var recentCacheKey: String = ""; @Volatile private var recentCacheMs: Long = 0L; @Volatile private var recentCacheJson: String? = null; fun invalidateRecentCache() { recentCacheJson = null; recentCacheMs = 0L }
     fun scanRecentFiles(storage: File, hiddenItems: Set<String>, limit: Int = 100): JSONArray {
-        data class Entry(val name: String, val rel: String, val size: Long, val mtime: Long, val kind: String)
+        val cacheKey = "${storage.absolutePath}|${hiddenItems.hashCode()}|$limit"; val now = System.currentTimeMillis(); val cached = recentCacheJson; if (cached != null && cacheKey == recentCacheKey && now - recentCacheMs < 15_000L) return JSONArray(cached); data class Entry(val name: String, val rel: String, val size: Long, val mtime: Long, val kind: String)
         val list = mutableListOf<Entry>()
         val skip = setOf(".thumbnails", ".trash", ".Trashes", TRASH_DIR_NAME, "Android")
         fun walk(dir: File, relPrefix: String, depth: Int) {
-            if (depth > 6 || list.size >= 4000) return
+            if (depth > 4 || list.size >= 1500) return
             val files = dir.listFiles() ?: return
             for (f in files) {
                 val n = f.name
@@ -307,7 +307,7 @@ object FileOps {
                     .put("kind", e.kind),
             )
         }
-        return arr
+        recentCacheKey = cacheKey; recentCacheJson = arr.toString(); recentCacheMs = System.currentTimeMillis(); return arr
     }
 
     fun searchStorage(storage: File, query: String, folderLabel: String): JSONArray {
