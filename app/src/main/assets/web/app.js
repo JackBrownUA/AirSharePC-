@@ -45,6 +45,72 @@
     el._t = setTimeout(() => el.classList.remove("show"), 2600);
   }
 
+let skeletonTimer = null;
+
+function beginFetch() {
+  if (state.fetchCtrl) state.fetchCtrl.abort();
+  state.fetchCtrl = new AbortController();
+  return state.fetchCtrl.signal;
+}
+
+function scheduleSkeleton(mode) {
+  cancelSkeleton();
+  skeletonTimer = setTimeout(() => {
+    const area = document.getElementById("content-area");
+    if (!area) return;
+    if (mode === "gallery") {
+      area.innerHTML = '<div class="sk-grid">' + '<div class="sk-card"></div>'.repeat(12) + '</div>';
+    } else {
+      area.innerHTML = '<div class="sk-list">' + '<div class="sk-row"></div>'.repeat(8) + '</div>';
+    }
+  }, 110);
+}
+
+function cancelSkeleton() {
+  if (skeletonTimer) {
+    clearTimeout(skeletonTimer);
+    skeletonTimer = null;
+  }
+}
+
+function setClipboard(mode, paths) {
+  if (!paths || !paths.length) return;
+  state.clipboard = { mode, paths };
+  updateClipboardUi();
+}
+
+function clearClipboard() {
+  state.clipboard = null;
+  updateClipboardUi();
+}
+
+function updateClipboardUi() {
+  const btnPaste = document.getElementById("btn-paste");
+  const btnCancel = document.getElementById("btn-cancel-clip");
+  const show = !!(state.trusted && state.tab === "files" && state.clipboard);
+  if (btnPaste) {
+    btnPaste.style.display = show ? "inline-flex" : "none";
+    if (show) {
+      const clip = state.clipboard;
+      btnPaste.textContent = "📥 " + t(clip.mode === "copy" ? "web_copy_here" : "web_move_here") + " (" + clip.paths.length + ")";
+    }
+  }
+  if (btnCancel) {
+    btnCancel.style.display = show ? "inline-flex" : "none";
+  }
+}
+
+async function pasteClipboardHere() {
+  const clip = state.clipboard;
+  if (!clip) return;
+  const res = await apiOp(clip.mode, { paths: clip.paths, dest_dir: state.relDir });
+  if (res && res.ok !== false) {
+    toast(t(clip.mode === "copy" ? "web_copied" : "web_moved"));
+    clearClipboard();
+    await loadFiles();
+  }
+}
+
   function esc(str) {
     return String(str || "").replace(/[&<>"']/g, (c) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
@@ -183,6 +249,7 @@ if (btnHide) {
     document.getElementById("btn-upload").style.display = (state.trusted && state.tab === "files") ? "inline-flex" : "none";
     document.getElementById("btn-mkdir").style.display = (state.trusted && state.tab === "files") ? "inline-flex" : "none";
     document.getElementById("dropzone").style.display = (state.trusted && state.tab === "files") ? "block" : "none";
+  updateClipboardUi();
     document.getElementById("btn-empty-trash").style.display = (state.trusted && state.tab === "trash") ? "inline-flex" : "none";
   }
 
@@ -280,9 +347,19 @@ if (btnHide) {
     document.getElementById("cb-select-all").checked = false;
     updateSelectionUi();
 
-    const r = await fetch(`/api/list?dir=${encodeURIComponent(state.relDir)}&page=${state.page}`);
+  const signal = beginFetch();
+  scheduleSkeleton("files");
+  let data;
+  try {
+    const r = await fetch(`/api/list?dir=${encodeURIComponent(state.relDir)}&page=${state.page}`, { signal });
+    cancelSkeleton();
     if (r.status === 401) { window.location.href = "/"; return; }
-    const data = await r.json();
+    data = await r.json();
+  } catch (err) {
+    cancelSkeleton();
+    if (err && err.name === "AbortError") return;
+    throw err;
+  }
     state.trusted = !!data.trusted;
     state.showHidden = !!data.show_hidden;
     state.activeFolder = data.active_folder || "downloads";
@@ -378,10 +455,20 @@ if (btnHide) {
     document.getElementById("favorites-strip").style.display = "none";
     document.getElementById("pager").style.display = "none";
 
-    const url = `/api/gallery?album=${encodeURIComponent(state.galleryAlbum)}&offset=${state.galleryOffset}&limit=120`;
-    const r = await fetch(url);
+  const url = `/api/gallery?album=${encodeURIComponent(state.galleryAlbum)}&offset=${state.galleryOffset}&limit=120`;
+  const signal = beginFetch();
+  if (reset) scheduleSkeleton("gallery");
+  let data;
+  try {
+    const r = await fetch(url, { signal });
+    cancelSkeleton();
     if (r.status === 401) { window.location.href = "/"; return; }
-    const data = await r.json();
+    data = await r.json();
+  } catch (err) {
+    cancelSkeleton();
+    if (err && err.name === "AbortError") return;
+    throw err;
+  }
     state.galleryAlbums = data.albums || [];
     state.galleryHasMore = !!data.has_more;
     state.galleryOffset += 120;
@@ -484,9 +571,19 @@ if (btnHide) {
     document.getElementById("favorites-strip").style.display = "none";
     document.getElementById("pager").style.display = "none";
 
-    const r = await fetch("/api/recent");
+  const signal = beginFetch();
+  scheduleSkeleton("recent");
+  let data;
+  try {
+    const r = await fetch("/api/recent", { signal });
+    cancelSkeleton();
     if (r.status === 401) { window.location.href = "/"; return; }
-    const data = await r.json();
+    data = await r.json();
+  } catch (err) {
+    cancelSkeleton();
+    if (err && err.name === "AbortError") return;
+    throw err;
+  }
     renderFileRows(data.results || [], { showPath: true });
   }
 
@@ -498,9 +595,19 @@ if (btnHide) {
     document.getElementById("favorites-strip").style.display = "none";
     document.getElementById("pager").style.display = "none";
 
-    const r = await fetch("/api/trash");
+  const signal = beginFetch();
+  scheduleSkeleton("trash");
+  let data;
+  try {
+    const r = await fetch("/api/trash", { signal });
+    cancelSkeleton();
     if (r.status === 401) { window.location.href = "/"; return; }
-    const data = await r.json();
+    data = await r.json();
+  } catch (err) {
+    cancelSkeleton();
+    if (err && err.name === "AbortError") return;
+    throw err;
+  }
     const area = document.getElementById("content-area");
     const items = data.items || [];
     if (!items.length) {
@@ -566,9 +673,19 @@ if (btnHide) {
     document.getElementById("breadcrumbs").style.display = "none";
     document.getElementById("favorites-strip").style.display = "none";
     document.getElementById("pager").style.display = "none";
-    const r = await fetch("/api/search?q=" + encodeURIComponent(q));
+  const signal = beginFetch();
+  scheduleSkeleton("search");
+  let data;
+  try {
+    const r = await fetch("/api/search?q=" + encodeURIComponent(q), { signal });
+    cancelSkeleton();
     if (r.status === 401) { window.location.href = "/"; return; }
-    const data = await r.json();
+    data = await r.json();
+  } catch (err) {
+    cancelSkeleton();
+    if (err && err.name === "AbortError") return;
+    throw err;
+  }
     const resList = data.results || []; renderFileRows(resList, { showPath: true }); const ic = document.getElementById("items-count"); if (ic) ic.textContent = t("web_total_items", { count: resList.length });
   }
 
@@ -907,7 +1024,11 @@ function openCtxMenu(ev, item) {
     m.appendChild(btn);
   };
   const addSep = () => { const d = document.createElement("div"); d.className = "ctx-sep"; m.appendChild(d); };
-
+  if (state.trusted && state.tab === "files" && state.clipboard) {
+    const clip = state.clipboard;
+    addItem("📥 " + t(clip.mode === "copy" ? "web_copy_here" : "web_move_here") + " (" + clip.paths.length + ")", () => pasteClipboardHere());
+    addSep();
+  }
   if (isDir) {
     addItem("📂 " + (t("web_ctx_open") || "Open"), () => navigateToDir(item.rel_path, true));
     addItem("⬇ ZIP", () => { window.location.href = "/zip?dir=" + encodeURIComponent(item.rel_path); });
@@ -940,8 +1061,8 @@ function openCtxMenu(ev, item) {
       if (res && res.ok) reloadCurrentTab();
       else toast((res && res.msg) || "Error");
     });
-    addItem("📁 " + (t("web_ctx_move") || "Move"), () => openFolderPicker("move", [item.rel_path]));
-    addItem("📋 " + (t("web_ctx_copy") || "Copy"), () => openFolderPicker("copy", [item.rel_path]));
+    addItem("📁 " + (t("web_ctx_move") || "Move"), () => setClipboard("move", [item.rel_path]));
+    addItem("📋 " + (t("web_ctx_copy") || "Copy"), () => setClipboard("copy", [item.rel_path]));
     addItem("👁 " + (t("web_ctx_hide") || "Hide"), async () => {
       await apiOp("hide", { rel_path: item.rel_path });
       reloadCurrentTab();
@@ -1151,9 +1272,11 @@ if (hdz) {
       if (qs) window.location.href = "/download_selected?" + qs;
     });
 
-    document.getElementById("btn-bulk-move").addEventListener("click", () => openFolderPicker("move", Array.from(state.selected)));
-    document.getElementById("btn-bulk-copy").addEventListener("click", () => openFolderPicker("copy", Array.from(state.selected)));
+    document.getElementById("btn-bulk-move").addEventListener("click", () => setClipboard("move", Array.from(state.selected)));
+    document.getElementById("btn-bulk-copy").addEventListener("click", () => setClipboard("copy", Array.from(state.selected)));
     document.getElementById("btn-bulk-delete").addEventListener("click", () => openDeleteModal(Array.from(state.selected)));
+  document.getElementById("btn-paste")?.addEventListener("click", () => pasteClipboardHere());
+  document.getElementById("btn-cancel-clip")?.addEventListener("click", () => clearClipboard());
 
     document.getElementById("btn-empty-trash").addEventListener("click", async () => {
       if (!confirm(t("web_empty_trash_confirm"))) return;
@@ -1270,6 +1393,7 @@ if (hdz) {
   }
 
   setInterval(async () => {
+    if (document.hidden) return;
     try {
       const r = await fetch("/api/status");
       if (r.status === 401 || r.status === 403) {
@@ -1285,6 +1409,11 @@ if (hdz) {
       }
       if (d.active_folder !== undefined && d.active_folder !== state.activeFolder) {
         state.activeFolder = d.active_folder;
+      state.relDir = "";
+      state.page = 1;
+      state.galleryAlbum = "";
+      clearClipboard();
+      history.replaceState({ tab: state.tab, dir: "" }, "", window.location.pathname + window.location.search);
         changed = true;
       }
       if (changed) {
