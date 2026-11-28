@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <title>AirShare PC</title>
-  <link rel="stylesheet" href="/assets/style.css">
+  <link rel="stylesheet" href="/assets/style.css?v=205">
 </head>
 <body class="__INIT_THEME__">
   <canvas id="skyCanvas"></canvas>
@@ -60,6 +60,8 @@
         <button class="mini-pill btn-access" id="btn-access" type="button" style="display:none;"></button>
         <button class="mini-pill desktop-only" id="btn-wide" type="button"></button>
         <button class="mini-pill" id="btn-hidden" type="button" style="display:none;"></button>
+        <button class="mini-pill btn-zip" id="btn-paste" type="button" style="display:none;"></button>
+        <button class="mini-pill" id="btn-cancel-clip" type="button" style="display:none;">&#10005;/<button>
         <button class="mini-pill btn-danger" id="btn-empty-trash" type="button" style="display:none;"></button>
       </div>
 
@@ -99,8 +101,7 @@
         <input type="checkbox" id="cb-select-all" class="file-cb">
         <span id="lbl-select-all"></span>
       </label>
-<button class="mini-pill btn-xs" id="btn-invert-sel" type="button"></button>
-<button class="mini-pill btn-xs" id="btn-clear-sel" type="button"></button>
+<button class="mini-pill btn-xs" id="btn-toggle-sel" type="button"></button>
 </div>
       <span id="items-count" class="items-count"></span>
     </div>
@@ -111,7 +112,10 @@
 
   <footer class="app-footer-pill">Crafted by JackBrownUA • Powered by Gemini</footer>
 
-  <!-- Custom Delete Confirmation Modal -->
+  <div class="modal-backdrop" id="modal-input">
+      <div class="modal-card"><div class="modal-title" id="inp-modal-title"></div><form id="inp-modal-form"><input class="search-input" id="inp-modal-field" type="text" autocomplete="off" style="width:100%;margin-bottom:14px;"><div class="modal-actions"><button class="mini-pill" id="inp-modal-cancel" type="button"></button><button class="mini-pill btn-primary" id="inp-modal-ok" type="submit"></button></div></form></div>
+ </div>
+   <!--  Custom Delete Confirmation Modal -->
   <div class="modal-backdrop" id="modal-delete">
     <div class="modal-card">
       <div class="modal-title" id="del-modal-title"></div>
@@ -177,8 +181,10 @@
       </div>
       <div class="cinema-stage">
         <canvas id="ambilightCanvas" class="ambilight-canvas"></canvas>
+        <button class="cinema-nav cinema-prev" id="cinema-prev" type="button" style="display:none;">&lsaquo;</button>
         <div id="cinema-body" class="cinema-body"></div>
-<div id="cinema-osd" class="cinema-osd" style="display:none;"></div>
+        <button class="cinema-nav cinema-next" id="cinema-next" type="button" style="display:none;">&rsaquo;</button>
+        <div id="cinema-osd" class="cinema-osd" style="display:none;"></div>
         <div id="cinema-resume" class="cinema-resume" style="display:none;">
           <span id="c-resume-text"></span>
           <button class="mini-pill btn-resume" id="c-resume-btn" type="button">▶</button>
@@ -216,6 +222,6 @@
     window.__INIT_THEME__ = "__INIT_THEME__";
     window.__I18N__ = __INIT_I18N__;
   </script>
-  <script src="/assets/app.js"></script>
+  <script src="/assets/app.js?v=205"></script>
 </body>
 </html>
