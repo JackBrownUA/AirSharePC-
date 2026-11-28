@@ -8,6 +8,7 @@
 </head>
 <body class="__INIT_THEME__">
   <canvas id="skyCanvas"></canvas>
+<div id="marqueeBox" class="marquee-box"></div>
   <div id="bg-scene" style="display:none;">
     <div class="bg-layer" id="layer-far"></div>
     <div class="bg-layer" id="layer-near"></div>
@@ -32,6 +33,13 @@
       </div>
     </div>
     <div class="top-right-controls">
+  <div class="ctrl-pill">
+  <span id="lbl-preview">🖼️ Preview</span>
+<label class="ios-switch">
+  <input type="checkbox" id="previewToggle">
+<span class="ios-slider"></span>
+</label>
+  </div>
       <div class="lang-menu-wrap" id="lang-menu-wrap">
         <button class="ctrl-pill lang-btn" id="lang-btn" type="button"></button>
         <div class="lang-dropdown" id="lang-dropdown" style="display:none;"></div>
@@ -54,6 +62,7 @@
       <div class="header-actions" id="action-bar">
         <button class="btn-upload-hero" id="btn-upload" type="button" style="display:none;"></button>
         <input type="file" id="file-input" multiple style="display:none;">
+<button class="mini-pill" id="btn-up-dir" type="button" style="display:none;"></button>
         <button class="mini-pill" id="btn-mkdir" type="button" style="display:none;"></button>
         <button class="mini-pill btn-access" id="btn-access" type="button" style="display:none;"></button>
         <button class="mini-pill desktop-only" id="btn-wide" type="button"></button>
@@ -92,10 +101,14 @@
     </div>
 
     <div class="select-toolbar" id="select-toolbar">
+<div class="select-left-group">
       <label class="select-all-label">
         <input type="checkbox" id="cb-select-all" class="file-cb">
         <span id="lbl-select-all"></span>
       </label>
+<button class="mini-pill btn-xs" id="btn-invert-sel" type="button"></button>
+<button class="mini-pill btn-xs" id="btn-clear-sel" type="button"></button>
+</div>
       <span id="items-count" class="items-count"></span>
     </div>
 
@@ -172,6 +185,7 @@
       <div class="cinema-stage">
         <canvas id="ambilightCanvas" class="ambilight-canvas"></canvas>
         <div id="cinema-body" class="cinema-body"></div>
+<div id="cinema-osd" class="cinema-osd" style="display:none;"></div>
         <div id="cinema-resume" class="cinema-resume" style="display:none;">
           <span id="c-resume-text"></span>
           <button class="mini-pill btn-resume" id="c-resume-btn" type="button">▶</button>
