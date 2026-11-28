@@ -41,7 +41,6 @@ import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -770,17 +769,9 @@ fun AuthChallengeModal(
         }
 
         if (!isAccessChange) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = trustedChoice,
-                    onClick = { trustedChoice = true },
-                    label = { Text(tr("auth_trust_full", emptyArray()), fontSize = 12.sp) },
-                )
-                FilterChip(
-                    selected = !trustedChoice,
-                    onClick = { trustedChoice = false },
-                    label = { Text(tr("auth_trust_guest", emptyArray()), fontSize = 12.sp) },
-                )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+               Surface(onClick = { trustedChoice = true }, modifier = Modifier.weight(1f).height(50.dp), shape = RoundedCornerShape(14.dp), color = if (trustedChoice) palette.green.copy(alpha = 0.22f) else palette.drawerCard, border = BorderStroke(1.2.dp, if (trustedChoice) palette.green else palette.cardBorder)) { Box(modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp), contentAlignment = Alignment.Center) { Text(tr("auth_trust_full", emptyArray()), fontSize = 11.5.sp, maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center) } }
+               Surface(onClick = { trustedChoice = false }, modifier = Modifier.weight(1f).height(50.dp), shape = RoundedCornerShape(14.dp), color = if (!trustedChoice) palette.blue.copy(alpha = 0.22f) else palette.drawerCard, border = BorderStroke(1.2.dp, if (!trustedChoice) palette.blue else palette.cardBorder)) { Box(modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp), contentAlignment = Alignment.Center) { Text(tr("auth_trust_guest", emptyArray()), fontSize = 11.5.sp, maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center) } }
             }
         }
 
