@@ -33,7 +33,7 @@ class SettingsStore(private val context: Context) {
         )
         val SUPPORTED_CODES = SUPPORTED_LANGUAGES.map { it.first }.toSet()
         val DEFAULT_FAVORITES = listOf("Download", "DCIM")
-        val DEFAULT_HIDDEN_ITEMS = listOf("Android", "Alarms", "Audiobooks", "Backups")
+        val DEFAULT_HIDDEN_ITEMS = listOf("Android")
         private val WEAK_SEQ = "01234567890123456789 98765432109876543210"
         private val PRIMARY_PREFIXES = listOf("wlan", "swlan", "wifi", "eth", "en", "wl")
         private val SECONDARY_PREFIXES = listOf("ap", "softap", "rndis", "p2p")
