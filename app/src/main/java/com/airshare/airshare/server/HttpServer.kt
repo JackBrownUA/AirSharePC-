@@ -133,7 +133,7 @@ class HttpServer(
     }
 
     private fun urlDecode(s: String): String =
-        try { URLDecoder.decode(s, "UTF-8") } catch (_: Exception) { s }
+        try { URLDecoder.decode(s.replace("+", "%2B"), "UTF-8") } catch (_: Exception) { s }
 
     private fun parseCookies(header: String?): Map<String, String> {
         if (header.isNullOrBlank()) return emptyMap()
@@ -778,7 +778,7 @@ class HttpServer(
 
         val extra = LinkedHashMap<String, String>()
         extra["Accept-Ranges"] = "bytes"
-        extra["Cache-Control"] = "no-store"
+        extra["Cache-Control"] = if (mime.startsWith("video/") || mime.startsWith("audio/")) "private, max-age=300" else "no-store"
         if (sandboxed) extra["Content-Security-Policy"] = "sandbox"
         if (forceAttach) extra["Content-Disposition"] = SecurityManager.makeContentDisposition(file.name, "attachment")
 
@@ -801,7 +801,7 @@ class HttpServer(
                     }
                 } else {
                     val sVal = sStr.toLongOrNull()
-                    val eVal = if (eStr.isEmpty()) { if (sVal != null && (mime.startsWith("video/") || mime.startsWith("audio/"))) (sVal + 8L * 1024L * 1024L - 1L).coerceAtMost(size - 1L) else size - 1L } else eStr.toLongOrNull()
+                    val eVal = if (eStr.isEmpty()) size - 1L else eStr.toLongOrNull()
                     if (sVal == null || eVal == null || sVal < 0L || sVal >= size || eVal < sVal) {
                         writeHeaders(out, 416, "Range Not Satisfiable", "text/plain", 0L, mapOf("Content-Range" to "bytes */$size"))
                         out.flush()
