@@ -27,6 +27,7 @@
     galleryGroups: [],
     galleryAlbums: [],
     parallaxEnabled: localStorage.getItem("airshare_parallax") !== "0",
+    previewEnabled: localStorage.getItem("airshare_preview") === "1",
     wideView: localStorage.getItem("airshare_wide") === "1",
     pendingDeletePaths: [],
     pickerMode: "move",
@@ -255,10 +256,19 @@ if (btnHide) {
         updateSelectionUi();
       });
 
-      const icon = document.createElement("div");
+      let icon;
+      if (state.previewEnabled && !isDir && ["img", "image", "vid", "video"].includes(item.kind)) {
+            icon = document.createElement("img");
+        icon.className = "file-thumb";
+        icon.loading = "lazy";
+        icon.alt = item.name || "";
+        icon.src = "/file/" + encPath(item.rel_path) + "?thumb=1";
+        } else {
+        icon = document.createElement("div");
       icon.className = "file-icon";
       icon.innerHTML = fileIconSvg(item.name, isDir, item.kind);
-
+      }
+      
       const main = document.createElement("div");
       main.className = "file-main";
       main.innerHTML = `<div class="file-name">${esc(item.name)}</div>
@@ -315,7 +325,9 @@ if (btnHide) {
     state.activeFolder = data.active_folder || "downloads";
     state.totalPages = data.total_pages || 1;
     applyRoleUi();
-
+    const upBtn = document.getElementById("btn-up-dir");
+    if (upBtn) upBtn.style.display = (state.relDir ? "inline-flex" : "none");
+    
     const favEl = document.getElementById("favorites-strip");
     if (data.favorites && data.favorites.length && !state.relDir) {
       favEl.style.display = "flex";
@@ -1037,7 +1049,10 @@ setTxt("dropzone", "⬆ " + t("web_drop_hint"));
 setTxt("cinema-ambient-btn", t("web_ambilight"));
 setTxt("c-pip", t("web_pip"));
 setTxt("c-mini", t("web_mini"));
-
+    setTxt("lbl-preview", t("web_preview"));
+    setTxt("btn-up-dir", "↑ " + t("web_up_dir"));
+    setTxt("btn-invert-sel", t("web_invert_sel"));
+    setTxt("btn-clear-sel", t("web_clear_sel"));
     const langFlags = {
     en: `<svg viewBox="0 0 24 16" width="20" height="14"><rect width="24" height="16" fill="#012169"/><path d="M0,0 L24,16 M24,0 L0,16" stroke="#fff" stroke-width="3"/><path d="M0,0 L24,16 M24,0 L0,16" stroke="#C8102E" stroke-width="1.5"/><path d="M12,0 V16 M0,8 H24" stroke="#fff" stroke-width="5"/><path d="M12,0 V16 M0,8 H24" stroke="#C8102E" stroke-width="3"/></svg>`,
     ru: `<svg viewBox="0 0 24 16" width="20" height="14"><rect width="24" height="5.33" fill="#fff"/><rect y="5.33" width="24" height="5.33" fill="#0039A6"/><rect y="10.67" width="24" height="5.33" fill="#D52B1E"/></svg>`,
@@ -1098,7 +1113,13 @@ if (pToggle) {
     state.parallaxEnabled = !!pToggle.checked;
     localStorage.setItem("airshare_parallax", state.parallaxEnabled ? "1" : "0");
   });
-}
+}  
+    const prevToggle = document.getElementById("previewToggle");
+        if (prevToggle) {
+          prevToggle.checked = !!state.previewEnabled;
+          prevToggle.addEventListener("change", () => { state.previewEnabled = !!prevToggle.checked; localStorage.setItem("airshare_preview", state.previewEnabled ? "1" : "0"); if (state.tab === "files") reloadCurrentTab(); }); }
+        const upBtn = document.getElementById("btn-up-dir"); if (upBtn) upBtn.addEventListener("click", () => { const parts = (state.relDir || "").split("/").filter(Boolean); parts.pop(); state.relDir = parts.join("/"); state.page = 1; loadFiles(); });
+    const invBtn = document.getElementById("btn-invert-sel"); if (invBtn) invBtn.addEventListener("click", () => { document.querySelectorAll("#content-area .file-cb").forEach(cb => { cb.checked = !cb.checked; cb.dispatchEvent(new Event("change")); }); }); const clrBtn = document.getElementById("btn-clear-sel"); if (clrBtn) clrBtn.addEventListener("click", () => { document.querySelectorAll("#content-area .file-cb").forEach(cb => { cb.checked = false; cb.dispatchEvent(new Event("change")); }); const sa = document.getElementById("cb-select-all"); if (sa) sa.checked = false; });
 
     document.querySelectorAll(".tab-btn").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -1315,4 +1336,6 @@ if (hdz) {
     initSky();
     loadFiles();
   });
+  let osdTimer = null; function showPlayerOsd(msg) { const el = document.getElementById("cinema-osd"); if (!el) return; el.textContent = msg; el.classList.add("show"); clearTimeout(osdTimer); osdTimer = setTimeout(() => el.classList.remove("show"), 850); } document.addEventListener("keydown", (e) => { const m = document.getElementById("modal-cinema"); if (!m || !m.classList.contains("open")) return; if (e.key === "Escape") { m.classList.remove("open"); stopCinemaMedia(); return; } const v = document.getElementById("mainVideo"); if (!v || v.style.display === "none") return; if (e.key === " " || e.key === "k") { e.preventDefault(); if (v.paused) { v.play(); showPlayerOsd("▶"); } else { v.pause(); showPlayerOsd("⏸"); } } else if (e.key === "ArrowLeft" || e.key === "j") { e.preventDefault(); v.currentTime = Math.max(0, v.currentTime - 5); showPlayerOsd("-5s"); } else if (e.key === "ArrowRight" || e.key === "l") { e.preventDefault(); v.currentTime = Math.min(v.duration || v.currentTime + 5, v.currentTime + 5); showPlayerOsd("+5s"); } else if (e.key === "ArrowUp") { e.preventDefault(); v.volume = Math.min(1, Math.round((v.volume + 0.1) * 10) / 10); showPlayerOsd(Math.round(v.volume * 100) + "%"); } else if (e.key === "ArrowDown") { e.preventDefault(); v.volume = Math.max(0, Math.round((v.volume - 0.1) * 10) / 10); showPlayerOsd(Math.round(v.volume * 100) + "%"); } else if (e.key === "m") { v.muted = !v.muted; showPlayerOsd(v.muted ? "Muted" : "Unmuted"); } else if (e.key === "f") { if (document.fullscreenElement) document.exitFullscreen(); else v.requestFullscreen?.(); } });
+    function initMarqueeSelect() { const box = document.getElementById("marqueeBox"); if (!box) return; let dragging = false, sx = 0, sy = 0; document.addEventListener("mousedown", (e) => { if (window.innerWidth <= 760 || e.button !== 0) return; if (e.target.closest("button,a,input,select,textarea,label,.modal,header,.tabs,.topbar,.nav-tabs")) return; dragging = true; sx = e.clientX; sy = e.clientY; }); document.addEventListener("mousemove", (e) => { if (!dragging) return; const dx = e.clientX - sx, dy = e.clientY - sy; if (Math.hypot(dx, dy) <= 8 && box.style.display !== "block") return; const l = Math.min(sx, e.clientX), t = Math.min(sy, e.clientY), w = Math.abs(dx), h = Math.abs(dy); box.style.display = "block"; box.style.left = l + "px"; box.style.top = t + "px"; box.style.width = w + "px"; box.style.height = h + "px"; document.querySelectorAll("#content-area .file-row .file-cb").forEach((cb) => { const row = cb.closest(".file-row"); if (!row) return; const r = row.getBoundingClientRect(); const hit = !(r.right < l || r.left > l + w || r.bottom < t || r.top > t + h); if (cb.checked !== hit) { cb.checked = hit; cb.dispatchEvent(new Event("change")); } }); }); document.addEventListener("mouseup", () => { if (!dragging) return; dragging = false; box.style.display = "none"; }); } initMarqueeSelect();
 })();
