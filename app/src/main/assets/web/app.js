@@ -609,7 +609,8 @@ if (btnHide) {
     throw err;
   }
     const area = document.getElementById("content-area");
-    const items = data.items || [];
+    const items = data.items || []; const ic = document.getElementById("items-count"); if (ic) ic.textContent = t("web_total_items", { count: items.length });
+    const et = document.getElementById("btn-empty-trash"); if (et) et.style.display = (state.trusted && items.length > 0) ? "inline-flex" : "none";
     if (!items.length) {
       area.innerHTML = `<div class="empty-state">${esc(t("web_trash_empty"))}</div>`;
       return;
@@ -624,7 +625,7 @@ if (btnHide) {
 
     for (const item of items) {
       const row = document.createElement("div");
-      row.className = "file-row";
+      row.className = "file-row"; row.addEventListener("contextmenu", (ev) => { ev.preventDefault(); openCtxMenu(ev, item, { mode: "trash" }); });
       const icon = document.createElement("div");
       icon.className = "file-icon";
       icon.innerHTML = fileIconSvg(item.name, item.is_dir, "");
@@ -1043,7 +1044,7 @@ function hideCtxMenu() {
   if (m) m.style.display = "none";
 }
 
-function openCtxMenu(ev, item) {
+function openCtxMenu(ev, item, opts = {}) {
   const m = document.getElementById("ctxMenu");
   if (!m) return;
   const isDir = item.kind === "dir" || item.is_dir;
@@ -1058,7 +1059,8 @@ function openCtxMenu(ev, item) {
     m.appendChild(btn);
   };
   const addSep = () => { const d = document.createElement("div"); d.className = "ctx-sep"; m.appendChild(d); };
-  if (state.trusted && state.tab === "files" && state.clipboard) {
+  if (opts && opts.mode === "trash") { addItem("↩ " + t("web_trash_restore"), async () => { await apiOp("restore", { ids: [item.id] }); toast(t("web_restored")); loadTrash(); }); addItem("🗑 " + t("web_trash_purge"), async () => { await apiOp("purge", { ids: [item.id] }); toast(t("web_purged")); loadTrash(); }, true); } else if (opts && opts.mode === "gallery") { addItem("👁 " + t("web_ctx_open"), () => openCinema(item)); addItem("⬇ " + t("web_ctx_download"), () => { window.location.href = "/media/raw/" + encPath(item.rel_path) + "?download=1"; }); } else {
+    if (state.trusted && state.tab === "files" && state.clipboard) {
     const clip = state.clipboard;
     addItem("📥 " + t(clip.mode === "copy" ? "web_copy_here" : "web_move_here") + " (" + clip.paths.length + ")", () => pasteClipboardHere());
     addSep();
@@ -1104,7 +1106,7 @@ function openCtxMenu(ev, item) {
     });
     addSep();
     addItem("🗑 " + (t("web_ctx_trash") || "Delete"), () => openDeleteModal([item.rel_path]), true);
-  }
+  }}
   m.style.display = "block";
   const mw = m.offsetWidth || 190, mh = m.offsetHeight || 220;
   const x = Math.min(ev.clientX, window.innerWidth - mw - 8);
