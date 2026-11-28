@@ -223,7 +223,7 @@ async function pasteClipboardHere() {
 if (btnHide) {
   btnHide.style.display = (n > 0 && canEdit) ? "inline-flex" : "none";
   btnHide.textContent = `👁 ${t("web_ctx_hide")} (${n})`;
-}
+} const btnToggleSel = document.getElementById("btn-toggle-sel"); if (btnToggleSel) btnToggleSel.textContent = n > 0 ? t("web_clear_sel") : t("web_invert_sel");
   }
 
   function folderTitleByKey(key) {
@@ -250,7 +250,7 @@ if (btnHide) {
     document.getElementById("btn-mkdir").style.display = (state.trusted && state.tab === "files") ? "inline-flex" : "none";
     document.getElementById("dropzone").style.display = (state.trusted && state.tab === "files") ? "block" : "none";
   updateClipboardUi();
-    document.getElementById("btn-empty-trash").style.display = (state.trusted && state.tab === "trash") ? "inline-flex" : "none";
+    document.getElementById("btn-empty-trash").style.display = (state.trusted && state.tab === "trash") ? "inline-flex" : "none"; const selToolbar = document.getElementById("select-toolbar"); if (selToolbar) selToolbar.style.display = (state.tab === "gallery" || state.tab === "trash") ? "none" : "flex";
   }
 
   async function apiOp(op, body) {
@@ -303,10 +303,10 @@ if (btnHide) {
       icon.innerHTML = fileIconSvg(item.name, isDir, item.kind);
       }
       
-      const main = document.createElement("div");
+      const main = document.createElement("div"); const dirOnly = item.rel_path && item.rel_path.includes("/") ? item.rel_path.slice(0, item.rel_path.lastIndexOf("/")) : "";
       main.className = "file-main";
       main.innerHTML = `<div class="file-name">${esc(item.name)}</div>
-        <div class="file-sub">${isDir ? "" : esc(item.size_str || "")}${opts && opts.showPath ? " • " + esc(item.rel_path) : ""}</div>`;
+        <div class="file-sub">${isDir ? "" : esc(item.size_str || "")}${opts && opts.showPath && dirOnly ? (isDir ? "" : " \u2022 ") + esc(dirOnly) : ""}</div>`;
       main.addEventListener("click", () => {
         if (isDir) {
           navigateToDir(item.rel_path, true);
@@ -584,7 +584,7 @@ if (btnHide) {
     if (err && err.name === "AbortError") return;
     throw err;
   }
-    renderFileRows(data.results || [], { showPath: true });
+    const resList = data.items || data.results || []; renderFileRows(resList, { showPath: true });
   }
 
   async function loadTrash() {
@@ -1171,8 +1171,8 @@ setTxt("c-pip", t("web_pip"));
 setTxt("c-mini", t("web_mini"));
     setTxt("lbl-preview", t("web_preview"));
     setTxt("btn-up-dir", "↑ " + t("web_up_dir"));
-    setTxt("btn-invert-sel", t("web_invert_sel"));
-    setTxt("btn-clear-sel", t("web_clear_sel"));
+    setTxt("btn-toggle-sel", t("web_invert_sel"));
+     
     const langFlags = {
     en: `<svg viewBox="0 0 24 16" width="20" height="14"><rect width="24" height="16" fill="#012169"/><path d="M0,0 L24,16 M24,0 L0,16" stroke="#fff" stroke-width="3"/><path d="M0,0 L24,16 M24,0 L0,16" stroke="#C8102E" stroke-width="1.5"/><path d="M12,0 V16 M0,8 H24" stroke="#fff" stroke-width="5"/><path d="M12,0 V16 M0,8 H24" stroke="#C8102E" stroke-width="3"/></svg>`,
     ru: `<svg viewBox="0 0 24 16" width="20" height="14"><rect width="24" height="5.33" fill="#fff"/><rect y="5.33" width="24" height="5.33" fill="#0039A6"/><rect y="10.67" width="24" height="5.33" fill="#D52B1E"/></svg>`,
@@ -1237,9 +1237,9 @@ if (pToggle) {
     const prevToggle = document.getElementById("previewToggle");
         if (prevToggle) {
           prevToggle.checked = !!state.previewEnabled;
-          prevToggle.addEventListener("change", () => { state.previewEnabled = !!prevToggle.checked; localStorage.setItem("airshare_preview", state.previewEnabled ? "1" : "0"); if (_lastItems && _lastItems.length) renderFileRows(_lastItems, _lastOpts); else reloadCurrentTab(); }); }
+          prevToggle.addEventListener("change", () => { state.previewEnabled = !!prevToggle.checked; localStorage.setItem("airshare_preview", state.previewEnabled ? "1" : "0"); if ((state.tab === "files" || state.tab === "recent") && _lastItems && _lastItems.length) renderFileRows(_lastItems, _lastOpts); }); }
         const upBtn = document.getElementById("btn-up-dir"); if (upBtn) upBtn.addEventListener("click", () => { const parts = (state.relDir || "").split("/").filter(Boolean); parts.pop(); navigateToDir(parts.join("/"), true); });
-    const invBtn = document.getElementById("btn-invert-sel"); if (invBtn) invBtn.addEventListener("click", () => { document.querySelectorAll("#content-area .file-cb").forEach(cb => { cb.checked = !cb.checked; cb.dispatchEvent(new Event("change")); }); }); const clrBtn = document.getElementById("btn-clear-sel"); if (clrBtn) clrBtn.addEventListener("click", () => { document.querySelectorAll("#content-area .file-cb").forEach(cb => { cb.checked = false; cb.dispatchEvent(new Event("change")); }); const sa = document.getElementById("cb-select-all"); if (sa) sa.checked = false; });
+    const toggleSelBtn = document.getElementById("btn-toggle-sel"); if (toggleSelBtn) toggleSelBtn.addEventListener("click", () => { if (state.selected.size > 0) { document.querySelectorAll("#content-area .file-cb").forEach(cb => { cb.checked = false; cb.dispatchEvent(new Event("change")); }); const sa = document.getElementById("cb-select-all"); if (sa) sa.checked = false; } else { document.querySelectorAll("#content-area .file-cb").forEach(cb => { cb.checked = !cb.checked; cb.dispatchEvent(new Event("change")); }); } });
 
     document.querySelectorAll(".tab-btn").forEach(btn => {
       btn.addEventListener("click", () => {
