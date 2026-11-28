@@ -135,42 +135,7 @@
     return [h0,h1,h2,h3,h4,h5,h6,h7].map(x => x.toString(16).padStart(8, "0")).join("");
   }
 
-  function initSky() {
-    const far = document.getElementById("layer-far");
-    const near = document.getElementById("layer-near");
-    for (let i = 0; i < 65; i++) {
-      const s = document.createElement("div");
-      s.className = "star";
-      const sz = (1 + Math.random() * 2.1).toFixed(1) + "px";
-      s.style.width = sz; s.style.height = sz;
-      s.style.left = (Math.random() * 100).toFixed(2) + "%";
-      s.style.top = (Math.random() * 100).toFixed(2) + "%";
-      s.style.animationDelay = (Math.random() * 4).toFixed(2) + "s";
-      (i % 2 === 0 ? far : near).appendChild(s);
-    }
-    for (let i = 0; i < 7; i++) {
-      const c = document.createElement("div");
-      c.className = "cloud";
-      c.style.width = (150 + Math.random() * 200) + "px";
-      c.style.height = (50 + Math.random() * 46) + "px";
-      c.style.top = (6 + i * 13) + "%";
-      c.style.left = (-20 + i * 15) + "%";
-      c.style.animationDuration = (34 + i * 7) + "s";
-      (i % 2 === 0 ? far : near).appendChild(c);
-    }
-    window.addEventListener("mousemove", (e) => {
-      if (!state.parallaxEnabled) {
-        far.style.transform = "none";
-        near.style.transform = "none";
-        return;
-      }
-      const dx = (e.clientX / window.innerWidth - 0.5) * 2;
-      const dy = (e.clientY / window.innerHeight - 0.5) * 2;
-      far.style.transform = `translate3d(${(-dx * 10).toFixed(1)}px, ${(-dy * 10).toFixed(1)}px, 0)`;
-      near.style.transform = `translate3d(${(-dx * 22).toFixed(1)}px, ${(-dy * 22).toFixed(1)}px, 0)`;
-    });
-  }
-
+  
   function updateSelectionUi() {
     const n = state.selected.size;
     const btnZip = document.getElementById("btn-download-zip");
@@ -231,7 +196,9 @@ if (btnHide) {
     return r.json();
   }
 
+  let _lastItems = []; let _lastOpts = null;
   function renderFileRows(items, opts) {
+    _lastItems = items || []; _lastOpts = opts || null;
     const area = document.getElementById("content-area");
     if (!items || !items.length) {
       area.innerHTML = `<div class="empty-state">${esc(t("web_no_files"))}</div>`;
@@ -272,15 +239,11 @@ if (btnHide) {
       const main = document.createElement("div");
       main.className = "file-main";
       main.innerHTML = `<div class="file-name">${esc(item.name)}</div>
-        <div class="file-sub">${esc(item.size_str || "")}${opts && opts.showPath ? " • " + esc(item.rel_path) : ""}</div>`;
+        <div class="file-sub">${isDir ? "" : esc(item.size_str || "")}${opts && opts.showPath ? " • " + esc(item.rel_path) : ""}</div>`;
       main.addEventListener("click", () => {
         if (isDir) {
-          state.tab = "files";
-          state.relDir = item.rel_path;
-          state.page = 1;
-          syncTabButtons();
-          loadFiles();
-        } else if (item.kind === "img" || item.kind === "image" || item.kind === "vid" || item.kind === "video" || item.kind === "aud" || item.kind === "audio") {
+          navigateToDir(item.rel_path, true);
+        } else if (["img", "image", "vid", "video", "aud", "audio"].includes(item.kind)) {
           openCinema(item.name, "/file/" + encPath(item.rel_path) + "?preview=1", "/file/" + encPath(item.rel_path), item.kind);
         } else {
           window.location.href = "/file/" + encPath(item.rel_path);
@@ -354,20 +317,20 @@ if (btnHide) {
     const rootCrumb = document.createElement("span");
     rootCrumb.className = "crumb";
     rootCrumb.textContent = "🏠 " + folderTitleByKey(state.activeFolder);
-    rootCrumb.addEventListener("click", () => { state.relDir = ""; state.page = 1; loadFiles(); });
+    rootCrumb.addEventListener("click", () => { navigateToDir("", true); });
     bc.appendChild(rootCrumb);
     if (state.relDir) {
       let acc = "";
       for (const part of state.relDir.split("/").filter(Boolean)) {
         const sep = document.createElement("span");
-        sep.textContent = "/";
+        sep.textContent = "›";
         bc.appendChild(sep);
         acc = acc ? acc + "/" + part : part;
         const target = acc;
         const c = document.createElement("span");
         c.className = "crumb";
         c.textContent = part;
-        c.addEventListener("click", () => { state.relDir = target; state.page = 1; loadFiles(); });
+        c.addEventListener("click", () => { navigateToDir(target, true); });
         bc.appendChild(c);
       }
     }
@@ -376,8 +339,9 @@ if (btnHide) {
     renderPager(); const ic = document.getElementById("items-count"); if (ic) ic.textContent = t("web_total_items", { count: data.total_items ?? (data.items ? data.items.length : 0) });
   }
 
-  function renderPager() {
-    const pager = document.getElementById("pager");
+  function navigateToDir(dir, push) { state.tab = "files"; state.relDir = dir || ""; state.page = 1; syncTabButtons(); if (push) history.pushState({ tab: "files", dir: state.relDir }, "", "#dir=" + encodeURIComponent(state.relDir)); loadFiles(); } window.addEventListener("popstate", (e) => { const st = e.state; if (st && st.tab === "files") { navigateToDir(st.dir || "", false); } else { const h = window.location.hash || ""; navigateToDir(h.startsWith("#dir=") ? decodeURIComponent(h.slice(5)) : "", false); } });
+    function renderPager() {
+      const pager = document.getElementById("pager");
     if (state.tab !== "files" || state.totalPages <= 1) {
       pager.style.display = "none";
       return;
@@ -607,7 +571,7 @@ if (btnHide) {
     const r = await fetch("/api/search?q=" + encodeURIComponent(q));
     if (r.status === 401) { window.location.href = "/"; return; }
     const data = await r.json();
-    renderFileRows(data.results || [], { showPath: true });
+    const resList = data.results || []; renderFileRows(resList, { showPath: true }); const ic = document.getElementById("items-count"); if (ic) ic.textContent = t("web_total_items", { count: resList.length });
   }
 
   async function uploadFiles(fileList) {
@@ -867,9 +831,9 @@ function openCinema(title, previewUrl, dlUrl, kind) {
     m.autoplay = true;
     if (isVid) m.playsInline = true;
     m.controls = !controls;
-    m.src = previewUrl;
+    m.preload = "metadata"; m.addEventListener("error", () => toast("Video codec/stream error — try Download")); m.src = previewUrl;
     _cinemaMediaEl = m;
-    body.appendChild(m); if (isVid) { const pipBtn = document.getElementById("c-pip"); if (pipBtn) { pipBtn.style.display = document.pictureInPictureEnabled ? "" : "none"; pipBtn.onclick = () => { if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {}); else if (m.requestPictureInPicture) m.requestPictureInPicture().catch(() => {}); }; } const miniBtn = document.getElementById("c-mini"); const cardEl = document.getElementById("cinema-card"); if (miniBtn && cardEl) { cardEl.classList.remove("mini-mode"); miniBtn.onclick = () => cardEl.classList.toggle("mini-mode"); } const resBox = document.getElementById("cinema-resume"); const resTxt = document.getElementById("c-resume-text"); const resBtn = document.getElementById("c-resume-btn"); const posKey = "airshare_pos_" + title; if (resBox) resBox.style.display = "none"; let savedPos = 0; try { savedPos = parseFloat(localStorage.getItem(posKey) || "0"); } catch (_) {} if (savedPos > 5 && resBox && resTxt && resBtn) { const mm = Math.floor(savedPos / 60), ss = String(Math.floor(savedPos % 60)).padStart(2, "0"); resTxt.textContent = mm + ":" + ss; resBox.style.display = "flex"; resBtn.onclick = () => { m.currentTime = savedPos; resBox.style.display = "none"; }; } m.addEventListener("timeupdate", () => { if (m.currentTime > 5) try { localStorage.setItem(posKey, String(Math.floor(m.currentTime))); } catch (_) {} }); }
+    body.appendChild(m); m.load(); m.play().catch(() => {}); if (isVid) { const pipBtn = document.getElementById("c-pip"); if (pipBtn) { pipBtn.style.display = document.pictureInPictureEnabled ? "" : "none"; pipBtn.onclick = () => { if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {}); else if (m.requestPictureInPicture) m.requestPictureInPicture().catch(() => {}); }; } const miniBtn = document.getElementById("c-mini"); const cardEl = document.getElementById("cinema-card"); if (miniBtn && cardEl) { cardEl.classList.remove("mini-mode"); miniBtn.onclick = () => cardEl.classList.toggle("mini-mode"); } const resBox = document.getElementById("cinema-resume"); const resTxt = document.getElementById("c-resume-text"); const resBtn = document.getElementById("c-resume-btn"); const posKey = "airshare_pos_" + title; if (resBox) resBox.style.display = "none"; let savedPos = 0; try { savedPos = parseFloat(localStorage.getItem(posKey) || "0"); } catch (_) {} if (savedPos > 5 && resBox && resTxt && resBtn) { const mm = Math.floor(savedPos / 60), ss = String(Math.floor(savedPos % 60)).padStart(2, "0"); resTxt.textContent = mm + ":" + ss; resBox.style.display = "flex"; resBtn.onclick = () => { m.currentTime = savedPos; resBox.style.display = "none"; }; } m.addEventListener("timeupdate", () => { if (m.currentTime > 5) try { localStorage.setItem(posKey, String(Math.floor(m.currentTime))); } catch (_) {} }); }
 
     if (controls) {
       controls.style.display = "flex";
@@ -1117,8 +1081,8 @@ if (pToggle) {
     const prevToggle = document.getElementById("previewToggle");
         if (prevToggle) {
           prevToggle.checked = !!state.previewEnabled;
-          prevToggle.addEventListener("change", () => { state.previewEnabled = !!prevToggle.checked; localStorage.setItem("airshare_preview", state.previewEnabled ? "1" : "0"); if (state.tab === "files") reloadCurrentTab(); }); }
-        const upBtn = document.getElementById("btn-up-dir"); if (upBtn) upBtn.addEventListener("click", () => { const parts = (state.relDir || "").split("/").filter(Boolean); parts.pop(); state.relDir = parts.join("/"); state.page = 1; loadFiles(); });
+          prevToggle.addEventListener("change", () => { state.previewEnabled = !!prevToggle.checked; localStorage.setItem("airshare_preview", state.previewEnabled ? "1" : "0"); if (_lastItems && _lastItems.length) renderFileRows(_lastItems, _lastOpts); else reloadCurrentTab(); }); }
+        const upBtn = document.getElementById("btn-up-dir"); if (upBtn) upBtn.addEventListener("click", () => { const parts = (state.relDir || "").split("/").filter(Boolean); parts.pop(); navigateToDir(parts.join("/"), true); });
     const invBtn = document.getElementById("btn-invert-sel"); if (invBtn) invBtn.addEventListener("click", () => { document.querySelectorAll("#content-area .file-cb").forEach(cb => { cb.checked = !cb.checked; cb.dispatchEvent(new Event("change")); }); }); const clrBtn = document.getElementById("btn-clear-sel"); if (clrBtn) clrBtn.addEventListener("click", () => { document.querySelectorAll("#content-area .file-cb").forEach(cb => { cb.checked = false; cb.dispatchEvent(new Event("change")); }); const sa = document.getElementById("cb-select-all"); if (sa) sa.checked = false; });
 
     document.querySelectorAll(".tab-btn").forEach(btn => {
@@ -1333,7 +1297,6 @@ if (hdz) {
   }, 2500);
 
   initSkyCanvas();
-    initSky();
     loadFiles();
   });
   let osdTimer = null; function showPlayerOsd(msg) { const el = document.getElementById("cinema-osd"); if (!el) return; el.textContent = msg; el.classList.add("show"); clearTimeout(osdTimer); osdTimer = setTimeout(() => el.classList.remove("show"), 850); } document.addEventListener("keydown", (e) => { const m = document.getElementById("modal-cinema"); if (!m || !m.classList.contains("open")) return; if (e.key === "Escape") { m.classList.remove("open"); stopCinemaMedia(); return; } const v = document.getElementById("mainVideo"); if (!v || v.style.display === "none") return; if (e.key === " " || e.key === "k") { e.preventDefault(); if (v.paused) { v.play(); showPlayerOsd("▶"); } else { v.pause(); showPlayerOsd("⏸"); } } else if (e.key === "ArrowLeft" || e.key === "j") { e.preventDefault(); v.currentTime = Math.max(0, v.currentTime - 5); showPlayerOsd("-5s"); } else if (e.key === "ArrowRight" || e.key === "l") { e.preventDefault(); v.currentTime = Math.min(v.duration || v.currentTime + 5, v.currentTime + 5); showPlayerOsd("+5s"); } else if (e.key === "ArrowUp") { e.preventDefault(); v.volume = Math.min(1, Math.round((v.volume + 0.1) * 10) / 10); showPlayerOsd(Math.round(v.volume * 100) + "%"); } else if (e.key === "ArrowDown") { e.preventDefault(); v.volume = Math.max(0, Math.round((v.volume - 0.1) * 10) / 10); showPlayerOsd(Math.round(v.volume * 100) + "%"); } else if (e.key === "m") { v.muted = !v.muted; showPlayerOsd(v.muted ? "Muted" : "Unmuted"); } else if (e.key === "f") { if (document.fullscreenElement) document.exitFullscreen(); else v.requestFullscreen?.(); } });
