@@ -369,12 +369,7 @@ class HttpServer(
     private fun resolveLang(query: Map<String, List<String>>, cookies: Map<String, String>, acceptLang: String?): String {
         query["lang"]?.firstOrNull()?.lowercase(Locale.ROOT)?.let { if (it in SettingsStore.SUPPORTED_CODES) return it }
         cookies["airshare_lang"]?.lowercase(Locale.ROOT)?.let { if (it in SettingsStore.SUPPORTED_CODES) return it }
-        if (!acceptLang.isNullOrBlank()) {
-            for (part in acceptLang.split(",")) {
-                val code = part.substringBefore(";").trim().lowercase(Locale.ROOT).take(2)
-                if (code in SettingsStore.SUPPORTED_CODES) return code
-            }
-        }
+       
         return store.language
     }
     private fun detectDeviceLabel(ua: String?): String {
@@ -508,7 +503,7 @@ class HttpServer(
 
         val rawFiles = dir.listFiles()?.filter { f ->
             val n = f.name
-            if (FileOps.isInternalHidden(n)) return@filter false
+            if (FileOps.isInternalHidden(n)) || n.startsWith(".") return@filter false
             val relItem = if (relDir.isEmpty()) n else "$relDir/$n"
             if (!showHidden && (n.startsWith(".") || n in hiddenSet || relItem in hiddenSet)) return@filter false
             true
@@ -595,11 +590,11 @@ class HttpServer(
         when (op) {
             "rename" -> {
                 val (ok, msg) = FileOps.renameItem(storage, obj.optString("path"), obj.optString("new_name"))
-                sendJson(out, if (ok) 200 else 400, JSONObject().put("ok", ok).put("msg", msg))
+                if (ok) FileOps.invalidateRecentCache(); sendJson(out, if (ok) 200 else 400, JSONObject().put("ok", ok).put("msg", msg))
             }
             "move", "copy" -> {
                 val (ok, done) = FileOps.moveOrCopyItems(storage, jsonStringList("paths"), obj.optString("dest_dir"), op == "copy")
-                sendJson(out, if (ok) 200 else 400, JSONObject().put("ok", ok).put("done", JSONArray(done)))
+                if (ok) FileOps.invalidateRecentCache(); sendJson(out, if (ok) 200 else 400, JSONObject().put("ok", ok).put("done", JSONArray(done)))
             }
             "mkdir" -> {
                 val (ok, msg) = FileOps.createFolder(storage, obj.optString("dir"), obj.optString("name"))
@@ -607,12 +602,12 @@ class HttpServer(
             }
             "delete" -> {
                 val moved = FileOps.moveToTrash(storage, jsonStringList("paths"))
-                mediaLibrary.invalidateCache()
+                mediaLibrary.invalidateCache(); FileOps.invalidateRecentCache()
                 sendJson(out, if (moved.isNotEmpty()) 200 else 400, JSONObject().put("ok", moved.isNotEmpty()).put("moved", JSONArray(moved)))
             }
             "restore" -> {
                 val restored = FileOps.restoreFromTrash(storage, jsonStringList("ids"))
-                mediaLibrary.invalidateCache()
+                mediaLibrary.invalidateCache(); FileOps.invalidateRecentCache()
                 sendJson(out, if (restored.isNotEmpty()) 200 else 400, JSONObject().put("ok", restored.isNotEmpty()))
             }
             "purge" -> {
@@ -728,7 +723,7 @@ class HttpServer(
                 tmpFile.copyTo(dest, overwrite = true)
                 tmpFile.delete()
             }
-            mediaLibrary.invalidateCache()
+            mediaLibrary.invalidateCache(); FileOps.invalidateRecentCache()
             val lbl = AppI18n.tr(context, "uploaded", store.language)
             AppState.recordTransfer("${dest.name} ($lbl • ${SettingsStore.formatSize(received)})", "upload")
             onTransferCompleted()
@@ -756,11 +751,11 @@ class HttpServer(
         if (isThumb && !asAttachment && !headOnly) {
             val jpeg = mediaLibrary.getOrCreateThumbnail(file, mediaId)
             if (jpeg != null) {
-                writeHeaders(
+                val isWebp = jpeg.size >= 4 && jpeg[0] == 'R'.code.toByte() && jpeg[1] == 'I'.code.toByte(); writeHeaders(
                     out,
                     200,
                     "OK",
-                    "image/jpeg",
+                    if (isWebp) "image/webp" else "image/jpeg",
                     jpeg.size.toLong(),
                     mapOf("Cache-Control" to "private, max-age=3600"),
                 )
@@ -833,7 +828,7 @@ class HttpServer(
             while (left > 0L) {
                 val r = raf.read(buf, 0, minOf(left, buf.size.toLong()).toInt())
                 if (r <= 0) break
-                out.write(buf, 0, r)
+                out.write(buf, 0, r); if (mime.startsWith("video/") || mime.startsWith("audio/")) out.flush()
                 left -= r
                 done += r
                 if (forceAttach || (!isThumb && size >= 65536L)) {
@@ -958,7 +953,7 @@ class HttpServer(
         }
         try {
             val bytes = context.assets.open("web/$clean").use { it.readBytes() }
-            writeHeaders(out, 200, "OK", ctype, bytes.size.toLong(), mapOf("Cache-Control" to "no-cache"))
+            writeHeaders(out, 200, "OK", ctype, bytes.size.toLong(), mapOf("Cache-Control" to "private, max-age=3600"))
             out.write(bytes)
             out.flush()
         } catch (_: Exception) {
