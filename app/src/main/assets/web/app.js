@@ -34,7 +34,7 @@
     pickerPaths: [],
     pickerDest: "",
     accessTargetKey: null,
-    accessPoll: null
+    accessPoll: null, galleryExpanded: false, pendingDeleteAction: "delete", clipboard: null, fetchCtrl: null, cinemaList: [], cinemaIdx: -1
   };
 
   function toast(msg) {
@@ -289,7 +289,7 @@ if (btnHide) {
     state.totalPages = data.total_pages || 1;
     applyRoleUi();
     const upBtn = document.getElementById("btn-up-dir");
-    if (upBtn) upBtn.style.display = (state.relDir ? "inline-flex" : "none");
+    if (upBtn) upBtn.style.display = (state.tab === "files" && state.relDir ? "inline-flex" : "none");
     
     const favEl = document.getElementById("favorites-strip");
     if (data.favorites && data.favorites.length && !state.relDir) {
@@ -301,9 +301,7 @@ if (btnHide) {
         chip.type = "button";
         chip.textContent = "★ " + f;
         chip.addEventListener("click", () => {
-          state.relDir = f;
-          state.page = 1;
-          loadFiles();
+          navigateToDir(f, true);
         });
         favEl.appendChild(chip);
       }
@@ -339,7 +337,7 @@ if (btnHide) {
     renderPager(); const ic = document.getElementById("items-count"); if (ic) ic.textContent = t("web_total_items", { count: data.total_items ?? (data.items ? data.items.length : 0) });
   }
 
-  function navigateToDir(dir, push) { state.tab = "files"; state.relDir = dir || ""; state.page = 1; syncTabButtons(); if (push) history.pushState({ tab: "files", dir: state.relDir }, "", "#dir=" + encodeURIComponent(state.relDir)); loadFiles(); } window.addEventListener("popstate", (e) => { const st = e.state; if (st && st.tab === "files") { navigateToDir(st.dir || "", false); } else { const h = window.location.hash || ""; navigateToDir(h.startsWith("#dir=") ? decodeURIComponent(h.slice(5)) : "", false); } });
+  function navigateToDir(dir, push) { state.tab = "files"; state.relDir = String(dir || "").replace(/^\/+|\/+$/g, ""); state.page = 1; syncTabButtons(); if (push) history.pushState({ tab: "files", dir: state.relDir }, "", "#dir=" + encodeURIComponent(state.relDir)); loadFiles(); } window.addEventListener("popstate", (e) => { const st = e.state; if (st && st.tab === "files") { navigateToDir(st.dir || "", false); } else { const h = window.location.hash || ""; navigateToDir(h.startsWith("#dir=") ? decodeURIComponent(h.slice(5)) : "", false); } });
     function renderPager() {
       const pager = document.getElementById("pager");
     if (state.tab !== "files" || state.totalPages <= 1) {
@@ -911,7 +909,7 @@ function openCtxMenu(ev, item) {
   const addSep = () => { const d = document.createElement("div"); d.className = "ctx-sep"; m.appendChild(d); };
 
   if (isDir) {
-    addItem("📂 " + (t("web_ctx_open") || "Open"), () => { state.curDir = item.rel_path; loadFiles(); });
+    addItem("📂 " + (t("web_ctx_open") || "Open"), () => navigateToDir(item.rel_path, true));
     addItem("⬇ ZIP", () => { window.location.href = "/zip?dir=" + encodeURIComponent(item.rel_path); });
   } else {
     addItem("👁 " + (t("web_ctx_open") || "Open"), () => {
@@ -961,7 +959,7 @@ function openCtxMenu(ev, item) {
 document.addEventListener("click", hideCtxMenu);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideCtxMenu(); });
 
-function initSkyCanvas() { const c = document.getElementById("sky-canvas"); if (!c) return; const ctx = c.getContext("2d"); let w = 0, h = 0, mx = 0, my = 0; const resize = () => { w = c.width = window.innerWidth; h = c.height = window.innerHeight; }; resize(); window.addEventListener("resize", resize); window.addEventListener("mousemove", e => { if (!state.parallaxEnabled) return; mx = (e.clientX / Math.max(1, w) - 0.5) * 40; my = (e.clientY / Math.max(1, h) - 0.5) * 40; }); window.addEventListener("deviceorientation", e => { if (!state.parallaxEnabled || e.gamma == null || e.beta == null) return; mx = Math.max(-30, Math.min(30, e.gamma)) * 1.2; my = Math.max(-30, Math.min(30, e.beta - 45)) * 1.2; }); const starColors = ["255,255,255", "200,225,255", "255,235,205", "180,210,255", "255,215,240"]; const stars = Array.from({ length: 260 }, () => ({ x: Math.random(), y: Math.random(), r: Math.random() * 1.7 + 0.4, a: Math.random() * Math.PI * 2, s: Math.random() * 0.025 + 0.008, d: Math.random() * 0.8 + 0.2, col: starColors[Math.floor(Math.random() * starColors.length)] })); const meteors = []; const spawnMeteor = () => { meteors.push({ x: Math.random() * w * 0.8 + w * 0.1, y: Math.random() * h * 0.35, vx: -(Math.random() * 6 + 7), vy: Math.random() * 3 + 3, len: Math.random() * 70 + 60, alpha: 1 }); }; const clouds = Array.from({ length: 11 }, () => ({ x: Math.random(), y: Math.random() * 0.55 + 0.05, sc: Math.random() * 0.7 + 0.6, sp: Math.random() * 0.00018 + 0.00008, d: Math.random() * 0.5 + 0.25 })); const drawCloud = (cx, cy, sc) => { ctx.save(); ctx.translate(cx, cy); ctx.scale(sc, sc); ctx.fillStyle = "rgba(255, 255, 255, 0.72)"; ctx.beginPath(); ctx.arc(0, 0, 28, 0, Math.PI * 2); ctx.arc(26, -8, 22, 0, Math.PI * 2); ctx.arc(-26, -4, 20, 0, Math.PI * 2); ctx.arc(46, 4, 16, 0, Math.PI * 2); ctx.arc(-44, 6, 15, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }; const frame = () => { ctx.clearRect(0, 0, w, h); const isLight = document.documentElement.getAttribute("data-theme") === "light"; if (isLight) { const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, "#cfe4ff"); g.addColorStop(1, "#f2f7ff"); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h); for (const cl of clouds) { cl.x = (cl.x + cl.sp) % 1.25; const cx = (cl.x - 0.12) * w - mx * cl.d; const cy = cl.y * h - my * cl.d; drawCloud(cx, cy, cl.sc); } } else { for (const st of stars) { st.a += st.s; const alpha = 0.25 + 0.75 * (0.5 + 0.5 * Math.sin(st.a)); const px = ((st.x * w - mx * st.d) % w + w) % w; const py = ((st.y * h - my * st.d) % h + h) % h; ctx.fillStyle = `rgba(${st.col}, ${alpha.toFixed(3)})`; ctx.beginPath(); ctx.arc(px, py, st.r, 0, Math.PI * 2); ctx.fill(); } if (Math.random() < 0.008 && meteors.length < 3) spawnMeteor(); for (let i = meteors.length - 1; i >= 0; i--) { const mt = meteors[i]; const tx = mt.x - mt.vx * (mt.len / 10); const ty = mt.y - mt.vy * (mt.len / 10); const grad = ctx.createLinearGradient(mt.x, mt.y, tx, ty); grad.addColorStop(0, `rgba(255,255,255,${mt.alpha.toFixed(3)})`); grad.addColorStop(1, "rgba(180,220,255,0)"); ctx.strokeStyle = grad; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(mt.x, mt.y); ctx.lineTo(tx, ty); ctx.stroke(); mt.x += mt.vx; mt.y += mt.vy; mt.alpha -= 0.015; if (mt.alpha <= 0) meteors.splice(i, 1); } } requestAnimationFrame(frame); }; requestAnimationFrame(frame); }
+function initSkyCanvas() { const c = document.getElementById("sky-canvas"); if (!c) return; const ctx = c.getContext("2d"); let w = 0, h = 0, mx = 0, my = 0; const resize = () => { w = c.width = Math.max(window.innerWidth, 1); h = c.height = Math.max(window.innerHeight, 1); }; resize(); window.addEventListener("resize", resize); window.addEventListener("mousemove", e => { if (!state.parallaxEnabled) return; mx = (e.clientX / Math.max(1, w) - 0.5) * 40; my = (e.clientY / Math.max(1, h) - 0.5) * 40; }); window.addEventListener("deviceorientation", e => { if (!state.parallaxEnabled || e.gamma == null || e.beta == null) return; mx = Math.max(-30, Math.min(30, e.gamma)) * 1.2; my = Math.max(-30, Math.min(30, e.beta - 45)) * 1.2; }); const starColors = ["255,255,255", "200,225,255", "255,235,205", "180,210,255", "255,215,240"]; const stars = Array.from({ length: 260 }, () => ({ x: Math.random(), y: Math.random(), r: Math.random() * 1.7 + 0.4, a: Math.random() * Math.PI * 2, s: Math.random() * 0.025 + 0.008, d: Math.random() * 0.8 + 0.2, col: starColors[Math.floor(Math.random() * starColors.length)] })); const meteors = []; const spawnMeteor = () => { meteors.push({ x: Math.random() * w * 0.8 + w * 0.1, y: Math.random() * h * 0.35, vx: -(Math.random() * 6 + 7), vy: Math.random() * 3 + 3, len: Math.random() * 70 + 60, alpha: 1 }); }; const clouds = Array.from({ length: 11 }, () => ({ x: Math.random(), y: Math.random() * 0.55 + 0.05, sc: Math.random() * 0.7 + 0.6, sp: Math.random() * 0.00018 + 0.00008, d: Math.random() * 0.5 + 0.25 })); const drawCloud = (cx, cy, sc) => { ctx.save(); ctx.translate(cx, cy); ctx.scale(sc, sc); ctx.fillStyle = "rgba(255, 255, 255, 0.72)"; ctx.beginPath(); ctx.arc(0, 0, 28, 0, Math.PI * 2); ctx.arc(26, -8, 22, 0, Math.PI * 2); ctx.arc(-26, -4, 20, 0, Math.PI * 2); ctx.arc(46, 4, 16, 0, Math.PI * 2); ctx.arc(-44, 6, 15, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }; const frame = () => { ctx.clearRect(0, 0, w, h); const isLight = document.documentElement.getAttribute("data-theme") === "light"; if (isLight) { const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, "#cfe4ff"); g.addColorStop(1, "#f2f7ff"); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h); for (const cl of clouds) { cl.x = (cl.x + cl.sp) % 1.25; const cx = (cl.x - 0.12) * w - mx * cl.d; const cy = cl.y * h - my * cl.d; drawCloud(cx, cy, cl.sc); } } else { for (const st of stars) { st.a += st.s; const alpha = 0.25 + 0.75 * (0.5 + 0.5 * Math.sin(st.a)); const px = ((st.x * w - mx * st.d) % w + w) % w; const py = ((st.y * h - my * st.d) % h + h) % h; ctx.fillStyle = `rgba(${st.col}, ${alpha.toFixed(3)})`; ctx.beginPath(); ctx.arc(px, py, st.r, 0, Math.PI * 2); ctx.fill(); } if (Math.random() < 0.008 && meteors.length < 3) spawnMeteor(); for (let i = meteors.length - 1; i >= 0; i--) { const mt = meteors[i]; const tx = mt.x - mt.vx * (mt.len / 10); const ty = mt.y - mt.vy * (mt.len / 10); const grad = ctx.createLinearGradient(mt.x, mt.y, tx, ty); grad.addColorStop(0, `rgba(255,255,255,${mt.alpha.toFixed(3)})`); grad.addColorStop(1, "rgba(180,220,255,0)"); ctx.strokeStyle = grad; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(mt.x, mt.y); ctx.lineTo(tx, ty); ctx.stroke(); mt.x += mt.vx; mt.y += mt.vy; mt.alpha -= 0.015; if (mt.alpha <= 0) meteors.splice(i, 1); } } requestAnimationFrame(frame); }; requestAnimationFrame(frame); }
 
   async function showSha(relPath) {
     document.getElementById("sha-title").textContent = t("web_sha_title");
@@ -977,7 +975,7 @@ function initSkyCanvas() { const c = document.getElementById("sky-canvas"); if (
   function syncTabButtons() {
     document.querySelectorAll(".tab-btn").forEach(b => {
       b.classList.toggle("active", b.dataset.tab === state.tab);
-    });
+    }); const upBtn = document.getElementById("btn-up-dir"); if (upBtn && state.tab !== "files") upBtn.style.display = "none";
   }
 
   function reloadCurrentTab() {
@@ -990,12 +988,12 @@ function initSkyCanvas() { const c = document.getElementById("sky-canvas"); if (
   document.addEventListener("DOMContentLoaded", () => {
     const savedTheme = localStorage.getItem("airshare_theme") || window.__INIT_THEME__ || "dark";
     document.documentElement.setAttribute("data-theme", savedTheme);
-  document.body.classList.remove("dark", "light"); document.body.classList.add(savedTheme);
-    document.body.classList.toggle("wide-view", state.wideView);
+  document.body.classList.remove("dark", "light"); document.body.classList.add(savedTheme); initSkyCanvas();
+    document.body.classList.toggle("wide-view", state.wideView); history.replaceState({ tab: "files", dir: "" }, "", window.location.pathname + window.location.search);
 
  const setTxt = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
     setTxt("btn-access", "🔐 " + t("web_access_btn"));
-setTxt("btn-wide", "▫ " + t("web_wide_view"));
+setTxt("btn-wide", "⊞ " + t("web_view_toggle"));
 document.getElementById("btn-wide")?.classList.toggle("active", state.wideView);
 setTxt("lbl-parallax", "✨ " + t("web_parallax"));
 setTxt("tab-files", "📁 " + t("web_tab_files"));
@@ -1063,11 +1061,11 @@ if (tToggle) {
   });
 }
 
-    document.getElementById("btn-wide").addEventListener("click", () => {
+    document.getElementById("btn-wide").addEventListener("click", () => { const rows = Array.from(document.querySelectorAll(".file-row")).slice(0, 40); const firstRects = rows.map(r => r.getBoundingClientRect());
       state.wideView = !state.wideView;
       document.body.classList.toggle("wide-view", state.wideView);
       document.getElementById("btn-wide").classList.toggle("active", state.wideView);
-      localStorage.setItem("airshare_wide", state.wideView ? "1" : "0");
+      localStorage.setItem("airshare_wide", state.wideView ? "1" : "0";) const moved = []; rows.forEach((r, i) => { const last = r.getBoundingClientRect(); const dx = firstRects[i].left - last.left; const dy = firstRects[i].top - last.top; if (dx || dy) { r.style.transition = "none"; r.style.transform = "translate3d(" + dx + "px, " + dy + "px, 0)"; moved.push(r); } }); if (moved.length) { void document.body.offsetHeight; moved.forEach(r => { r.style.transition = "transform 340ms cubic-bezier(0.22, 1, 0.36, 1)"; r.style.transform = "translate3d(0, 0, 0)"; }); setTimeout(() => { moved.forEach(r => { r.style.transition = ""; r.style.transform = ""; }); }, 360); };
     });
 
  const pToggle = document.getElementById("parallaxToggle");
@@ -1296,7 +1294,7 @@ if (hdz) {
     } catch (_) {}
   }, 2500);
 
-  initSkyCanvas();
+  
     loadFiles();
   });
   let osdTimer = null; function showPlayerOsd(msg) { const el = document.getElementById("cinema-osd"); if (!el) return; el.textContent = msg; el.classList.add("show"); clearTimeout(osdTimer); osdTimer = setTimeout(() => el.classList.remove("show"), 850); } document.addEventListener("keydown", (e) => { const m = document.getElementById("modal-cinema"); if (!m || !m.classList.contains("open")) return; if (e.key === "Escape") { m.classList.remove("open"); stopCinemaMedia(); return; } const v = document.getElementById("mainVideo"); if (!v || v.style.display === "none") return; if (e.key === " " || e.key === "k") { e.preventDefault(); if (v.paused) { v.play(); showPlayerOsd("▶"); } else { v.pause(); showPlayerOsd("⏸"); } } else if (e.key === "ArrowLeft" || e.key === "j") { e.preventDefault(); v.currentTime = Math.max(0, v.currentTime - 5); showPlayerOsd("-5s"); } else if (e.key === "ArrowRight" || e.key === "l") { e.preventDefault(); v.currentTime = Math.min(v.duration || v.currentTime + 5, v.currentTime + 5); showPlayerOsd("+5s"); } else if (e.key === "ArrowUp") { e.preventDefault(); v.volume = Math.min(1, Math.round((v.volume + 0.1) * 10) / 10); showPlayerOsd(Math.round(v.volume * 100) + "%"); } else if (e.key === "ArrowDown") { e.preventDefault(); v.volume = Math.max(0, Math.round((v.volume - 0.1) * 10) / 10); showPlayerOsd(Math.round(v.volume * 100) + "%"); } else if (e.key === "m") { v.muted = !v.muted; showPlayerOsd(v.muted ? "Muted" : "Unmuted"); } else if (e.key === "f") { if (document.fullscreenElement) document.exitFullscreen(); else v.requestFullscreen?.(); } });
