@@ -503,7 +503,7 @@ class HttpServer(
 
         val rawFiles = dir.listFiles()?.filter { f ->
             val n = f.name
-            if (FileOps.isInternalHidden(n) || n.startsWith(".") return@filter false
+            if (FileOps.isInternalHidden(n) || n.startsWith(".")) return@filter false
             val relItem = if (relDir.isEmpty()) n else "$relDir/$n"
             if (!showHidden && (n in hiddenSet || relItem in hiddenSet)) return@filter false
             true
