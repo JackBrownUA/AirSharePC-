@@ -724,13 +724,47 @@ if (btnHide) {
     loadFiles();
   }
 
+  let inputModalCb = null;
+
+  function openInputModal(title, initialVal, onSubmit) {
+    inputModalCb = onSubmit;
+    document.getElementById("inp-modal-title").textContent = title;
+    const field = document.getElementById("inp-modal-field");
+    field.value = initialVal || "";
+    const cancelBtn = document.getElementById("inp-modal-cancel");
+    if (cancelBtn) cancelBtn.textContent = t("web_del_no");
+    document.getElementById("modal-input").classList.add("open");
+    setTimeout(() => { field.focus(); field.select(); }, 50);
+  }
+
+  function closeInputModal() {
+    document.getElementById("modal-input").classList.remove("open");
+    inputModalCb = null;
+  }
+
+  function openEmptyTrashModal() {
+    state.pendingDeleteAction = "empty_trash";
+    document.getElementById("del-modal-title").textContent = t("web_empty_trash");
+    document.getElementById("del-modal-hint").textContent = t("web_empty_trash_confirm");
+    document.getElementById("del-cancel").textContent = t("web_del_no");
+    document.getElementById("del-confirm").textContent = t("web_del_yes");
+    document.getElementById("modal-delete").classList.add("open");
+  }
+
   function openDeleteModal(paths) {
+    state.pendingDeleteAction = "delete";
     state.pendingDeletePaths = paths;
     const title = paths.length === 1
       ? t("web_del_title_one")
       : t("web_del_title_many", { n: paths.length });
     document.getElementById("del-modal-title").textContent = title;
-    document.getElementById("del-modal-hint").textContent = t("web_del_hint");
+    const trashMap = {
+      downloads: "Download/.airshare_trash",
+      camera: "DCIM/Camera/.airshare_trash",
+      documents: "Documents/.airshare_trash"
+    };
+    const trashPath = trashMap[state.activeFolder] || "Internal Storage/.airshare_trash";
+    document.getElementById("del-modal-hint").textContent = t("web_del_hint") + " (" + trashPath + ")";
     document.getElementById("del-cancel").textContent = t("web_del_no");
     document.getElementById("del-confirm").textContent = t("web_del_yes");
     document.getElementById("modal-delete").classList.add("open");
@@ -1055,11 +1089,12 @@ function openCtxMenu(ev, item) {
   if (canEdit) {
     addSep();
     addItem("✏ " + (t("web_ctx_rename") || "Rename"), async () => {
-      const nw = prompt(t("web_rename_prompt") || "New name:", item.name);
+      openInputModal(t("web_rename_prompt") || "New name:", item.name, async (nw) => {
       if (!nw || nw === item.name) return;
       const res = await apiOp("rename", { path: item.rel_path, new_name: nw });
       if (res && res.ok) reloadCurrentTab();
       else toast((res && res.msg) || "Error");
+        });
     });
     addItem("📁 " + (t("web_ctx_move") || "Move"), () => setClipboard("move", [item.rel_path]));
     addItem("📋 " + (t("web_ctx_copy") || "Copy"), () => setClipboard("copy", [item.rel_path]));
@@ -1238,11 +1273,12 @@ if (pToggle) {
     });
 
     document.getElementById("btn-mkdir").addEventListener("click", async () => {
-      const name = prompt(t("web_mkdir_prompt"));
+      openInputModal(t("web_mkdir_prompt"), "", async (name) => {
       if (!name) return;
       const res = await apiOp("mkdir", { dir: state.relDir, name });
       if (res && res.ok) loadFiles();
       else toast((res && res.msg) || "Error");
+      });
     });
 
     document.getElementById("btn-upload").addEventListener("click", () => document.getElementById("file-input").click());
@@ -1279,15 +1315,22 @@ if (hdz) {
   document.getElementById("btn-cancel-clip")?.addEventListener("click", () => clearClipboard());
 
     document.getElementById("btn-empty-trash").addEventListener("click", async () => {
-      if (!confirm(t("web_empty_trash_confirm"))) return;
-      await apiOp("empty_trash", {});
-      toast(t("web_purged"));
-      loadTrash();
+      openEmptyTrashModal();
     });
 
     document.getElementById("del-cancel").addEventListener("click", () => document.getElementById("modal-delete").classList.remove("open"));
+    document.getElementById("inp-modal-cancel")?.addEventListener("click", closeInputModal);
+    document.getElementById("inp-modal-form")?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const val = document.getElementById("inp-modal-field").value.trim();
+      const cb = inputModalCb;
+      closeInputModal();
+      if (cb) await cb(val);
+    });
+
     document.getElementById("del-confirm").addEventListener("click", async () => {
       document.getElementById("modal-delete").classList.remove("open");
+      if (state.pendingDeleteAction === "empty_trash") { await apiOp("empty_trash", {}); toast(t("web_purged")); loadTrash(); return; }
       const res = await apiOp("delete", { paths: state.pendingDeletePaths });
       if (res && res.ok) {
         toast(t("web_deleted"));
